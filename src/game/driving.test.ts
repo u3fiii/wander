@@ -4,7 +4,7 @@ import { emptyControls, initialCar, initialLoopCar, isBlocked, stepCar, stepLoop
 import type { CarState, Controls } from './driving.ts';
 import { CAR_CONFIG, LOOP_DRIVE } from './config.ts';
 import { FULL_TURN, GLOBE_RADIUS, LOOP_LENGTH, loopFrame, loopLatitude, loopPoint } from './globe.ts';
-import { landInfluence } from './worldMap.ts';
+import { distanceToRoadNetwork, landInfluence } from './worldMap.ts';
 
 function drive(car: CarState, input: Partial<Controls>, seconds: number, fps = 60) {
   for (let i = 0; i < Math.round(seconds * fps); i++) stepLoopCar(car, { ...emptyControls(), ...input }, 1 / fps);
@@ -52,7 +52,8 @@ test('globe acceleration builds progressively and speed stays bounded in both ge
   const car = initialLoopCar();
   drive(car, { forward: true }, 0.5);
   const launchSpeed = car.speed;
-  assert.ok(launchSpeed > 2 && launchSpeed < 4);
+  // Launch is a deliberate kick, then the engine tapers toward top speed.
+  assert.ok(launchSpeed > 4 && launchSpeed < 9);
   drive(car, { forward: true }, 1);
   assert.ok(car.speed > launchSpeed && car.speed < CAR_CONFIG.maxSpeed);
   drive(car, { forward: true }, 20);
@@ -189,7 +190,8 @@ test('the car cannot drive into water: it is turned along the shore and can stil
   for (let index = 0; index < 240; index++) {
     stepLoopCar(car, { ...emptyControls(), forward: true }, 1 / 60, true);
     const frame = loopFrame(car.x, car.z);
-    assert.ok(landInfluence(frame.latitude, car.x) >= LOOP_DRIVE.waterSurfaceInfluence, 'the car entered the water');
+    const onRoad = distanceToRoadNetwork(frame.latitude, car.x) <= LOOP_DRIVE.waterRoadMargin;
+    assert.ok(onRoad || landInfluence(frame.latitude, car.x) >= LOOP_DRIVE.waterSurfaceInfluence, 'the car entered the water');
   }
   const before = car.distance;
   for (let index = 0; index < 60; index++) stepLoopCar(car, { ...emptyControls(), back: true }, 1 / 60, true);

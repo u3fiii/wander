@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CAR_CONFIG } from './config.ts';
+import { CAR_CONFIG, JUICE_CONFIG } from './config.ts';
 import { PALETTE } from './palette.ts';
 import type { CarState } from './driving.ts';
 
@@ -99,10 +99,15 @@ export type BodySpring = {
   roll: number; rollVelocity: number;
   pitch: number; pitchVelocity: number;
   bounce: number; bounceVelocity: number;
-  lastAcceleration: number;
+  squash: number; squashVelocity: number;
+  wiggle: number; wiggleVelocity: number;
+  driftYaw: number; driftVelocity: number;
+  lastAcceleration: number; lastBoosting: number;
 };
 export const createBodySpring = (): BodySpring => ({
-  roll: 0, rollVelocity: 0, pitch: 0, pitchVelocity: 0, bounce: 0, bounceVelocity: 0, lastAcceleration: 0,
+  roll: 0, rollVelocity: 0, pitch: 0, pitchVelocity: 0, bounce: 0, bounceVelocity: 0,
+  squash: 0, squashVelocity: 0, wiggle: 0, wiggleVelocity: 0, driftYaw: 0, driftVelocity: 0,
+  lastAcceleration: 0, lastBoosting: 0,
 });
 
 const bumps = (distance: number) => Math.sin(distance * 2.3) * 0.6 + Math.sin(distance * 5.1 + 1.3) * 0.4;
@@ -119,6 +124,12 @@ export function updateBodySpring(spring: BodySpring, car: CarState, dt: number, 
     : 0;
   spring.bounceVelocity -= Math.abs(car.acceleration - spring.lastAcceleration) * CAR_CONFIG.bounceKick;
   spring.lastAcceleration = car.acceleration;
+  // Squash pulse when boost fires, small random squashes over off-road bumps.
+  if (active && car.boosting && !spring.lastBoosting) spring.squashVelocity += JUICE_CONFIG.squashImpulse;
+  if (active && offroad && Math.random() < dt * 4 * Math.abs(speedRatio)) spring.squashVelocity += JUICE_CONFIG.squashImpulse * 0.35;
+  spring.lastBoosting = car.boosting;
+  const wiggleTarget = active ? car.yawRate * JUICE_CONFIG.wiggleFactor : 0;
+  const driftTarget = active && car.drift ? car.steering * JUICE_CONFIG.driftAngleMax : 0;
   const steps = Math.max(1, Math.ceil(dt / SPRING_STEP));
   const h = dt / steps;
   for (let i = 0; i < steps; i++) {
@@ -128,6 +139,12 @@ export function updateBodySpring(spring: BodySpring, car: CarState, dt: number, 
     spring.pitch += spring.pitchVelocity * h;
     spring.bounceVelocity += (CAR_CONFIG.bounceStiffness * (bumpTarget - spring.bounce) - CAR_CONFIG.bounceDamping * spring.bounceVelocity) * h;
     spring.bounce += spring.bounceVelocity * h;
+    spring.squashVelocity += (-JUICE_CONFIG.squashStiffness * spring.squash - JUICE_CONFIG.squashDamping * spring.squashVelocity) * h;
+    spring.squash = THREE.MathUtils.clamp(spring.squash + spring.squashVelocity * h, -JUICE_CONFIG.maxSquash, JUICE_CONFIG.maxSquash);
+    spring.wiggleVelocity += (JUICE_CONFIG.wiggleStiffness * (wiggleTarget - spring.wiggle) - JUICE_CONFIG.wiggleDamping * spring.wiggleVelocity) * h;
+    spring.wiggle += spring.wiggleVelocity * h;
+    spring.driftVelocity += (JUICE_CONFIG.driftStiffness * (driftTarget - spring.driftYaw) - JUICE_CONFIG.driftDamping * spring.driftVelocity) * h;
+    spring.driftYaw += spring.driftVelocity * h;
   }
 }
 

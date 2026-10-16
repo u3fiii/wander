@@ -26,7 +26,9 @@
 
 /* sky-gradient */
 .scene{background:radial-gradient(circle at 18% 8%,rgba(241,253,246,.96) 0,rgba(214,248,247,.62) 13%,rgba(214,248,247,0) 31%),linear-gradient(180deg,#72cef0 0%,#a6e4f2 52%,#e6f7f3 100%)}
-.night .scene{background:radial-gradient(circle at 76% 17%,rgba(191,213,237,.2) 0,rgba(191,213,237,0) 18%),linear-gradient(180deg,#07162d 0%,#173754 56%,#77726f 100%)}
+/* Night sky cross-fades over the day sky instead of switching. */
+.scene::before{content:'';position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1.6s ease;background:radial-gradient(circle at 76% 17%,rgba(191,213,237,.2) 0,rgba(191,213,237,0) 18%),linear-gradient(180deg,#07162d 0%,#173754 56%,#77726f 100%)}
+.night .scene::before{opacity:1}
 
 /* A single, restrained edge vignette keeps overview and driving color
    consistent. Atmospheric depth is handled by Three.js fog in the scene. */
@@ -78,3 +80,26 @@
 .intro.ready .intro-copy{animation:drift-soft 8.5s ease-in-out infinite}
 .intro.ready .cta{animation:drift-soft 6.5s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){.intro-card h1,.intro-copy,.cta,.intro-controls,.intro-caption{translate:none;transition:none}.intro.ready .intro-card h1,.intro.ready .intro-copy,.intro.ready .cta{animation:none}}
+
+/* Off-road warning under the top bar. */
+@keyframes road-warning-in{0%{opacity:0;transform:translateX(-50%) scale(.6)}60%{opacity:1;transform:translateX(-50%) scale(1.08)}100%{opacity:1;transform:translateX(-50%) scale(1)}}
+@keyframes road-warning-pulse{0%,100%{box-shadow:0 4px 18px #7a4d0a33,0 0 0 0 #f4b54466}50%{box-shadow:0 4px 18px #7a4d0a33,0 0 0 9px #f4b54400}}
+.road-warning{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:9px 16px;border-radius:40px;background:#f4b544;color:#3a2a08;font-size:12px;font-weight:600;letter-spacing:.2px;box-shadow:0 4px 18px #7a4d0a33;white-space:nowrap;pointer-events:none;animation:road-warning-in .45s cubic-bezier(.34,1.56,.64,1) both,road-warning-pulse 1.6s ease-in-out .45s infinite}
+.road-warning svg{width:16px;height:16px}
+@media (prefers-reduced-motion:reduce){.road-warning{animation:none}}
+
+/* Throttle bar under the speedometer and the gamepad hint. */
+.throttle-bar{position:absolute;left:34px;right:34px;bottom:-4px;height:3px;border-radius:2px;background:#faf5dc33;overflow:hidden}
+.throttle-bar span{display:block;height:100%;background:#f0d18e;transform-origin:left;transition:transform .1s linear}
+.gamepad-hint{display:flex;align-items:center;gap:5px;background:#fbf6e9e8;color:#35554a;padding:5px 9px;border-radius:4px;font-size:10px}
+
+/* Boost meter under the throttle bar. */
+.boost-bar{position:absolute;left:34px;right:34px;bottom:-11px;height:4px;border-radius:2px;background:#faf5dc33;overflow:hidden}
+.boost-bar span{display:block;height:100%;background:#e2795a;transform-origin:left;transition:transform .1s linear}
+.boost-bar.firing span{background:#f4b544}
+
+/* Smooth-driving streak: pops in with a little overshoot each time it levels up. */
+@keyframes streak-pop{0%{opacity:0;transform:translateX(-50%) scale(.6)}60%{opacity:1;transform:translateX(-50%) scale(1.12)}100%{opacity:1;transform:translateX(-50%) scale(1)}}
+.streak{position:absolute;bottom:58px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:40px;background:#173e3ce6;color:#f7efda;font-size:12px;letter-spacing:.3px;box-shadow:0 6px 20px #173e3c33;pointer-events:none;animation:streak-pop .45s cubic-bezier(.34,1.56,.64,1) both}
+.streak b{color:#f4b544;margin-left:4px}
+@media (prefers-reduced-motion:reduce){.streak{animation:none}}
