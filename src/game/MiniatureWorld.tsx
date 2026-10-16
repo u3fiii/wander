@@ -38,14 +38,13 @@ import wellUrl from '../assets/low_poly_well/well.glb?url';
 import boatUrl from '../assets/boat/temp_export.dae?url';
 import swimRingUrl from '../assets/float_low_poly/float.glb?url';
 import bouldersUrl from '../assets/rock_low_poly/rocks.glb?url';
-import fieldUrl from '../assets/football_field_free/field.glb?url';
 import islandUrl from '../assets/island/island.glb?url';
 import fishingBoatUrl from '../assets/fishing_boat/boat.glb?url';
 import streetLightsUrl from '../assets/simple_collection_of_low_poly_street_lights/street-lights.glb?url';
 import streetPropsUrl from '../assets/simple_low_poly_street_props_v2/street-props.glb?url';
-import streetWorkUrl from '../assets/simple_low_poly_street_work_stuff/scene.gltf?url';
+import streetWorkUrl from '../assets/simple_low_poly_street_work_stuff/street-work.glb?url';
 import planeModelUrl from '../assets/low_poly_plane/plane.glb?url';
-import medievalHouseUrl from '../assets/low_poly_medieval_house/scene.gltf?url';
+import medievalHouseUrl from '../assets/low_poly_medieval_house/house.glb?url';
 
 const up = new THREE.Vector3(0, 1, 0);
 const turn = Math.PI * 2;
@@ -549,7 +548,7 @@ function JapaneseBridgeGarden() {
         const angle = sequence * 2.399963;
         const latitude = Math.asin(THREE.MathUtils.clamp(-0.9 + ((sequence * 73 + 29) % 181) / 181 * 1.8, -0.96, 0.96));
         const longitude = (sequence * 2.399963 + phase) % turn;
-        if (landInfluence(latitude, longitude) < 0.8 || distanceToRoadNetwork(latitude, longitude) < roadClearance || nearField(latitude, longitude)) continue;
+        if (landInfluence(latitude, longitude) < 0.8 || distanceToRoadNetwork(latitude, longitude) < roadClearance) continue;
         if (distanceToMountainSites(latitude, longitude) < 5.5 || nearBeach(latitude, longitude)) continue;
         const variation = ((sequence * 29) % 97) / 97;
         placements.push({
@@ -1131,7 +1130,7 @@ function Town() {
         sink: footprintDrop(spot.latitude, spot.longitude, spot.orientation, 1.2, 1.2),
         colors: { roof: 'roofWarmBrown', wall: 'wallCream', bush: random() < 0.7 ? 'mainTree' : 'lightTree', jitter: jitterAmount(random, JITTER.houses) } as CityColors,
       };
-    }).filter(planter => footprintFits(planter.latitude, planter.longitude, 1) && planter.sink <= MAX_FOOTPRINT_DROP && !nearField(planter.latitude, planter.longitude));
+    }).filter(planter => footprintFits(planter.latitude, planter.longitude, 1) && planter.sink <= MAX_FOOTPRINT_DROP);
     return { houses, planters, paths, trees };
   }, []);
   useEffect(() => {
@@ -1268,7 +1267,7 @@ function LowPolyTrees() {
       if (landInfluence(latitude, longitude) < 0.8 || distanceToRoadNetwork(latitude, longitude) < 6.4) continue;
       if (distanceToMountainSites(latitude, longitude) < 5.5 || nearBeach(latitude, longitude)) continue;
       if (Math.hypot(latitude - WELL.latitude, (longitude - WELL.longitude) * Math.cos(latitude)) * GLOBE_RADIUS < 3) continue;
-      if (regionInfluence(forest, latitude, longitude) > 0.28 || nearField(latitude, longitude)) continue;
+      if (regionInfluence(forest, latitude, longitude) > 0.28) continue;
       if (regionInfluence(city, latitude, longitude) > 0.72) continue;
       items.push({
         latitude,
@@ -1287,7 +1286,7 @@ function LowPolyTrees() {
       const latitude = forest.latitude + Math.sin(angle) * radius * forest.latitudeRadius;
       const longitude = forest.longitude
         + Math.cos(angle) * radius * forest.longitudeRadius / Math.max(0.35, Math.cos(forest.latitude));
-      if (landInfluence(latitude, longitude) < 0.8 || distanceToRoadNetwork(latitude, longitude) < 5.1 || nearField(latitude, longitude)) continue;
+      if (landInfluence(latitude, longitude) < 0.8 || distanceToRoadNetwork(latitude, longitude) < 5.1) continue;
       if (distanceToMountainSites(latitude, longitude) < 5.5 || nearBeach(latitude, longitude)) continue;
       items.push({
         latitude,
@@ -1412,7 +1411,7 @@ function Well() {
   </group>;
 }
 
-// A small medieval cottage in the meadow between the football pitch and the well.
+// A small medieval cottage in the meadow near the well.
 // Keep its supplied textured material; bend its broad footprint to follow the globe.
 const MEADOW_HOUSE = { latitude: 0.22, longitude: 5.53, height: 3.8, rotation: -0.45, radius: 3.4 } as const;
 
@@ -1908,7 +1907,6 @@ function Boulders() {
       landInfluence(latitude, longitude) >= 0.9
       && distanceToRoadNetwork(latitude, longitude) > 3.5 + size
       && !nearBeach(latitude, longitude)
-      && !nearField(latitude, longitude)
       && regionInfluence(city, latitude, longitude) < 0.5
       && !obstacleAt(latitude, longitude, size * 0.6 + 0.6)
       && !items.some(item => Math.hypot(item.latitude - latitude, (item.longitude - longitude) * Math.cos(latitude)) * GLOBE_RADIUS < (item.size + size) * 0.45);
@@ -1973,267 +1971,6 @@ function Boulders() {
   }, [placed]);
   useEffect(() => () => materials.forEach(material => material.dispose()), [materials]);
   return <>{placed.map((item, index) => <group key={`boulder-${index}`} position={item.position} quaternion={item.orientation}><primitive object={item.object} /></group>)}</>;
-}
-
-// A small football pitch in the open meadow of the forest peninsula: the model's pitch, goals and benches (its
-// big square base and tall enclosure are left out), laid east-west and bent to the globe's curve so its corners
-// don't float. The goals are solid; the grass can be driven over. Trees and stones keep off it.
-// The pitch stands on a low concrete plinth raised `lift` above the ground (its sides run `footing` metres down
-// into the land), so the faceted ground never pokes through the grass.
-const FIELD = { latitude: 1.07, longitude: 3.645, length: 7.7, lift: 0.5, footing: 1.4, plinthMargin: 1.04, keepClear: 6, dropNodes: ['Object_8', 'Object_112'], pitchNodes: ['Object_4', 'Object_6'] };
-
-// Field colours chosen to harmonise with the world rather than copy it: a fresher green pitch (with mowing stripes)
-// and warm white lines, warm stone walls, and coral seats echoing the village roofs.
-function fieldRole(pitch: boolean) {
-  return ({ hue, saturation, lightness }: FaceSample): PaletteKey => {
-    if (lightness > 0.78) return 'wallWarmWhite';
-    // The pitch is one colour: its baked dark shading (the circles) is dropped, and only its white lines are kept.
-    if (pitch) return 'pitchOrange';
-    if (hue >= 60 && hue < 170 && saturation > 0.2) return 'pitchOrange';
-    if (hue >= 12 && hue < 50 && saturation > 0.25) return 'roofAccent';
-    if (saturation > 0.4 && (hue < 12 || hue >= 340)) return 'roofAccent';
-    if (lightness < 0.18) return 'doorsTrim';
-    return 'fieldStone';
-  };
-}
-// Lighter and darker bands across the pitch grass, like a mown lawn (only the green faces are touched).
-function mowingStripes(geometry: THREE.BufferGeometry, roles: string[]) {
-  const position = geometry.getAttribute('position');
-  const color = geometry.getAttribute('color');
-  if (!color) return;
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox!;
-  const long = box.max.x - box.min.x >= box.max.z - box.min.z ? 'x' : 'z';
-  const span = long === 'x' ? box.max.x - box.min.x : box.max.z - box.min.z;
-  geometry.groups.forEach(group => {
-    if (roles[group.materialIndex!] !== 'pitchOrange') return;
-    for (let i = group.start; i < group.start + group.count; i += 3) {
-      const along = ((long === 'x' ? position.getX(i) + position.getX(i + 1) + position.getX(i + 2) : position.getZ(i) + position.getZ(i + 1) + position.getZ(i + 2)) / 3
-        - (long === 'x' ? box.min.x : box.min.z)) / (span || 1);
-      const factor = Math.floor(along * 10) % 2 === 0 ? 1.07 : 0.94;
-      for (let k = 0; k < 3; k++) color.setXYZ(i + k, color.getX(i + k) * factor, color.getY(i + k) * factor, color.getZ(i + k) * factor);
-    }
-  });
-  color.needsUpdate = true;
-}
-
-// The winding stone path from the main road to the pitch: from the road's edge nearest the pitch it meanders
-// (a smooth curve through a few side-stepped points) to the pitch's near side, rising onto the plinth at the end.
-const FIELD_PATH = { width: 1.7, wiggle: [1.8, -2.2, 1.4], samples: 70, ramp: 2.4, keepClear: 1.8 };
-let fieldPathCache: Array<{ latitude: number; longitude: number; along: number }> | null = null;
-
-function fieldPath() {
-  if (fieldPathCache) return fieldPathCache;
-  const target = new THREE.Vector3(...sphereNormal(FIELD.latitude, FIELD.longitude));
-  const path = ROAD_PATHS[0];
-  let best = { t: 0, angle: Infinity };
-  for (let i = 0; i < path.segments; i++) {
-    const t = i / path.segments;
-    const angle = new THREE.Vector3(...sphereNormal(path.latitudeAt(t), path.longitudeAt(t))).angleTo(target);
-    if (angle < best.angle) best = { t, angle };
-  }
-  const frame = roadPathFrame(path, best.t);
-  const roadDirection = new THREE.Vector3(...sphereNormal(frame.latitude, frame.longitude));
-  const side = new THREE.Vector3(...frame.side);
-  if (side.dot(target.clone().sub(roadDirection)) < 0) side.negate();
-  const start = roadDirection.clone().addScaledVector(side, (path.width * 0.5 + WORLD_SETTINGS.roads.shoulderExtra * 0.5 + 0.4) / GLOBE_RADIUS).normalize();
-  const toRoad = start.clone().sub(target).projectOnPlane(target).normalize();
-  const end = target.clone().addScaledVector(toRoad, FIELD.length * 0.42 / GLOBE_RADIUS).normalize();
-  const across = new THREE.Vector3().crossVectors(target, toRoad).normalize();
-  const points = [start];
-  FIELD_PATH.wiggle.forEach((offset, index) => {
-    const share = (index + 1) / (FIELD_PATH.wiggle.length + 1);
-    points.push(start.clone().lerp(end, share).addScaledVector(across, offset / GLOBE_RADIUS).normalize());
-  });
-  points.push(end);
-  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-  fieldPathCache = curve.getSpacedPoints(FIELD_PATH.samples).map((point, index) => {
-    point.normalize();
-    return { latitude: Math.asin(THREE.MathUtils.clamp(point.y, -1, 1)), longitude: Math.atan2(point.x, point.z), along: index / FIELD_PATH.samples };
-  });
-  return fieldPathCache;
-}
-
-const nearField = (latitude: number, longitude: number) =>
-  Math.hypot(latitude - FIELD.latitude, Math.atan2(Math.sin(longitude - FIELD.longitude), Math.cos(longitude - FIELD.longitude)) * Math.cos(latitude)) * GLOBE_RADIUS < FIELD.keepClear
-  || fieldPath().some(point => Math.hypot(latitude - point.latitude, Math.atan2(Math.sin(longitude - point.longitude), Math.cos(longitude - point.longitude)) * Math.cos(latitude)) * GLOBE_RADIUS < FIELD_PATH.keepClear);
-
-function FieldPath() {
-  const { paving, stones } = useMemo(() => {
-    const points = fieldPath();
-    const length = points.length;
-    let pathLength = 0;
-    for (let i = 1; i < length; i++) {
-      pathLength += new THREE.Vector3(...sphereNormal(points[i].latitude, points[i].longitude))
-        .angleTo(new THREE.Vector3(...sphereNormal(points[i - 1].latitude, points[i - 1].longitude))) * GLOBE_RADIUS;
-    }
-    const rampStart = Math.max(0, 1 - FIELD_PATH.ramp / Math.max(pathLength, 0.001));
-    const positions: number[] = [];
-    const colors: number[] = [];
-    const tones = [PALETTE.pavingLight, PALETTE.pavingDark, PALETTE.fieldStone].map(hex => new THREE.Color(hex));
-    const random = seededRandom(808);
-    const edges = points.map((point, index) => {
-      const next = points[Math.min(index + 1, length - 1)], previous = points[Math.max(index - 1, 0)];
-      const here = new THREE.Vector3(...sphereNormal(point.latitude, point.longitude));
-      const forward = new THREE.Vector3(...sphereNormal(next.latitude, next.longitude)).sub(new THREE.Vector3(...sphereNormal(previous.latitude, previous.longitude))).projectOnPlane(here).normalize();
-      const across = new THREE.Vector3().crossVectors(here, forward).normalize();
-      const lift = 0.07 + FIELD.lift * THREE.MathUtils.smoothstep(point.along, rampStart, 1);
-      return [-1, 0, 1].map(side => {
-        const direction = here.clone().addScaledVector(across, side * FIELD_PATH.width * 0.5 / GLOBE_RADIUS).normalize();
-        const latitude = Math.asin(THREE.MathUtils.clamp(direction.y, -1, 1)), longitude = Math.atan2(direction.x, direction.z);
-        return { position: new THREE.Vector3(...terrainPoint(latitude, longitude, lift)), latitude, longitude };
-      });
-    });
-    // Paving: two stones across, one per sample along, each its own warm stone tone.
-    for (let index = 0; index < length - 1; index++) {
-      for (let lane = 0; lane < 2; lane++) {
-        const a = edges[index][lane].position, b = edges[index][lane + 1].position, c = edges[index + 1][lane + 1].position, d = edges[index + 1][lane].position;
-        const tone = tones[Math.floor(random() * tones.length)].clone().offsetHSL(0, 0, (random() - 0.5) * 0.05);
-        positions.push(...a.toArray(), ...c.toArray(), ...b.toArray(), ...a.toArray(), ...d.toArray(), ...c.toArray());
-        for (let k = 0; k < 6; k++) colors.push(tone.r, tone.g, tone.b);
-      }
-    }
-    const paving = new THREE.BufferGeometry();
-    paving.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    paving.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    paving.computeVertexNormals();
-    // Small rocks lining both sides, every couple of samples.
-    const stones: Array<{ position: [number, number, number]; orientation: THREE.Quaternion; scale: [number, number, number]; tone: number }> = [];
-    for (let index = 1; index < length - 3; index += 2) {
-      for (const side of [0, 2]) {
-        if (random() < 0.3) continue;
-        const edge = edges[index][side];
-        const normal = new THREE.Vector3(...groundNormal(edge.latitude, edge.longitude));
-        const orientation = new THREE.Quaternion().setFromUnitVectors(up, normal).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(random() * 0.3, random() * Math.PI * 2, random() * 0.3)));
-        const size = 0.18 + random() * 0.2;
-        stones.push({ position: edge.position.toArray() as [number, number, number], orientation, scale: [size * 1.3, size * 0.7, size], tone: Math.floor(random() * 3) });
-      }
-    }
-    return { paving, stones };
-  }, []);
-  const [pavingMaterial, stoneGeometry, stoneMaterials] = useMemo(() => [
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
-    new THREE.IcosahedronGeometry(1, 0),
-    [-0.06, 0, 0.06].map(jitter => paletteMaterial('roadShoulder', { jitter, roughness: 1 })),
-  ] as const, []);
-  useEffect(() => () => { paving.dispose(); pavingMaterial.dispose(); stoneGeometry.dispose(); stoneMaterials.forEach(material => material.dispose()); }, [paving, pavingMaterial, stoneGeometry, stoneMaterials]);
-  return <>
-    <mesh geometry={paving} material={pavingMaterial} receiveShadow />
-    {stones.map((stone, index) => <mesh key={`path-stone-${index}`} geometry={stoneGeometry} material={stoneMaterials[stone.tone]} position={stone.position} quaternion={stone.orientation} scale={stone.scale} castShadow receiveShadow />)}
-  </>;
-}
-
-function FootballField() {
-  const gltf = useLoader(GLTFLoader, fieldUrl);
-  const placement = useMemo(() => {
-    const field = gltf.scene.clone(true);
-    field.traverse(child => {
-      if (!(child instanceof THREE.Mesh)) return;
-      if (FIELD.dropNodes.includes(child.name)) { child.visible = false; return; }
-      const map = (child.material as THREE.MeshStandardMaterial).map;
-      const baked = bakeRoles(child.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.wallWarmWhite), fieldRole(FIELD.pitchNodes.includes(child.name)));
-      child.geometry = baked.geometry;
-      child.material = roleMaterials(baked.roles, role => ({ key: role as PaletteKey }));
-      if (FIELD.pitchNodes.includes(child.name)) {
-        // The pitch is drawn flat: the texture's baked dark shading (the circles) is cleared before the mowing stripes.
-        const colors = child.geometry.getAttribute('color');
-        if (colors) { for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1); colors.needsUpdate = true; }
-        mowingStripes(child.geometry, baked.roles);
-        // Its two layered planes sit almost together; the lower one is pushed back so they don't flicker.
-        if (child.name === FIELD.pitchNodes[0]) (child.material as THREE.Material[]).forEach(material => {
-          material.polygonOffset = true; material.polygonOffsetFactor = 2; material.polygonOffsetUnits = 2;
-        });
-      }
-      child.castShadow = true;
-      child.receiveShadow = true;
-    });
-    // Remove the hidden parts so they don't count towards the size or get bent.
-    const hidden: THREE.Object3D[] = [];
-    field.traverse(child => { if (!child.visible) hidden.push(child); });
-    hidden.forEach(child => child.removeFromParent());
-    field.updateMatrixWorld(true);
-    const bounds = new THREE.Box3().setFromObject(field);
-    const size = bounds.getSize(new THREE.Vector3());
-    const centre = bounds.getCenter(new THREE.Vector3());
-    const holder = new THREE.Group();
-    holder.add(field);
-    field.position.set(-centre.x, -bounds.min.y, -centre.z);
-    // Plinth under the pitch (in the model's units, so it scales and bends with it).
-    const scaleToWorld = FIELD.length / Math.max(size.x, size.z);
-    const plinthHeight = (FIELD.lift + FIELD.footing) / scaleToWorld;
-    const plinth = new THREE.Mesh(
-      // Its top sits a hair under the pitch so the grass always draws over it.
-      new THREE.BoxGeometry(size.x * FIELD.plinthMargin, plinthHeight, size.z * FIELD.plinthMargin, 14, 1, 10).translate(0, -plinthHeight / 2 - 0.06 / scaleToWorld, 0),
-      // Box faces: +x, -x, +y (top), -y, +z, -z. The top is grass (it shows through the gaps in the model's pitch).
-      [0, 1, 2, 3, 4, 5].map(side => paletteMaterial(side === 2 ? 'pitchOrange' : 'fieldStone', { roughness: 0.95 })),
-    );
-    plinth.castShadow = true;
-    plinth.receiveShadow = true;
-    holder.add(plinth);
-    // The supplied pitch model has no working floodlights, so add four compact
-    // corner masts with inward-facing heads and real, soft spot lights.
-    const towerScale = scaleToWorld;
-    const mastHeight = 2.55 / towerScale;
-    const mastGeometry = new THREE.CylinderGeometry(0.065 / towerScale, 0.11 / towerScale, mastHeight, 6);
-    const housingGeometry = new THREE.BoxGeometry(0.62 / towerScale, 0.23 / towerScale, 0.34 / towerScale);
-    const lensGeometry = new THREE.BoxGeometry(0.48 / towerScale, 0.12 / towerScale, 0.035 / towerScale);
-    const mastMaterial = paletteMaterial('roadShoulder', { roughness: 0.9 });
-    const housingMaterial = paletteMaterial('tires', { roughness: 0.85 });
-    const lensMaterial = new THREE.MeshStandardMaterial({ color: PALETTE.flowerCream, emissive: PALETTE.flowerCream, emissiveIntensity: 0, roughness: 0.72 });
-    const spots: THREE.SpotLight[] = [];
-    const cornerX = size.x * 0.46, cornerZ = size.z * 0.46;
-    for (const x of [-cornerX, cornerX]) for (const z of [-cornerZ, cornerZ]) {
-      const mast = new THREE.Mesh(mastGeometry, mastMaterial);
-      mast.position.set(x, mastHeight * 0.5, z);
-      mast.castShadow = true;
-      holder.add(mast);
-      const head = new THREE.Group();
-      head.position.set(x, mastHeight, z);
-      head.rotation.y = Math.atan2(-x, -z);
-      const housing = new THREE.Mesh(housingGeometry, housingMaterial);
-      housing.position.set(0, 0, -0.08 / towerScale);
-      housing.castShadow = true;
-      head.add(housing);
-      const lens = new THREE.Mesh(lensGeometry, lensMaterial);
-      lens.position.set(0, 0, 0.105 / towerScale);
-      head.add(lens);
-      holder.add(head);
-      const spot = new THREE.SpotLight(PALETTE.flowerCream, 0, 10 / towerScale, 0.72, 0.72, 2);
-      spot.position.set(x, mastHeight - 0.08 / towerScale, z);
-      spot.target.position.set(0, 0.12 / towerScale, 0);
-      holder.add(spot, spot.target);
-      spots.push(spot);
-    }
-    // Lay the pitch's long side east-west.
-    const normal = new THREE.Vector3(...groundNormal(FIELD.latitude, FIELD.longitude));
-    const along = new THREE.Vector3(Math.cos(FIELD.longitude), 0, -Math.sin(FIELD.longitude)).projectOnPlane(normal).normalize();
-    const forward = new THREE.Vector3().crossVectors(along, normal);
-    const orientation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(along, normal, forward));
-    const scale = FIELD.length / Math.max(size.x, size.z);
-    const long = size.x >= size.z ? 0 : Math.PI / 2;
-    const object = bendToGlobe(holder, long, scale);
-    const position = terrainPoint(FIELD.latitude, FIELD.longitude, FIELD.lift);
-    const goals = [-1, 1].map(end => toLatLon(new THREE.Vector3(...position).addScaledVector(along, end * FIELD.length * 0.47)));
-    return { object, position, orientation, goals, spots, mastGeometry, housingGeometry, lensGeometry, mastMaterial, housingMaterial, lensMaterial };
-  }, [gltf.scene]);
-  useFrame(() => {
-    const blend = nightState.blend;
-    placement.lensMaterial.emissiveIntensity = blend * 3.2;
-    placement.spots.forEach(spot => { spot.intensity = blend * 28; });
-  });
-  useEffect(() => () => {
-    placement.mastGeometry.dispose();
-    placement.housingGeometry.dispose();
-    placement.lensGeometry.dispose();
-    placement.mastMaterial.dispose();
-    placement.housingMaterial.dispose();
-    placement.lensMaterial.dispose();
-  }, [placement]);
-  useEffect(() => {
-    setObstacleGroup('field', placement.goals.map(goal => ({ ...goal, radius: 1.1 })));
-    return () => clearObstacleGroup('field');
-  }, [placement]);
-  return <group position={placement.position} quaternion={placement.orientation}><primitive object={placement.object} /></group>;
 }
 
 // A little palm island out in the polar bay (CC BY-NC, see the README): two palms, a dock, a shack, coconuts and
@@ -2450,7 +2187,7 @@ const metresBetween = (latitude: number, longitude: number, lat0: number, lon0: 
 
 function fillerSpots() {
   const random = seededRandom(FILLER.seed);
-  const buildings: Array<[number, number, number]> = [[WELL.latitude, WELL.longitude, FILLER.buildingClear], [MEADOW_HOUSE.latitude, MEADOW_HOUSE.longitude, FILLER.buildingClear + 1], [FIELD.latitude, FIELD.longitude, FIELD.keepClear]];
+  const buildings: Array<[number, number, number]> = [[WELL.latitude, WELL.longitude, FILLER.buildingClear], [MEADOW_HOUSE.latitude, MEADOW_HOUSE.longitude, FILLER.buildingClear + 1]];
   const spots: Array<{ kind: 'rock' | 'tuft' | 'bush'; latitude: number; longitude: number; scale: number; yaw: number; colour: PaletteKey }> = [];
   for (let attempt = 0; attempt < FILLER.tries && spots.length < FILLER.count; attempt++) {
     const latitude = Math.asin(random() * 1.9 - 0.95), longitude = random() * turn;
@@ -2458,7 +2195,7 @@ function fillerSpots() {
     if (distanceToRoadNetwork(latitude, longitude) < FILLER.roadClear) continue;
     if (regionInfluence(cityRegion, latitude, longitude) > 0.3) continue;
     if (buildings.some(([lat, lon, clear]) => metresBetween(latitude, longitude, lat, lon) < clear)) continue;
-    if (distanceToMountainSites(latitude, longitude) < 5.5 || nearBeach(latitude, longitude) || nearField(latitude, longitude)) continue;
+    if (distanceToMountainSites(latitude, longitude) < 5.5 || nearBeach(latitude, longitude)) continue;
     if (obstacleAt(latitude, longitude, FILLER.treeClear)) continue;
     const roll = random();
     const kind = roll < 0.3 ? 'rock' : roll < 0.7 ? 'tuft' : 'bush';
@@ -2518,7 +2255,7 @@ function Fireflies() {
       const road = distanceToRoadNetwork(latitude, longitude);
       if (road < 2.5 || road > 9) continue;
       if (regionInfluence(cityRegion, latitude, longitude) > 0.3) continue;
-      if (nearBeach(latitude, longitude) || nearField(latitude, longitude)) continue;
+      if (nearBeach(latitude, longitude)) continue;
       bases.push(new THREE.Vector3(...terrainPoint(latitude, longitude, 0)));
       normals.push(new THREE.Vector3(...sphereNormal(latitude, longitude)));
       phases.push(random() * Math.PI * 2);
@@ -2820,6 +2557,6 @@ export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
     <Terrain />
     <JapaneseBridgeGarden />
     <LoopRoad />
-    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boat /><BeachFloats /><Boulders /><FootballField /><FieldPath /><Meadow /><Footpaths /><Fireflies /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
+    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boat /><BeachFloats /><Boulders /><Meadow /><Footpaths /><Fireflies /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
   </group>;
 }

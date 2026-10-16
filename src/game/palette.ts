@@ -7,7 +7,6 @@ export const PALETTE = {
   // Loose earth kicked up off-road: dry, a little warmer than the grass.
   soil: '#9c8058',
   // Football pitch: warm orange turf, in the same warm family as the bridge and the village roofs.
-  pitchOrange: '#e0894f',
   fieldStone: '#dccaa2',
   pavingLight: '#d8c7a0',
   pavingDark: '#b9a57e',

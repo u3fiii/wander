@@ -77,7 +77,6 @@ The swim rings use [Float Low Poly](https://sketchfab.com/3d-models/float-low-po
 
 The big rocks and boulders use [Rock low poly](https://sketchfab.com/3d-models/rock-low-poly-2c88f234671c4aceb6a6449270b168b0) by [Elbolillo](https://sketchfab.com/Elbolilloduro), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Source files, runtime GLB conversion and license are in `src/assets/rock_low_poly`.
 
-The football pitch uses [Football Field (Free)](https://sketchfab.com/3d-models/football-field-free-77ffca674aa043eba81d283f26d015e2) by [coolalext](https://sketchfab.com/coolalext), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Source files, runtime GLB conversion and license are in `src/assets/football_field_free`.
 
 The palm island uses [Island](https://sketchfab.com/3d-models/island-3dd8d58630ff4d5e913b1ea045d3fe48) by [BConnolly](https://sketchfab.com/BConnolly), licensed under [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) — **non-commercial only**: remove it (the `PalmIsland` component) or get the author's permission before any commercial use. Source files, runtime GLB conversion and license are in `src/assets/island`.
 

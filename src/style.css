@@ -152,8 +152,12 @@
   .intro .intro-controls{display:none}
   .intro .intro-caption{display:none}
   .intro .vignette{background:linear-gradient(0deg,#f5f0db 0%,#f5f0dbf0 40%,#f5f0db00 72%)}
-  .night .intro .vignette{background:linear-gradient(0deg,#101d33 0%,#101d33f0 40%,#101d3300 72%)}
-  .night .intro-card .start-button{background:#f4ecd4;color:#14223a}
+  /* Night: the class sits on the same element as .intro, so these use .night.intro. A black fade with white text. */
+  .night.intro .vignette{background:linear-gradient(0deg,#000 0%,#000000f0 40%,#00000000 72%)}
+  .night.intro .intro-card h1,.night.intro .intro-card h1 .ch{color:#fff}
+  .night.intro .intro-card p,.night.intro .intro-card .eyebrow{color:#ffffffd9}
+  .night.intro .intro-card .start-button{background:#fff;border-color:#fff;color:#111}
+  .night.intro .intro-card .start-button svg{color:#111}
 }
 
 /* Touch driving: a steering wheel on the left, pedals on the right. */
