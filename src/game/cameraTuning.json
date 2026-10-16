@@ -1,0 +1,10 @@
+{
+  "baseFov": 44.5,
+  "speedFovBoost": 25,
+  "cameraDistance": 7.9,
+  "cameraHeight": 14.6,
+  "cameraSmoothing": 1.7,
+  "focusRange": 15.5,
+  "blurDriving": 1.65,
+  "blurOverview": 1.2
+}

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CAR_CONFIG, JUICE_CONFIG, LOOP_DRIVE } from './config';
+import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
 import { playWhoosh, updateAudio } from './audio';
 import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
@@ -17,6 +18,8 @@ import MiniatureWorld from './MiniatureWorld';
 import IntroDepthOfField from './IntroDepthOfField';
 import { cinematicState } from './cinematic';
 import { nightState } from './nightState';
+import { dayLook } from './dayLook';
+import { nightLook } from './nightLook';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
@@ -59,7 +62,7 @@ function readGamepad() {
   return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
-  started: boolean; paused: boolean; night: boolean; cameraMode: number; resetKey: number;
+  started: boolean; paused: boolean; night: boolean; nightFade?: number; cameraMode: number; resetKey: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
   onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void;
 };
@@ -182,6 +185,7 @@ function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
     if (!on) return;
     const flicker = 0.75 + Math.sin(state.clock.elapsedTime * 47) * 0.15 + Math.random() * 0.15;
     flame.current.scale.set(1, 1, JUICE_CONFIG.flameLength * flicker);
+    material.color.set(boostTuning.flameColour);
   });
   return <mesh
     ref={flame}
@@ -232,7 +236,7 @@ function HeadlightBeam({ blend }: { blend: React.RefObject<number> }) {
   useEffect(() => { spot.current.target = target; }, [target]);
   useFrame(() => { spot.current.intensity = blend.current * 80; });
   return <>
-    <spotLight ref={spot} color={WARM_LIGHT.beam} position={[0, 0.7, -1.3]} angle={0.58} penumbra={0.85} distance={26} decay={1.6} intensity={0} />
+    <spotLight ref={spot} color={WARM_LIGHT.beam} position={[0, 0.7, -1.3]} angle={0.58} penumbra={1} distance={26} decay={1.6} intensity={0} />
     <primitive object={target} position={[0, 0, -10]} />
   </>;
 }
@@ -337,10 +341,6 @@ const SIDE_HIT_CAMERA = {
   dutchKick: 1.1, dutchStiffness: 55, dutchDamping: 6.5, maxDutch: 0.09,
   swing: 2.2, swingDecay: 2.6, fovKick: 5, shake: 0.18,
 };
-// Holding a boost: the camera eases up and back (on a smooth in-out curve) and stays there for the whole burst,
-// with a fine hum and a quick nodding tilt, as if the car is shaking with rage and power (the depth of field and
-// warm grade are handled elsewhere).
-const BOOST_FEEL = { pullBack: 5.2, rise: 3.2, attack: 2.2, release: 1.6, vibration: 0.035, tilt: 0.0016, tiltRate: 115, tiltFine: 0.0007, tiltFineRate: 180 };
 // Shared game-time scale (slow motion); traffic reads it so the whole world slows together.
 const gameTime = { scale: 1 };
 
@@ -524,7 +524,7 @@ function AtmosphereGlow({ amount, night }: { amount: React.RefObject<number>; ni
     const n = night.current;
     uniforms.uFade.value = amount.current;
     uniforms.uColor.value.copy(dayColor).lerp(nightColor, n);
-    uniforms.uIntensity.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.intensity, ATMOSPHERE.glow.nightIntensity, n);
+    uniforms.uIntensity.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.intensity * dayLook.glow, ATMOSPHERE.glow.nightIntensity * nightLook.glow, n);
     uniforms.uPower.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.power, ATMOSPHERE.glow.nightPower, n);
   });
   return <mesh renderOrder={-1}>
@@ -553,77 +553,8 @@ function AtmosphereGlow({ amount, night }: { amount: React.RefObject<number>; ni
   </mesh>;
 }
 
-// The full moon: a low-poly disc, placed as a distant body of the sky. Physically it has no parallax (moving the
-// camera doesn't shift its direction), it moves across the view only when the camera turns, instantly and by the
-// same angle as the stars, it keeps a constant size, and it stays in focus (the depth of field leaves it sharp). Flat creamy facets
-// with a little variation, a few soft crater patches and gentle darkening toward the rim, unlit so it glows on
-// its own, with a soft halo. Fades in with night.
-const MOON = {
-  view: new THREE.Vector3(0.15, 0.28, -1).normalize(), distance: 360, radius: 13, detail: 2,
-  glow: 1.55, halo: 96,
-  craters: [[0.35, 0.3, 0.26], [-0.3, 0.42, 0.18], [-0.12, -0.38, 0.22], [0.45, -0.25, 0.14], [-0.5, -0.05, 0.12]] as Array<[number, number, number]>,
-};
-
-function buildMoonGeometry() {
-  const geometry = new THREE.IcosahedronGeometry(MOON.radius, MOON.detail);
-  const position = geometry.getAttribute('position');
-  const cream = new THREE.Color('#f7f0dc'), crater = new THREE.Color('#ddd2b8');
-  const colors: number[] = [];
-  const centre = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
-  for (let i = 0; i < position.count; i += 3) {
-    a.fromBufferAttribute(position, i); b.fromBufferAttribute(position, i + 1); c.fromBufferAttribute(position, i + 2);
-    centre.copy(a).add(b).add(c).normalize();
-    // Facing the camera is +z; craters sit on that face, judged by the facet centre's x/y.
-    let darkness = 0;
-    for (const [x, y, size] of MOON.craters) darkness = Math.max(darkness, 1 - Math.hypot(centre.x - x, centre.y - y) / size);
-    const color = cream.clone().lerp(crater, THREE.MathUtils.clamp(darkness, 0, 1) * 0.85);
-    color.multiplyScalar((0.97 + Math.sin(i * 12.9898) * 0.03) * (0.8 + 0.2 * Math.max(centre.z, 0)));
-    for (let k = 0; k < 3; k++) colors.push(color.r, color.g, color.b);
-  }
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  return geometry;
-}
-
-function Moon({ night }: { night: React.RefObject<number> }) {
-  const { camera } = useThree();
-  const group = useRef<THREE.Group>(null!);
-  const geometry = useMemo(buildMoonGeometry, []);
-  // Bright on purpose: the depth-of-field output pass tone-maps everything, the moon included.
-  const material = useMemo(() => new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(1, 1, 1).multiplyScalar(MOON.glow), fog: false, transparent: true, opacity: 0, toneMapped: false }), []);
-  const halo = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 128;
-    const context = canvas.getContext('2d')!;
-    const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, 'rgba(255,246,224,0.45)');
-    gradient.addColorStop(0.25, 'rgba(250,240,222,0.26)');
-    gradient.addColorStop(0.55, 'rgba(215,226,255,0.08)');
-    gradient.addColorStop(1, 'rgba(200,215,255,0)');
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, 128, 128);
-    return new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0 });
-  }, []);
-  const offset = useMemo(() => new THREE.Vector3(), []);
-  useEffect(() => () => { geometry.dispose(); material.dispose(); halo.map?.dispose(); halo.dispose(); }, [geometry, material, halo]);
-  // Runs after the camera has moved this frame (priority between the scene and the render), so it never lags.
-  useFrame((_, delta) => {
-    const n = night.current;
-    group.current.visible = n > 0.01;
-    // Fixed direction in the world sky: from any camera position the Moon sits in the same place (no parallax).
-    offset.copy(MOON.view).multiplyScalar(MOON.distance);
-    group.current.position.copy(camera.position).add(offset);
-    group.current.quaternion.copy(camera.quaternion);
-    material.opacity = n;
-    halo.opacity = n;
-  }, 0.5);
-  return <group ref={group}>
-    <sprite material={halo} scale={[MOON.halo, MOON.halo, 1]} renderOrder={-2} />
-    <mesh geometry={geometry} material={material} />
-  </group>;
-}
-
 // Meteors: a few faint streaks that cross the sky behind the globe every so often. Placed far away in world
-// space (like the moon), so they never cross the globe or move with the camera. Each one is a glowing tail that
+// space, so they never cross the globe or move with the camera. Each one is a glowing tail that
 // flares in, flies across and fades out.
 const METEORS = { count: 4, distance: 300, gapMin: 7, gapMax: 16, lifeMin: 0.7, lifeMax: 1.1, travel: 130, width: 1.6, brightness: 1.3 };
 
@@ -758,10 +689,17 @@ function DrivingScene(props: SceneProps) {
   const globeReady = useRef(false);
   const cameraOffset = useMemo(() => new THREE.Vector3(), []);
   const nightBlend = useRef(props.night ? 1 : 0);
+  const nightProgress = useRef(props.night ? 1 : 0);
   const ambientLight = useRef<THREE.AmbientLight>(null!);
   const hemisphereLight = useRef<THREE.HemisphereLight>(null!);
   const rimLight = useRef<THREE.DirectionalLight>(null!);
   const bounceLight = useRef<THREE.DirectionalLight>(null!);
+  const [neutralSun, amberSun, daySunColour, hazeColour, dayFogColour] = useMemo(() => [
+    new THREE.Color('#fffaf2'), new THREE.Color('#ffb25e'), new THREE.Color(), new THREE.Color('#ebeee2'), new THREE.Color(),
+  ], []);
+  const [neutralMoon, coolMoon, nightMoonColour, nightHazeColour, nightFogColour] = useMemo(() => [
+    new THREE.Color('#e8eeff'), new THREE.Color('#8fb2ff'), new THREE.Color(), new THREE.Color('#5a6f88'), new THREE.Color(),
+  ], []);
   const lightColors = useMemo(() => {
     const c = (hex: string) => new THREE.Color(hex);
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
@@ -1023,7 +961,7 @@ function DrivingScene(props: SceneProps) {
       ...keys,
       throttle,
       reverse: Math.max(pedals.current.brake, pad.brake),
-      steer: Math.abs(pad.steer) > Math.abs(keySteer) ? pad.steer : keySteer,
+      steer: [pad.steer, keySteer, keys.steer ?? 0].reduce((best, value) => (Math.abs(value) > Math.abs(best) ? value : best), 0),
     };
     const intro = !props.started && zoomProgress.current < 0.02;
     if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true);
@@ -1101,28 +1039,43 @@ function DrivingScene(props: SceneProps) {
     groundVehiclePosition.sub(globeCenter).applyQuaternion(globeQuat).add(globeCenter);
     vehicleTangent.applyQuaternion(globeQuat);
     surfaceUp.copy(vehicleUp).applyQuaternion(globeQuat);
-    // Day/night cross-fade: every light, the fog and exposure blend over ~1.5s instead of switching.
-    nightBlend.current = THREE.MathUtils.damp(nightBlend.current, props.night ? 1 : 0, NIGHT_FADE_RATE, dt);
+    // Day/night cross-fade: every light, the fog and exposure blend over ~1.5s instead of switching. The automatic
+    // change instead runs at a steady pace over `nightFade` seconds, eased at both ends.
+    if (props.nightFade) {
+      nightProgress.current = THREE.MathUtils.clamp(nightProgress.current + (props.night ? 1 : -1) * dt / props.nightFade, 0, 1);
+      nightBlend.current = THREE.MathUtils.smoothstep(nightProgress.current, 0, 1);
+    } else {
+      nightBlend.current = THREE.MathUtils.damp(nightBlend.current, props.night ? 1 : 0, NIGHT_FADE_RATE, dt);
+      nightProgress.current = nightBlend.current;
+    }
     const n = nightBlend.current;
     nightState.blend = n;
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
-    ambientLight.current.intensity = THREE.MathUtils.lerp(day.ambientIntensity, night.ambientIntensity, n);
+    // Daytime values come from the Day look panel (dayLook); night keeps its own.
+    daySunColour.copy(neutralSun).lerp(amberSun, dayLook.sunWarmth);
+    dayFogColour.copy(lightColors.dayFog).lerp(hazeColour, dayLook.haze * 0.5);
+    // Night values come from the Night tab of the same panel (nightLook).
+    nightMoonColour.copy(neutralMoon).lerp(coolMoon, nightLook.moonCool);
+    nightFogColour.copy(lightColors.nightFog).lerp(nightHazeColour, nightLook.haze * 0.5);
+    ambientLight.current.intensity = THREE.MathUtils.lerp(day.ambientIntensity * dayLook.skyLight, night.ambientIntensity * nightLook.skyLight, n);
     ambientLight.current.color.lerpColors(lightColors.dayAmbient, lightColors.nightAmbient, n);
-    hemisphereLight.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.hemisphereIntensity, night.hemisphereIntensity, n);
+    hemisphereLight.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.hemisphereIntensity * dayLook.skyLight, night.hemisphereIntensity * nightLook.skyLight, n);
     hemisphereLight.current.color.lerpColors(lightColors.daySky, lightColors.nightSky, n);
     hemisphereLight.current.groundColor.lerpColors(lightColors.dayGround, lightColors.nightGround, n);
-    sun.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.sunIntensity, night.sunIntensity, n);
-    sun.current.color.lerpColors(lightColors.daySun, lightColors.nightSun, n);
+    sun.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.sunIntensity * dayLook.sunStrength, night.sunIntensity * nightLook.moonStrength, n);
+    sun.current.color.lerpColors(daySunColour, nightMoonColour, n);
     rimLight.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.rimIntensity, night.rimIntensity, n) + boostAtmosphere.current * 0.12;
     rimLight.current.color.lerpColors(lightColors.dayRim, lightColors.nightRim, n).lerp(lightColors.boostRim, boostAtmosphere.current * 0.32);
     bounceLight.current.intensity = THREE.MathUtils.lerp(0.24, 0.12, n);
     bounceLight.current.color.lerpColors(lightColors.dayBounce, lightColors.nightBounce, n);
-    fog.color.lerpColors(lightColors.dayFog, lightColors.nightFog, n);
-    gl.toneMappingExposure = THREE.MathUtils.lerp(ATMOSPHERE.post.exposure, night.exposure, n);
+    fog.color.lerpColors(dayFogColour, nightFogColour, n);
+    gl.toneMappingExposure = THREE.MathUtils.lerp(dayLook.exposure, nightLook.exposure, n);
     const cameraDistance = camera.position.distanceTo(globeCenter);
     const fogEase = 1 - Math.exp(-ATMOSPHERE.fog.damping * dt);
     fog.near = THREE.MathUtils.lerp(fog.near, cameraDistance - GLOBE_RADIUS * ATMOSPHERE.fog.nearFactor, fogEase);
-    fog.far = THREE.MathUtils.lerp(fog.far, cameraDistance + GLOBE_RADIUS * ATMOSPHERE.fog.farFactor, fogEase);
+    // Haze pulls the far edge of the fog in by day (up to about two thirds closer).
+    const farFactor = ATMOSPHERE.fog.farFactor * THREE.MathUtils.lerp(1 - 0.65 * dayLook.haze, 1 - 0.65 * nightLook.haze, n);
+    fog.far = THREE.MathUtils.lerp(fog.far, cameraDistance + GLOBE_RADIUS * farFactor, fogEase);
     glowAmount.current = 1 - zoomProgress.current * ATMOSPHERE.glow.drivingFade;
     // Follow the local tangent plane while driving so the sun keeps a gentle
     // three-quarter angle even when the car reaches another side of the globe.
@@ -1277,7 +1230,6 @@ function DrivingScene(props: SceneProps) {
     <directionalLight ref={rimLight} position={[58, 18, -48]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={ATMOSPHERE.light.rimIntensity} color={ART_DIRECTION.day.rimColor} />
     <directionalLight ref={bounceLight} position={[18, -38, -62]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={0.24} color={ART_DIRECTION.day.bounceColor} />
     <primitive object={speedLines.group} />
-    <Moon night={nightBlend} />
     <Meteors />
     <group ref={globeGroup} position={[0, -GLOBE_RADIUS, 0]}>
       <AtmosphereGlow amount={glowAmount} night={nightBlend} />

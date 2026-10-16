@@ -1,0 +1,12 @@
+{
+  "maxSpeed": 18,
+  "acceleration": 9,
+  "brakeDecel": 14,
+  "maxTurnRate": 4.2,
+  "steerResponse": 5,
+  "lateralGrip": 13,
+  "driftYawBoost": 1.56,
+  "roadAssist": 0.8,
+  "rollStiffness": 12,
+  "maxRoll": 0.255
+}

@@ -58,7 +58,6 @@ Fonts: Outfit and Quicksand through Fontsource (SIL Open Font License). Icons: L
 
 Road palette and raised curb profile are adapted from [Low Poly UFO Scene](https://sketchfab.com/3d-models/low-poly-ufo-scene-207cb85b20a5430eb636966d408f1bd0) by [EdwinRC](https://sketchfab.com/Edwin3D), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files and original license are kept in `src/assets/low_poly_ufo_scene`.
 
-Clouds use [Low Poly Cloud](https://sketchfab.com/3d-models/low-poly-cloud-81910476b24d4fc5a73c908d6c2a38a2) by [Hyungjung Kim](https://sketchfab.com/hyungjungkim), licensed under [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/). The supplied source files and original license are kept in `src/assets/low_poly_cloud`.
 
 The bridge, rocks, ground cover, flowers and lanterns use [Japanese Bridge Garden](https://sketchfab.com/3d-models/japanese-bridge-garden-d122e17593eb4012913cde927486d15a) by [kristenlee](https://sketchfab.com/kristenlee), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, runtime GLB conversion and original license are kept in `src/assets/japanese_bridge_garden`.
 

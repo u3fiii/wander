@@ -10,6 +10,7 @@ import { MOUNTAIN_SITES, REGIONS, ROAD_PATHS, WORLD_SETTINGS, distanceToRoadNetw
 import type { RoadPath } from './worldMap';
 import { clearObstacleGroup, obstacleAt, setObstacleGroup } from './obstacles';
 import { nightState } from './nightState';
+import { nightLook } from './nightLook';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
 import { ART_DIRECTION } from './artDirection';
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
@@ -29,7 +30,6 @@ import planterUrl from '../assets/kenny city/planter.obj?url';
 import treeLargeUrl from '../assets/kenny city/tree-large.obj?url';
 import treeSmallUrl from '../assets/kenny city/tree-small.obj?url';
 import pathStonesUrl from '../assets/kenny city/path-stones-long.obj?url';
-import cloudModelUrl from '../assets/low_poly_cloud/cloud.glb?url';
 import japaneseGardenUrl from '../assets/japanese_bridge_garden/bridge-garden.glb?url';
 import lowPolyTreesUrl from '../assets/low_poly_trees/trees.glb?url';
 import mountainModelUrl from '../assets/low_poly_mountain_free/mountain.glb?url';
@@ -968,7 +968,7 @@ function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, co
     });
     return { model: clone, windows };
   }, [source, texture, colors, planter, stone, windowsLit]);
-  useFrame(() => { for (const material of windows) material.emissiveIntensity = nightState.blend * WINDOW_GLOW.intensity; });
+  useFrame(() => { for (const material of windows) material.emissiveIntensity = nightState.blend * WINDOW_GLOW.intensity * nightLook.cityLights; });
   const position = useMemo(() => terrainPoint(latitude, longitude, 0.05 - sink), [latitude, longitude, sink]);
   useEffect(() => () => {
     model.traverse(child => {
@@ -1460,7 +1460,7 @@ const STREET = {
   lampScale: 1.3, lampSetback: 4.5, propScale: 1.1, benchSetback: 5.3, mailboxSetback: 4.7,
   lampColor: '#ffc27a', headGlow: 1.9,
   // Six faint, closely spaced steps fading to nothing: velvety and soft, yet still faceted like the world.
-  pool: { radii: [0.8, 1.4, 2.0, 2.6, 3.2, 3.8], strength: [0.15, 0.125, 0.095, 0.066, 0.038, 0.015], segments: 12, lift: 0.06 },
+  pool: { radii: [1.0, 1.7, 2.4, 3.1, 3.9, 4.8], strength: [0.14, 0.12, 0.095, 0.068, 0.04, 0.016], segments: 12, lift: 0.06 },
 };
 
 type PropTemplate = { object: THREE.Object3D; head: THREE.Vector3 };
@@ -1656,9 +1656,10 @@ function StreetFurniture() {
   const glowGroup = useRef<THREE.Group>(null!);
   useFrame(() => {
     const n = nightState.blend;
-    shared.lampHead.emissiveIntensity = n * 3.4;
-    shared.pool.opacity = n;
-    shared.glow.opacity = n * 0.8;
+    const city = nightLook.cityLights;
+    shared.lampHead.emissiveIntensity = n * 3.4 * city;
+    shared.pool.opacity = Math.min(1, n * city);
+    shared.glow.opacity = Math.min(1, n * 0.8 * city);
     glowGroup.current.visible = n > 0.01;
   });
   return <>
@@ -2133,7 +2134,16 @@ function FootballField() {
       const baked = bakeRoles(child.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.wallWarmWhite), fieldRole(FIELD.pitchNodes.includes(child.name)));
       child.geometry = baked.geometry;
       child.material = roleMaterials(baked.roles, role => ({ key: role as PaletteKey }));
-      if (FIELD.pitchNodes.includes(child.name)) mowingStripes(child.geometry, baked.roles);
+      if (FIELD.pitchNodes.includes(child.name)) {
+        // The pitch is drawn flat: the texture's baked dark shading (the circles) is cleared before the mowing stripes.
+        const colors = child.geometry.getAttribute('color');
+        if (colors) { for (let i = 0; i < colors.count; i++) colors.setXYZ(i, 1, 1, 1); colors.needsUpdate = true; }
+        mowingStripes(child.geometry, baked.roles);
+        // Its two layered planes sit almost together; the lower one is pushed back so they don't flicker.
+        if (child.name === FIELD.pitchNodes[0]) (child.material as THREE.Material[]).forEach(material => {
+          material.polygonOffset = true; material.polygonOffsetFactor = 2; material.polygonOffsetUnits = 2;
+        });
+      }
       child.castShadow = true;
       child.receiveShadow = true;
     });
@@ -2805,101 +2815,11 @@ function Coast() {
   </>;
 }
 
-const cloudPlacements = [
-  { latitude: 0.68, longitude: 0.02, altitude: 10.8, scale: [0.085, 0.068, 0.076], rotation: 0.35 },
-  { latitude: 0.18, longitude: 1.72, altitude: 9.6, scale: [0.105, 0.076, 0.082], rotation: 2.55 },
-  { latitude: 0.92, longitude: 2.92, altitude: 13.2, scale: [0.058, 0.05, 0.066], rotation: 2.1 },
-  { latitude: -0.48, longitude: 4.16, altitude: 12.8, scale: [0.055, 0.047, 0.064], rotation: 2.86 },
-  { latitude: 0.04, longitude: 5.92, altitude: 13.6, scale: [0.098, 0.072, 0.078], rotation: 2.42 },
-] as const;
-
-const CLOUD_DRIFT = { minSpeed: 0.003, speedRange: 0.006, foregroundSpeed: 0.02, foregroundOpacity: 0.85 };
-// Lag: the clouds follow the globe's turn a little late (the rate they catch up at, per second). A hand-drag turns the
-// globe fast, so the clouds visibly trail it; the slow automatic spin hardly shows any lag.
-const CLOUD_LAG = 2.5;
-const FOREGROUND_CLOUDS = [
-  { position: [0, 40, 72] as const, scale: 0.09 },
-];
-
-function CloudLayer({ zoom }: { zoom: RefObject<number> }) {
-  const gltf = useLoader(GLTFLoader, cloudModelUrl);
-  const material = useMemo(() => new THREE.MeshStandardMaterial({
-    color: PALETTE.clouds, roughness: 0.95, metalness: 0, flatShading: true,
-  }), []);
-  const foregroundMaterial = useMemo(() => new THREE.MeshStandardMaterial({
-    color: PALETTE.clouds, roughness: 0.95, metalness: 0, flatShading: true,
-    transparent: true, opacity: CLOUD_DRIFT.foregroundOpacity, depthWrite: false,
-  }), []);
-  const source = useMemo(() => {
-    const model = gltf.scene.clone(true);
-    model.traverse(child => {
-      if (!(child instanceof THREE.Mesh)) return;
-      child.material = material;
-      child.castShadow = false;
-      child.receiveShadow = false;
-    });
-    const center = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
-    model.position.sub(center);
-    return model;
-  }, [gltf.scene, material]);
-  const clouds = useMemo(() => cloudPlacements.map((cloud, index) => {
-    const normal = new THREE.Vector3(...spherePoint(cloud.latitude, cloud.longitude, 0)).sub(new THREE.Vector3(0, -GLOBE_RADIUS, 0)).normalize();
-    const orientation = new THREE.Quaternion().setFromUnitVectors(up, normal);
-    orientation.multiply(new THREE.Quaternion().setFromAxisAngle(up, cloud.rotation));
-    return {
-      ...cloud,
-      object: source.clone(true),
-      position: spherePoint(cloud.latitude, cloud.longitude, cloud.altitude),
-      orientation,
-      key: `cloud-${index}`,
-    };
-  }), [source]);
-  const drift = useMemo(() => cloudPlacements.map((_, index) => (index % 2 ? -1 : 1)
-    * (CLOUD_DRIFT.minSpeed + ((index * 0.37) % 1) * CLOUD_DRIFT.speedRange)), []);
-  const orbits = useRef<THREE.Group[]>([]);
-  const foreground = useRef<THREE.Group>(null!);
-  const foregroundClouds = useMemo(() => FOREGROUND_CLOUDS.map(cloud => {
-    const object = source.clone(true);
-    object.traverse(child => { if (child instanceof THREE.Mesh) child.material = foregroundMaterial; });
-    return { ...cloud, object };
-  }), [source, foregroundMaterial]);
-  useEffect(() => () => { material.dispose(); foregroundMaterial.dispose(); }, [material, foregroundMaterial]);
-  const layer = useRef<THREE.Group>(null!);
-  const globeTurn = useMemo(() => new THREE.Quaternion(), []);
-  const cloudTurn = useMemo(() => new THREE.Quaternion(), []);
-  const cloudsStarted = useRef(false);
-  useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05);
-    // The globe's turn is applied to the layer's parent. The clouds' own turn catches up with it gradually, so they
-    // trail the globe when it's turned by hand, about the planet's centre.
-    layer.current.parent!.getWorldQuaternion(globeTurn);
-    if (!cloudsStarted.current) { cloudTurn.copy(globeTurn); cloudsStarted.current = true; }
-    cloudTurn.slerp(globeTurn, 1 - Math.exp(-CLOUD_LAG * dt));
-    layer.current.quaternion.copy(globeTurn.clone().invert().multiply(cloudTurn));
-    orbits.current.forEach((orbit, index) => { if (orbit) orbit.rotation.y += dt * drift[index]; });
-    foreground.current.rotation.y += dt * CLOUD_DRIFT.foregroundSpeed;
-    foregroundMaterial.opacity = CLOUD_DRIFT.foregroundOpacity * (1 - zoom.current);
-  });
-  return <group ref={layer} position={[0, -GLOBE_RADIUS, 0]}><group position={[0, GLOBE_RADIUS, 0]}>
-    {clouds.map((cloud, index) => <group key={cloud.key} ref={el => { if (el) orbits.current[index] = el; }}>
-      <group position={cloud.position} quaternion={cloud.orientation} scale={cloud.scale}>
-        <primitive object={cloud.object} />
-      </group>
-    </group>)}
-    <group ref={foreground}>
-      {foregroundClouds.map((cloud, index) => <group key={`foreground-${index}`} position={cloud.position} scale={cloud.scale}>
-        <primitive object={cloud.object} />
-      </group>)}
-    </group>
-  </group></group>;
-}
-
 export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
   return <group>
     <Terrain />
     <JapaneseBridgeGarden />
     <LoopRoad />
     <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boat /><BeachFloats /><Boulders /><FootballField /><FieldPath /><Meadow /><Footpaths /><Fireflies /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
-    <CloudLayer zoom={zoom} />
   </group>;
 }

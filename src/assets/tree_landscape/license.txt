@@ -1,0 +1,11 @@
+Model Information:
+* title:	Tree Landscape
+* source:	https://sketchfab.com/3d-models/tree-landscape-83b67f452fb64414bcbc8416dccf17a1
+* author:	Sabbir Ahmed (https://sketchfab.com/sabbirahmedsr)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Tree Landscape" (https://sketchfab.com/3d-models/tree-landscape-83b67f452fb64414bcbc8416dccf17a1) by Sabbir Ahmed (https://sketchfab.com/sabbirahmedsr) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

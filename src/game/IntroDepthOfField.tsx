@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { RefObject } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -10,6 +10,11 @@ import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { GLOBE_RADIUS } from './globe';
 import type { CarState } from './driving';
 import { cinematicState } from './cinematic';
+import { nightState } from './nightState';
+import { dayLook } from './dayLook';
+import { nightLook } from './nightLook';
+import { cameraTuning } from './cameraTuning';
+import { boostTuning } from './boostTuning';
 
 const settings = ART_DIRECTION.introDepthOfField;
 const driving = ART_DIRECTION.drivingDepthOfField;
@@ -53,6 +58,7 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
   const focus = useRef<number | null>(null);
   const amount = useRef(1);
   const boostAmount = useRef(0);
+  const boostColour = useMemo(() => new THREE.Color(), []);
   const center = useRef(new THREE.Vector3());
   const surface = useRef(new THREE.Vector3());
   const carFocus = useRef(new THREE.Vector3());
@@ -72,8 +78,8 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     // single thin focal plane. Preserve canvas alpha over the CSS sky gradient.
     bokeh.uniforms.focusRange = { value: GLOBE_RADIUS * settings.focusRangeFactor };
     bokeh.uniforms.nearBlur = { value: 1 };
-    // Beyond the globe and its clouds there is only the moon (and the empty sky): keep that sharp, since
-    // anything that far would otherwise get the maximum blur and turn the moon into a smudge.
+    // Beyond the globe there is only the empty sky (and the meteors): keep that sharp, since anything that far
+    // would otherwise get the maximum blur and turn into a smudge.
     bokeh.uniforms.sharpBeyond = { value: 1e6 };
     bokeh.materialBokeh.fragmentShader = bokeh.materialBokeh.fragmentShader
       .replace('uniform float focus;', 'uniform float focus;\nuniform float focusRange;\nuniform float nearBlur;\nuniform float sharpBeyond;')
@@ -85,13 +91,27 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     // A cool hit gets its own look here (uGrade 0..1): faded, bleached colour with firm contrast and very soft
     // light glowing out of the highlights.
     output.material.uniforms.uGrade = { value: 0 };
+    // A gentle warm grade for daytime (strength 0..1), fading out at night.
+    output.material.uniforms.uWarm = { value: 0 };
+    // Day saturation from the Day look panel (1 = unchanged), faded out at night.
+    output.material.uniforms.uSat = { value: 1 };
+    // The blur also spreads the globe's edge out into the empty sky as a soft ring. uFringe keeps that ring (1) or
+    // trims it away (0); it follows the look panel's Globe halo slider.
+    output.material.uniforms.uFringe = { value: 1 };
+    // Boost: a strong, saturated orange push (strength 0..1 from the boost burst).
+    output.material.uniforms.uBoost = { value: 0 };
+    // The boost's colour multiplier (its brightest channel at 1.18), strength and saturation, from the Boost tab.
+    output.material.uniforms.uBoostTint = { value: new THREE.Vector3(1.18, 0.9, 0.68) };
+    output.material.uniforms.uBoostMix = { value: 0.75 };
+    output.material.uniforms.uBoostSat = { value: 1.3 };
     output.material.uniforms.uTexel = { value: new THREE.Vector2(1, 1) };
     // Head-on crashes (the red ones) push the contrast up instead (uImpact 0..1).
     output.material.uniforms.uImpact = { value: 0 };
     output.material.fragmentShader = output.material.fragmentShader
-      .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform float uGrade;\nuniform vec2 uTexel;\nuniform float uImpact;')
+      .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform float uGrade;\nuniform vec2 uTexel;\nuniform float uImpact;\nuniform float uWarm;\nuniform float uBoost;\nuniform vec3 uBoostTint;\nuniform float uBoostMix;\nuniform float uBoostSat;\nuniform float uSat;\nuniform float uFringe;')
       .replace('gl_FragColor = texture2D( tDiffuse, vUv );', `gl_FragColor = texture2D( tDiffuse, vUv );
  gl_FragColor.rgb /= max(gl_FragColor.a, 0.00001);
+ gl_FragColor.a = mix(smoothstep(0.4, 0.95, gl_FragColor.a), gl_FragColor.a, clamp(uFringe, 0.0, 1.0));
  vec3 softLight = gl_FragColor.rgb;
  if (uGrade > 0.001) {
    vec2 r = uTexel * 5.0;
@@ -127,6 +147,15 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
    contrasted = contrasted * contrasted * (3.0 - 2.0 * contrasted);
    gl_FragColor.rgb = mix(base, mix(tinted, contrasted, 0.85), uImpact);
  }
+ if (uBoost > 0.001) {
+   vec3 boosted = gl_FragColor.rgb * uBoostTint + (uBoostTint - 0.6) * vec3(0.077, 0.033, 0.0);
+   float boostLuma = dot(boosted, vec3(0.299, 0.587, 0.114));
+   boosted = mix(vec3(boostLuma), boosted, uBoostSat);
+   gl_FragColor.rgb = mix(gl_FragColor.rgb, clamp(boosted, 0.0, 1.0), uBoost * uBoostMix);
+ }
+ // Daytime warmth: a touch of gold in the light and a faint lift in the shadows.
+ gl_FragColor.rgb = mix(vec3(dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114))), gl_FragColor.rgb, uSat);
+ gl_FragColor.rgb = mix(gl_FragColor.rgb, gl_FragColor.rgb * vec3(1.04, 1.0, 0.93) + vec3(0.012, 0.007, 0.0), uWarm);
  // Cinematic finish, always on and very light: highlights take a touch of warmth, and the frame settles with a
  // soft vignette, so the whole scene reads as one warm, filmic picture.
  float finishLuma = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
@@ -194,13 +223,13 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
       current.bokeh.uniforms.focus.value = Math.max(camera.near, focus.current);
       current.bokeh.uniforms.sharpBeyond.value = camera.position.distanceTo(center.current) + GLOBE_RADIUS * 1.8;
     }
-    const drivingFocusRange = THREE.MathUtils.lerp(driving.focusRange, boostSettings.focusRange, boost);
-    const drivingAperture = THREE.MathUtils.lerp(driving.aperture, boostSettings.aperture, boost);
-    const drivingMaxBlur = THREE.MathUtils.lerp(driving.maxBlur, boostSettings.maxBlur, boost);
+    const drivingFocusRange = THREE.MathUtils.lerp(cameraTuning.focusRange, boostSettings.focusRange, boost);
+    const drivingAperture = THREE.MathUtils.lerp(driving.aperture * cameraTuning.blurDriving, boostSettings.aperture * boostTuning.blur, boost);
+    const drivingMaxBlur = THREE.MathUtils.lerp(driving.maxBlur * cameraTuning.blurDriving, boostSettings.maxBlur * boostTuning.blur, boost);
     current.bokeh.uniforms.focusRange.value = THREE.MathUtils.lerp(GLOBE_RADIUS * settings.focusRangeFactor, drivingFocusRange, blend);
     current.bokeh.uniforms.nearBlur.value = 1 - blend;
-    current.bokeh.uniforms.aperture.value = (settings.aperture * overviewAmount + drivingAperture * drivingAmount) * amount.current;
-    current.bokeh.uniforms.maxblur.value = (settings.maxBlur * overviewAmount + drivingMaxBlur * drivingAmount) * amount.current;
+    current.bokeh.uniforms.aperture.value = (settings.aperture * cameraTuning.blurOverview * overviewAmount + drivingAperture * drivingAmount) * amount.current;
+    current.bokeh.uniforms.maxblur.value = (settings.maxBlur * cameraTuning.blurOverview * overviewAmount + drivingMaxBlur * drivingAmount) * amount.current;
     // Crash cut-in: lock focus on the crash and exaggerate the blur in front of and behind it.
     const crash = cinematicState.crash;
     if (crash > 0) {
@@ -213,6 +242,17 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
       uniforms.maxblur.value = THREE.MathUtils.lerp(uniforms.maxblur.value, crashSettings.maxBlur, crash);
     }
     current.output.material.uniforms.uGrade.value = cinematicState.cool;
+    // During a boost the daytime warmth and haze step back, so the boost's orange isn't stacked into yellow.
+    const daytime = (1 - nightState.blend) * (1 - boostAmount.current);
+    current.output.material.uniforms.uWarm.value = daytime * dayLook.warmFilter;
+    current.output.material.uniforms.uFringe.value = THREE.MathUtils.lerp(dayLook.glow, nightLook.glow, nightState.blend);
+    current.output.material.uniforms.uSat.value = 1 + (dayLook.saturation - 1) * (1 - nightState.blend) + (nightLook.saturation - 1) * nightState.blend;
+    current.output.material.uniforms.uBoost.value = boostAmount.current;
+    // Raw picker values (no colour-space conversion), so the default reproduces the original multiplier.
+    boostColour.setStyle(boostTuning.gradeColour, THREE.LinearSRGBColorSpace);
+    current.output.material.uniforms.uBoostTint.value.set(boostColour.r, boostColour.g, boostColour.b).multiplyScalar(1.18 / Math.max(boostColour.r, boostColour.g, boostColour.b, 0.001));
+    current.output.material.uniforms.uBoostMix.value = boostTuning.gradeStrength;
+    current.output.material.uniforms.uBoostSat.value = boostTuning.gradeSaturation;
     current.output.material.uniforms.uImpact.value = Math.max(0, cinematicState.crash - cinematicState.cool);
     current.composer.render(dt);
   }, 1);

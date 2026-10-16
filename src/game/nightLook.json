@@ -1,0 +1,13 @@
+{
+  "moonCool": 0.52,
+  "moonStrength": 1.22,
+  "skyLight": 1.26,
+  "haze": 0.11,
+  "cityLights": 0.65,
+  "saturation": 0.68,
+  "exposure": 0.65,
+  "skyTop": "#111118",
+  "skyHorizon": "#0a0a0b",
+  "glow": 0.06,
+  "aurora": 0.02
+}

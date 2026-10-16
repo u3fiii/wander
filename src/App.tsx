@@ -1,17 +1,67 @@
-import { Component, useCallback, useEffect, useRef, useState } from 'react';
+import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronLeft, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, SlidersHorizontal, ChevronLeft, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
 import type { Telemetry } from './game/Scene';
 import { emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
 import type { ControlKey } from './game/driving';
+
+// Touch steering: a round wheel you turn with a finger. Dragging it sets the steering (up to a 270° turn); letting go
+// springs it back to the centre.
+const WHEEL_LOCK = 270;
+function SteeringWheel({ controls }: { controls: React.RefObject<{ steer?: number }> }) {
+  const [turn, setTurn] = useState(0);
+  const wheel = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ start: number; base: number } | null>(null);
+  const angleOf = (event: React.PointerEvent) => {
+    const rect = wheel.current!.getBoundingClientRect();
+    return Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI;
+  };
+  const apply = (degrees: number) => {
+    setTurn(degrees);
+    controls.current.steer = Math.max(-1, Math.min(1, -degrees / 90));
+  };
+  return <div
+    ref={wheel}
+    className="steering-wheel"
+    role="slider"
+    aria-label="Steering wheel"
+    aria-valuemin={-WHEEL_LOCK}
+    aria-valuemax={WHEEL_LOCK}
+    aria-valuenow={Math.round(turn)}
+    style={{ transform: `rotate(${turn}deg)` }}
+    onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); drag.current = { start: angleOf(event), base: turn }; }}
+    onPointerMove={event => {
+      if (!drag.current) return;
+      let delta = angleOf(event) - drag.current.start;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      apply(Math.max(-WHEEL_LOCK, Math.min(WHEEL_LOCK, drag.current.base + delta)));
+    }}
+    onPointerUp={() => { drag.current = null; apply(0); }}
+    onPointerCancel={() => { drag.current = null; apply(0); }}
+  >
+    <span className="wheel-top" />
+  </div>;
+}
 import type { TrafficHit } from './game/obstacles';
+import { DAY_LOOK_SAVED, DAY_LOOK_SLIDERS, dayLook } from './game/dayLook';
+import type { DayLook } from './game/dayLook';
+import { NIGHT_LOOK_SAVED, NIGHT_LOOK_SLIDERS, nightLook } from './game/nightLook';
+import type { NightLook } from './game/nightLook';
+import { CAR_TUNING_SAVED, CAR_TUNING_SLIDERS } from './game/carTuning';
+import type { CarTuning } from './game/carTuning';
+import { CAMERA_TUNING_SAVED, CAMERA_TUNING_SLIDERS, applyCameraTuning, cameraTuning } from './game/cameraTuning';
+import { BOOST_TUNING_COLOURS, BOOST_TUNING_SAVED, BOOST_TUNING_SLIDERS, applyBoostTuning, boostTuning, type BoostTuning } from './game/boostTuning';
+import type { CameraTuning } from './game/cameraTuning';
 import { CAR_CONFIG, JUICE_CONFIG } from './game/config';
 import { setMuted, startAudio } from './game/audio';
 
 const TITLE = 'Just drive.';
 // How long each day or night phase lasts while driving (ms).
 const DAY_CYCLE_MS = 45000;
+// The automatic day/night change plays out slowly, over this many seconds (the button still switches quickly).
+const AUTO_SHIFT_SECONDS = 10;
 const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
 class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
@@ -37,7 +87,7 @@ function Help({ close }: { close: () => void }) {
   </section></div>;
 }
 
-// Night sky behind the globe: twinkling stars and a slow aurora (the moon is 3D, in the scene). Fades in with night mode.
+// Night sky behind the globe: twinkling stars and a slow aurora. Fades in with night mode.
 const STAR_LAYERS = [0, 1, 2].map(layer => {
   let seed = 7 + layer * 131;
   const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -53,15 +103,78 @@ function NightSky() {
   </div>;
 }
 
+// Look panel (dev tool): a few sliders for the day or night mood, applied live; Apply saves them to dayLook.json or
+// nightLook.json. Picking a tab switches the game to that time of day so the changes can be seen.
+type LookValues = Record<string, number | string>;
+type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
+type LookMode = 'day' | 'night' | 'car' | 'camera' | 'boost';
+function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onChange, onClose }: {
+  mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
+  endpoint: string; onChange: (look: LookValues) => void; onClose: () => void;
+}) {
+  const [status, setStatus] = useState('');
+  const set = (key: string, value: number | string) => { onChange({ ...look, [key]: value }); setStatus(''); };
+  const apply = async () => {
+    setStatus('Saving…');
+    try {
+      const response = await fetch(endpoint, { method: 'POST', body: JSON.stringify(look) });
+      setStatus(response.ok ? 'Saved — tell Claude to use it' : 'Could not save');
+    } catch { setStatus('Could not save (dev server only)'); }
+  };
+  return <div className="day-look" role="dialog" aria-label="Look">
+    <div className="day-look-head">
+      <div className="day-look-tabs">
+        <button className={mode === 'day' ? 'on' : ''} onClick={() => { onMode('day'); setStatus(''); }}>Day</button>
+        <button className={mode === 'night' ? 'on' : ''} onClick={() => { onMode('night'); setStatus(''); }}>Night</button>
+        <button className={mode === 'car' ? 'on' : ''} onClick={() => { onMode('car'); setStatus(''); }}>Car</button>
+        <button className={mode === 'camera' ? 'on' : ''} onClick={() => { onMode('camera'); setStatus(''); }}>Camera</button>
+        <button className={mode === 'boost' ? 'on' : ''} onClick={() => { onMode('boost'); setStatus(''); }}>Boost</button>
+      </div>
+      <button aria-label="Close" onClick={onClose}><X size={14} /></button>
+    </div>
+    {colours && <div className="day-look-colours">
+      {colours.map(colour => <label key={colour.key}><span>{colour.label}</span><input type="color" value={String(look[colour.key])} onChange={event => set(colour.key, event.target.value)} /></label>)}
+    </div>}
+    {sliders.map(slider => <Fragment key={slider.key}>{slider.group && <p className="day-look-group">{slider.group}</p>}<label className="day-look-row">
+      <span>{slider.label}<b>{Number(look[slider.key]).toFixed(slider.step < 0.01 ? 3 : 2)}</b></span>
+      <input type="range" min={slider.min} max={slider.max} step={slider.step} value={Number(look[slider.key])}
+        onChange={event => set(slider.key, Number(event.target.value))} />
+    </label></Fragment>)}
+    {'skyTop' in look && <div className="day-look-colours">
+      <label><span>Sky top</span><input type="color" value={String(look.skyTop)} onChange={event => set('skyTop', event.target.value)} /></label>
+      <label><span>Sky horizon</span><input type="color" value={String(look.skyHorizon)} onChange={event => set('skyHorizon', event.target.value)} /></label>
+    </div>}
+    <div className="day-look-actions">
+      <button onClick={() => { onChange({ ...saved }); setStatus(''); }}>Reset</button>
+      <button className="apply" onClick={apply}>Apply</button>
+    </div>
+    {status && <p className="day-look-status">{status}</p>}
+  </div>;
+}
+
 export default function App() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [night, setNight] = useState(false);
+  const [autoShift, setAutoShift] = useState(false);
+  // Day look panel (dev): live daytime mood settings, mirrored into the shared dayLook object the scene reads.
+  const [look, setLook] = useState<DayLook>({ ...dayLook });
+  const [showLook, setShowLook] = useState(false);
+  const changeLook = (next: DayLook) => { Object.assign(dayLook, next); setLook(next); };
+  const [nightValues, setNightValues] = useState<NightLook>({ ...nightLook });
+  const changeNightLook = (next: NightLook) => { Object.assign(nightLook, next); setNightValues(next); };
+  const [lookMode, setLookMode] = useState<LookMode>('day');
+  const [cameraValues, setCameraValues] = useState<CameraTuning>({ ...cameraTuning });
+  const changeCamera = (next: CameraTuning) => { applyCameraTuning(next); setCameraValues(next); };
+  const [boostValues, setBoostValues] = useState<BoostTuning>({ ...boostTuning });
+  const changeBoost = (next: BoostTuning) => { applyBoostTuning(next); setBoostValues(next); };
+  const [carValues, setCarValues] = useState<CarTuning>(() => Object.fromEntries(Object.keys(CAR_TUNING_SAVED).map(key => [key, CAR_CONFIG[key as keyof CarTuning]])) as CarTuning);
+  const changeCar = (next: CarTuning) => { Object.assign(CAR_CONFIG, next); setCarValues(next); };
   // Day and night cycle by themselves while you drive: each phase lasts a few minutes. The button still switches
   // at any time, and a manual switch restarts the count for the new phase.
   useEffect(() => {
     if (!started || paused) return;
-    const timer = window.setTimeout(() => setNight(value => !value), DAY_CYCLE_MS);
+    const timer = window.setTimeout(() => { setAutoShift(true); setNight(value => !value); }, DAY_CYCLE_MS);
     return () => window.clearTimeout(timer);
   }, [started, paused, night]);
   const [cameraMode, setCameraMode] = useState(0);
@@ -234,24 +347,31 @@ export default function App() {
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
   }, [started, paused, help, reset, recover]);
 
-  useEffect(() => {
-    if (started) return;
-    const move = (event: PointerEvent) => {
-      document.documentElement.style.setProperty('--mx', (event.clientX / innerWidth * 2 - 1).toFixed(3));
-      document.documentElement.style.setProperty('--my', (event.clientY / innerHeight * 2 - 1).toFixed(3));
-    };
-    window.addEventListener('pointermove', move);
-    return () => window.removeEventListener('pointermove', move);
-  }, [started]);
-
   const touch = (key: ControlKey) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); controls.current[key] = true; },
     onPointerUp: () => { controls.current[key] = false; },
     onPointerCancel: () => { controls.current[key] = false; },
     onLostPointerCapture: () => { controls.current[key] = false; },
   });
-  return <main className={`app scale-study ${night ? 'night' : ''} ${started ? 'playing' : 'intro'} ${ready ? 'ready' : ''}`}>
-    <div className="scene"><NightSky /><SceneBoundary><Scene started={started} paused={paused || help} night={night} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+  return <main className={`app scale-study ${night ? 'night' : ''} ${autoShift ? 'slow-shift' : ''} ${started ? 'playing' : 'intro'} ${ready ? 'ready' : ''}`} style={{ '--sky-top': look.skyTop, '--sky-horizon': look.skyHorizon, '--night-top': nightValues.skyTop, '--night-horizon': nightValues.skyHorizon, '--aurora': nightValues.aurora, '--boost-tint': boostValues.tintColour, '--boost-tint-opacity': boostValues.tintOpacity } as CSSProperties}>
+    {showLook && <LookPanel
+      mode={lookMode}
+      onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night') { setAutoShift(false); setNight(mode === 'night'); } }}
+      look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues }[lookMode]}
+      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS }[lookMode]}
+      colours={lookMode === 'boost' ? BOOST_TUNING_COLOURS : undefined}
+      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED }[lookMode]}
+      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning' }[lookMode]}
+      onChange={values => {
+        if (lookMode === 'day') changeLook(values as DayLook);
+        else if (lookMode === 'night') changeNightLook(values as NightLook);
+        else if (lookMode === 'car') changeCar(values as unknown as CarTuning);
+        else if (lookMode === 'camera') changeCamera(values as unknown as CameraTuning);
+        else changeBoost(values as unknown as BoostTuning);
+      }}
+      onClose={() => setShowLook(false)}
+    />}
+    <div className="scene"><NightSky /><SceneBoundary><Scene started={started} paused={paused || help} night={night} nightFade={autoShift ? AUTO_SHIFT_SECONDS : undefined} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className="topbar">
       <a href="#" className="brand" aria-label="Wander, home" onClick={e => { e.preventDefault(); setStarted(false); setPaused(false); reset(); }}>
@@ -262,7 +382,8 @@ export default function App() {
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
         : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
       <nav className="toolbar" aria-label="Game settings">
-        <button aria-label={night ? 'Switch to evening' : 'Switch to night'} title={night ? 'Evening' : 'Night'} onClick={() => setNight(n => !n)}>{night ? <Sun /> : <Moon />}</button>
+        <button aria-label={night ? 'Switch to evening' : 'Switch to night'} title={night ? 'Evening' : 'Night'} onClick={() => { setAutoShift(false); setNight(n => !n); }}>{night ? <Sun /> : <Moon />}</button>
+        {import.meta.env.DEV && <button aria-label="Day look" title="Day look" className={showLook ? 'active' : ''} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         <button className={cameraMode ? 'active' : ''} aria-label="Change camera view" title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
         <button aria-label="Controls and help" title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
@@ -286,7 +407,7 @@ export default function App() {
       {hitNote && <div key={hitNote.id} className={`hit-note ${hitNote.kind}`} role="status">{hitNote.text} <b>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b></div>}
       {streakShown && <div key={streakLevel} className="streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
       <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="score-chip">Score <b>{score}</b></span><span><kbd>Space</kbd> Brake</span><span><kbd>Shift</kbd> Boost</span><span><kbd>F</kbd> Back to road</span><span><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
-      <div className="touch-controls" aria-label="Touch controls"><div><button aria-label="Steer left" {...touch('left')}><ArrowLeft /></button><button aria-label="Steer right" {...touch('right')}><ArrowRight /></button></div><div><button aria-label="Brake and reverse" {...touch('back')}><ArrowDown /></button><button aria-label="Accelerate" {...touch('forward')}><ArrowUp /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button></div></div>
+      <div className="touch-controls" aria-label="Touch controls"><SteeringWheel controls={controls} /><div className="pedals"><button className="reverse-touch" aria-label="Reverse" {...touch('back')}><ArrowDown /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button><button className="gas-touch" aria-label="Accelerate" {...touch('forward')}>Gas</button></div></div>
     </>}
 
     <footer className="page-footer"><span>WANDER · TAKE THE LONG WAY</span></footer>

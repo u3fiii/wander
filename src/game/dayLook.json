@@ -1,0 +1,12 @@
+{
+  "sunWarmth": 0.5,
+  "sunStrength": 1.6,
+  "skyLight": 0.4,
+  "haze": 0.14,
+  "warmFilter": 0.48,
+  "saturation": 1.08,
+  "exposure": 1.4,
+  "skyTop": "#6ecff2",
+  "skyHorizon": "#e6f7f3",
+  "glow": 1
+}
