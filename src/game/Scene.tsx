@@ -9,9 +9,9 @@ import { playWhoosh, updateAudio } from './audio';
 import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
-import { initialLoopCar, stepLoopCar } from './driving';
-import { clearObstacleGroup, setObstacleGroup } from './obstacles';
-import type { Obstacle } from './obstacles';
+import { initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
+import { clearObstacleGroup, drainTrafficHits, setObstacleGroup } from './obstacles';
+import type { Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
 import MiniatureWorld from './MiniatureWorld';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
@@ -31,7 +31,7 @@ import deliveryModelUrl from '../assets/kenny cars/delivery.obj?url';
 // Atmosphere tunables. Distances are in world units; colors come from PALETTE.
 const ATMOSPHERE = {
   fog: { nearFactor: 0.04, farFactor: 1.0, damping: 4 },
-  glow: { radius: 1.06, intensity: 0.55, power: 2.2, drivingFade: 0.85 },
+  glow: { radius: 1.15, intensity: 0.6, power: 1.6, drivingFade: 0.45 },
   light: { hemisphereIntensity: 1.1, sunIntensity: 2.0, sunColor: PALETTE.sunWarm, shadowRadius: 4, rimIntensity: 0.2 },
   post: {
     exposure: 1.05,
@@ -51,14 +51,14 @@ function readGamepad() {
   };
   for (const pad of pads) {
     if (!pad) continue;
-    return { throttle: shape(pad.buttons[7]?.value ?? 0), brake: shape(pad.buttons[6]?.value ?? 0), steer: -shape(pad.axes[0] ?? 0) };
+    return { throttle: shape(pad.buttons[7]?.value ?? 0), brake: shape(pad.buttons[6]?.value ?? 0), steer: -shape(pad.axes[0] ?? 0), recover: !!pad.buttons[3]?.pressed };
   }
-  return { throttle: 0, brake: 0, steer: 0 };
+  return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
   started: boolean; paused: boolean; night: boolean; cameraMode: number; resetKey: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
-  onTelemetry: (data: Telemetry) => void; onReady: () => void;
+  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void;
 };
 
 const localUp = new THREE.Vector3(0, 1, 0);
@@ -293,12 +293,33 @@ const traffic = [
 const TRAFFIC_COLORS = trafficColors(traffic.length, traffic.map((_, index) => index).sort((a, b) => traffic[a].progress - traffic[b].progress));
 const TRAFFIC_JITTER = (() => { const random = seededRandom(9002); return traffic.map(() => jitterAmount(random, JITTER.cars)); })();
 
-const TRAFFIC_COLLISION_RADIUS = 1.1;
+// Traffic collides as a capsule matching the Kenney cars' body (about 2.3 long, 1.1 wide).
+const TRAFFIC_COLLISION = { radius: 0.55, halfLength: 0.6 };
 // Basic traffic reactions: stop for the player ahead in the lane, and take a push when hit.
 const NPC = {
   stopDistance: 10, minGap: 3.5, laneHalfWidth: 1.6, braking: 3, followDistance: 9, followGap: 4.5,
-  pushTransfer: 0.9, spinTransfer: 0.25, maxPush: 6, shoveForward: 0.7, hitCooldown: 0.4,
-  laneReturn: 2.5, pushDamping: 3, spinStiffness: 12, spinDamping: 4,
+  pushTransfer: 0.75, spinTransfer: 0.2, maxPush: 9, shoveForward: 0.7, hitCooldown: 0.4,
+  laneReturn: 2.2, pushDamping: 3.2, spinStiffness: 14, spinDamping: 3.2,
+};
+// A clip from the side is the good kind of crash, so it gets a show: the struck car is thrown harder,
+// time slows for a beat, and the camera pulls back with a shake. A head-on hit only gets a jolt.
+const SIDE_HIT = {
+  fling: 1.8, hop: 1.5, roll: 1.4,
+  slowMoScale: 0.3, slowMoHold: 0.15, slowMoRamp: 0.45,
+  dolly: 4, dollyDecay: 2.5, fovKick: 7, shake: 0.55,
+  frontShake: 0.35,
+};
+// Shared game-time scale (slow motion); traffic reads it so the whole world slows together.
+const gameTime = { scale: 1 };
+
+// Cartoon hit reaction (visual only): the struck car hops, rolls away from the hit and wobbles back,
+// squashes on impact and on landing. `strengthSpeed` is the hit speed that gives the full reaction.
+const NPC_HIT = {
+  strengthSpeed: 18,
+  hopMin: 1.6, hopMax: 5.5, gravity: 22, bounce: 0.32,
+  rollKick: 5, rollKickMax: 9, rollStiffness: 70, rollDamping: 6, airRollStiffness: 12, maxRoll: 0.7,
+  squashKick: 5, landSquash: 0.05, squashStiffness: 220, squashDamping: 11, maxSquash: 0.22,
+  halfWidth: 0.45,
 };
 
 function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale, paused, progressIndex, progresses, obstacle, player, reactive, nightBlend }: typeof traffic[number] & {
@@ -311,6 +332,9 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   nightBlend: React.RefObject<number>;
 }) {
   const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0 });
+  const hit = useRef({ hop: 0, hopVelocity: 0, roll: 0, rollVelocity: 0, squash: 0, squashVelocity: 0 });
+  const body = useRef<THREE.Group>(null!);
+  const heading = useMemo(() => new THREE.Vector3(), []);
   const playerPoint = useMemo(() => new THREE.Vector3(), []);
   const toPlayer = useMemo(() => new THREE.Vector3(), []);
   const group = useRef<THREE.Group>(null!);
@@ -322,7 +346,7 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   const back = useMemo(() => new THREE.Vector3(), []);
   const basis = useMemo(() => new THREE.Matrix4(), []);
   useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05);
+    const dt = Math.min(delta, 0.05) * gameTime.scale;
     const m = motion.current;
     if (!paused) progress.current = (progress.current + Math.sign(speed) * m.speed * dt / roadPathMetric(path, progress.current) + 1) % 1;
     progresses.current[progressIndex] = progress.current;
@@ -361,13 +385,23 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     m.cooldown = Math.max(0, m.cooldown - dt);
     obstacle.ramCooldown = Math.max(0, (obstacle.ramCooldown ?? 0) - dt);
     if (obstacle.impact && m.cooldown === 0) {
+      const side = obstacle.hitKind === 'side';
+      obstacle.hitKind = undefined;
+      const fling = side ? SIDE_HIT.fling : 1;
       const away = lateral > 0 ? -1 : 1;
       const sideways = Math.min(1, Math.abs(lateral) / NPC.laneHalfWidth);
-      m.pushVelocity += away * obstacle.impact * NPC.pushTransfer * Math.max(sideways, 0.35);
-      m.spinVelocity += away * obstacle.impact * NPC.spinTransfer;
+      m.pushVelocity += away * obstacle.impact * NPC.pushTransfer * Math.max(sideways, 0.35) * fling;
+      m.spinVelocity += away * obstacle.impact * NPC.spinTransfer * fling;
       // A hit from behind shoves the car forward; a hit from the front stops it dead.
       m.speed = ahead < 0 ? m.speed + obstacle.impact * NPC.shoveForward * (1 - sideways) : m.speed * 0.3;
       m.cooldown = NPC.hitCooldown;
+      const strength = THREE.MathUtils.clamp(obstacle.impact / NPC_HIT.strengthSpeed, 0, 1);
+      const h = hit.current;
+      h.hopVelocity = Math.max(h.hopVelocity, THREE.MathUtils.lerp(NPC_HIT.hopMin, NPC_HIT.hopMax, strength) * (side ? SIDE_HIT.hop : 1));
+      // Tip away from the hit: the body is shoved while the tyres grip, so the roof leans the way it's pushed
+      // (+z roll lifts the right side). A rear hit still gets a little roll so it reads as a bump.
+      h.rollVelocity += -away * THREE.MathUtils.lerp(NPC_HIT.rollKick, NPC_HIT.rollKickMax, strength) * Math.max(sideways, 0.3) * (side ? SIDE_HIT.roll : 1);
+      h.squashVelocity -= NPC_HIT.squashKick * (0.4 + strength);
     }
     obstacle.impact = 0;
     m.pushVelocity += (-m.push * NPC.laneReturn - m.pushVelocity * NPC.pushDamping) * dt;
@@ -375,17 +409,46 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     m.spinVelocity += (-m.spin * NPC.spinStiffness - m.spinVelocity * NPC.spinDamping) * dt;
     m.spin += m.spinVelocity * dt;
     group.current.rotateY(m.spin);
+    const h = hit.current;
+    h.hopVelocity -= NPC_HIT.gravity * dt;
+    h.hop += h.hopVelocity * dt;
+    if (h.hop <= 0) {
+      h.hop = 0;
+      if (h.hopVelocity < -1.5) {
+        h.squashVelocity += h.hopVelocity * NPC_HIT.landSquash * 10;
+        h.hopVelocity = -h.hopVelocity * NPC_HIT.bounce;
+      } else h.hopVelocity = 0;
+    }
+    const rollStiffness = h.hop > 0 ? NPC_HIT.airRollStiffness : NPC_HIT.rollStiffness;
+    h.rollVelocity += (-h.roll * rollStiffness - h.rollVelocity * NPC_HIT.rollDamping) * dt;
+    h.roll = THREE.MathUtils.clamp(h.roll + h.rollVelocity * dt, -NPC_HIT.maxRoll, NPC_HIT.maxRoll);
+    h.squashVelocity += (-h.squash * NPC_HIT.squashStiffness - h.squashVelocity * NPC_HIT.squashDamping) * dt;
+    h.squash = THREE.MathUtils.clamp(h.squash + h.squashVelocity * dt, -NPC_HIT.maxSquash, NPC_HIT.maxSquash);
+    // Roll pivots on the low-side wheels, so lift the body by the roll so it never digs into the road.
+    body.current.position.y = h.hop + Math.abs(Math.sin(h.roll)) * NPC_HIT.halfWidth;
+    body.current.rotation.z = h.roll;
+    body.current.scale.set(1 - h.squash * 0.5, 1 + h.squash, 1 - h.squash * 0.5);
     // Keep this car's collision circle on its current position (planet centre is localGlobeCenter).
     const p = group.current.position;
     const r = Math.hypot(p.x - localGlobeCenter.x, p.y - localGlobeCenter.y, p.z - localGlobeCenter.z);
     obstacle.latitude = Math.asin(THREE.MathUtils.clamp((p.y - localGlobeCenter.y) / r, -1, 1));
     obstacle.longitude = Math.atan2(p.x - localGlobeCenter.x, p.z - localGlobeCenter.z);
+    // Facing (including the hit spin) as an [east, north] unit vector for the capsule.
+    heading.set(0, 0, -1).applyQuaternion(group.current.quaternion);
+    const lat = obstacle.latitude, lon = obstacle.longitude;
+    const east = Math.cos(lon) * heading.x - Math.sin(lon) * heading.z;
+    const north = -Math.sin(lat) * Math.sin(lon) * heading.x + Math.cos(lat) * heading.y - Math.sin(lat) * Math.cos(lon) * heading.z;
+    const length = Math.hypot(east, north) || 1;
+    obstacle.forward = [east / length, north / length];
   });
-  return <group ref={group}><KenneyCar modelUrl={modelUrl} scale={scale} color={TRAFFIC_COLORS[progressIndex]} jitter={TRAFFIC_JITTER[progressIndex]} /><CarLamps blend={nightBlend} halfWidth={0.4} front={-1.15} rear={1.1} height={0.45} /></group>;
+  return <group ref={group}><group ref={body}>
+    <KenneyCar modelUrl={modelUrl} scale={scale} color={TRAFFIC_COLORS[progressIndex]} jitter={TRAFFIC_JITTER[progressIndex]} />
+    <CarLamps blend={nightBlend} halfWidth={0.4} front={-1.15} rear={1.1} height={0.45} />
+  </group></group>;
 }
 
 function Traffic({ paused, progresses, player, reactive, nightBlend }: { paused: boolean; progresses: React.RefObject<number[]>; player: React.RefObject<CarState>; reactive: boolean; nightBlend: React.RefObject<number> }) {
-  const obstacles = useMemo<Obstacle[]>(() => traffic.map(() => ({ latitude: 0, longitude: 0, radius: TRAFFIC_COLLISION_RADIUS, movable: true })), []);
+  const obstacles = useMemo<Obstacle[]>(() => traffic.map(() => ({ latitude: 0, longitude: 0, radius: TRAFFIC_COLLISION.radius, halfLength: TRAFFIC_COLLISION.halfLength, forward: [0, 1] as [number, number], movable: true })), []);
   useEffect(() => {
     setObstacleGroup('traffic', obstacles);
     return () => clearObstacleGroup('traffic');
@@ -514,6 +577,9 @@ function DrivingScene(props: SceneProps) {
   const bodyRoll = useRef(0);
   const fovKick = useRef(0);
   const trauma = useRef(0);
+  const slowMo = useRef(0);
+  const dolly = useRef(0);
+  const dollyDirection = useMemo(() => new THREE.Vector3(), []);
   const cameraLag = useRef(0);
   const wasBoosting = useRef(0);
   const tireMarks = useMemo(createTireMarks, []);
@@ -523,6 +589,7 @@ function DrivingScene(props: SceneProps) {
   const roughShake = useRef(0);
   const wasOnRoad = useRef<boolean | null>(null);
   const telemetryTime = useRef(0);
+  const padRecoverHeld = useRef(false);
   const sun = useRef<THREE.DirectionalLight>(null!);
   const sunTarget = useMemo(() => new THREE.Object3D(), []);
   const sunOverviewPosition = useMemo(() => new THREE.Vector3(-52, 78, 62), []);
@@ -626,7 +693,12 @@ function DrivingScene(props: SceneProps) {
   }, [gl, props.started]);
 
   useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05);
+    const realDt = Math.min(delta, 0.05);
+    slowMo.current = Math.max(0, slowMo.current - realDt);
+    gameTime.scale = slowMo.current > SIDE_HIT.slowMoRamp
+      ? SIDE_HIT.slowMoScale
+      : THREE.MathUtils.lerp(1, SIDE_HIT.slowMoScale, easeInOutCubic(slowMo.current / SIDE_HIT.slowMoRamp));
+    const dt = realDt * gameTime.scale;
     if (!readied.current) { readied.current = true; props.onReady(); }
     arrivalTime.current += dt;
     const settle = 1 - easeOutCubic(Math.min(arrivalTime.current / ARRIVAL.duration, 1));
@@ -696,6 +768,9 @@ function DrivingScene(props: SceneProps) {
     pedals.current.throttle = ramp(pedals.current.throttle, keys.forward, CAR_CONFIG.throttleRampUpTime, CAR_CONFIG.throttleRampDownTime);
     pedals.current.brake = ramp(pedals.current.brake, keys.back, CAR_CONFIG.brakeRampUpTime, CAR_CONFIG.brakeRampDownTime);
     const pad = readGamepad();
+    // Gamepad Y: back to road (once per press).
+    if (pad.recover && !padRecoverHeld.current && props.started && !props.paused) recoverToRoad(car);
+    padRecoverHeld.current = pad.recover;
     let throttle = Math.max(pedals.current.throttle, pad.throttle);
     if (keys.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
     const keySteer = Number(keys.left) - Number(keys.right);
@@ -707,6 +782,18 @@ function DrivingScene(props: SceneProps) {
     };
     const intro = !props.started && zoomProgress.current < 0.02;
     if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true);
+    for (const hit of drainTrafficHits()) {
+      if (hit.kind === 'side') {
+        slowMo.current = SIDE_HIT.slowMoHold + SIDE_HIT.slowMoRamp;
+        dolly.current = SIDE_HIT.dolly;
+        fovKick.current += SIDE_HIT.fovKick;
+        trauma.current = Math.min(1, trauma.current + SIDE_HIT.shake);
+        playWhoosh();
+      } else {
+        trauma.current = Math.min(1, trauma.current + SIDE_HIT.frontShake);
+      }
+      props.onTrafficHit?.(hit);
+    }
 
     const carFrame = loopFrame(car.x, car.z);
     const latitude = carFrame.latitude;
@@ -806,6 +893,10 @@ function DrivingScene(props: SceneProps) {
       .add(globeCenter);
     desiredLook.copy(introLook).lerp(gameLook, zoom);
     const ease = 1 - Math.exp(-CAR_CONFIG.cameraSmoothing * dt);
+    // Side-hit pull-back: the camera's target backs away from the car and eases in again in real time,
+    // so the camera glides out during the slow motion and settles as it ends.
+    dolly.current = THREE.MathUtils.damp(dolly.current, 0, SIDE_HIT.dollyDecay, realDt);
+    if (dolly.current > 0.01) desiredCamera.addScaledVector(dollyDirection.copy(desiredCamera).sub(desiredLook).normalize(), dolly.current * zoom);
     camera.position.lerp(desiredCamera, ease);
     // Never let the smoothed camera cut through the planet.
     cameraOffset.copy(camera.position).sub(globeCenter);

@@ -212,23 +212,3 @@ export function planeRole(face: FaceSample) {
   if (lightness > 0.8) return 'body';
   return 'trim';
 }
-
-// Shrinks one role's faces about their own centre, leaving the rest of the model in place.
-export function scaleRoleGeometry(geometry: THREE.BufferGeometry, roles: string[], role: string, factor: number) {
-  const position = geometry.getAttribute('position');
-  const centre = new THREE.Vector3();
-  const vertices: number[] = [];
-  geometry.groups.forEach(group => {
-    if (roles[group.materialIndex!] !== role) return;
-    for (let i = group.start; i < group.start + group.count; i++) vertices.push(i);
-  });
-  if (!vertices.length) return;
-  vertices.forEach(i => centre.add(new THREE.Vector3().fromBufferAttribute(position, i)));
-  centre.divideScalar(vertices.length);
-  vertices.forEach(i => {
-    const v = new THREE.Vector3().fromBufferAttribute(position, i).sub(centre).multiplyScalar(factor).add(centre);
-    position.setXYZ(i, v.x, v.y, v.z);
-  });
-  position.needsUpdate = true;
-  geometry.computeBoundingBox();
-}

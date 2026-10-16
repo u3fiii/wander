@@ -2,11 +2,13 @@
 export const CAR_CONFIG = {
   // Speed
   maxSpeed: 22,
-  reverseMaxSpeed: 5,
+  reverseMaxSpeed: 7,
   acceleration: 9,
   // Engine force tapers as (1 - accelTaper * (speed / limit)^2): a kick from standstill, softer near top speed.
   accelTaper: 0.92,
-  reverseAcceleration: 4.8,
+  reverseAcceleration: 9,
+  // Reverse pulls almost as hard at its top speed as from a standstill, so backing out feels immediate.
+  reverseTaper: 0.3,
   brakeDecel: 14,
   // Keyboard pedals ramp like analog ones (seconds from 0 to full, and back).
   throttleRampUpTime: 0.6,
@@ -33,12 +35,18 @@ export const CAR_CONFIG = {
   steerResponse: 5,
   steerReturn: 10,
   maxTurnRate: 4.2,
+  // Below `lowSpeedTurnSpeed` the car still gets this share of full steering, so it can turn tightly while
+  // manoeuvring or reversing (turn rate otherwise scales with speed up to top speed).
+  lowSpeedTurnSpeed: 4,
+  lowSpeedTurnFactor: 0.35,
   lateralGrip: 13,
   // Hidden road assist: how fast the heading eases back to the road direction (rad/s per rad),
   // the extra pull when heading for the edge, and how far from the centre the edge pull starts.
   roadAssist: 0.8,
   roadEdgeAssist: 3,
   roadEdgeStart: 1.8,
+  // Back to road (F): how far from the road centre the car is put back, at most.
+  recoverLaneOffset: 1.4,
   // Off-road (on land, away from the road)
   offroadSpeedFactor: 0.5,
   offroadSlowdownTime: 1,
@@ -63,10 +71,18 @@ export const CAR_CONFIG = {
   wheelFrontZ: 0.76,
   // Body radius used for collisions with trees, rocks, houses and mountains.
   collisionRadius: 0.7,
+  // Against traffic the car is a capsule: half the distance between its end-cap centres, and its half width.
+  collisionHalfLength: 0.8,
+  trafficRadius: 0.65,
   // Share of speed kept when ramming traffic; the player car is much heavier than NPCs.
   ramSpeedKeep: 0.85,
-  // On a railing hit, how much of the angle away from the bridge direction is kept per step (lower = straightens faster).
-  bridgeStraighten: 0.85,
+  // Speed lost per second while pressed against a car that hasn't been shoved clear yet, and how fast an overlap is eased out.
+  trafficHoldDecel: 3,
+  trafficSeparateRate: 10,
+  // On a railing hit, how fast the heading straightens toward the bridge direction (per second).
+  bridgeStraightenRate: 3,
+  // Fastest the car may be turned by a wall, trunk or shoreline it glances off (rad/s).
+  deflectRate: 2.5,
   // Shoreline: heading step tried when sliding along the water's edge, and speed lost per second while scraping it.
   shoreSlideStep: 0.06,
   shoreScrape: 1.5,

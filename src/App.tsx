@@ -3,8 +3,9 @@ import type { CSSProperties, ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronLeft, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
 import type { Telemetry } from './game/Scene';
-import { emptyControls, initialLoopCar } from './game/driving';
+import { emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
 import type { ControlKey } from './game/driving';
+import type { TrafficHit } from './game/obstacles';
 import { CAR_CONFIG, JUICE_CONFIG } from './game/config';
 import { setMuted, startAudio } from './game/audio';
 
@@ -24,6 +25,7 @@ function Help({ close }: { close: () => void }) {
     <div className="help-row"><span>Brake / handbrake drift</span><kbd>Space</kbd></div>
     <div className="help-row"><span>Boost</span><kbd>Shift</kbd></div>
     <div className="help-row"><span>Gentle throttle</span><kbd>Alt</kbd></div>
+    <div className="help-row"><span>Back to road when stuck</span><kbd>F</kbd></div>
     <div className="help-row"><span>Tuning panel</span><kbd>`</kbd></div>
     <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
     <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
@@ -49,6 +51,26 @@ export default function App() {
   const [streakLevel, setStreakLevel] = useState(0);
   const streakMessages = ['Smooth driving', 'Nice line', 'Clean drive', 'Great flow', 'On a roll', 'Cruising', 'Road master', 'Zen mode'];
   const [streakShown, setStreakShown] = useState(false);
+  // Traffic scoring: clipping a car from the side pays and gets a compliment; a head-on hit costs points and gets condolences.
+  const [score, setScore] = useState(0);
+  const [hitNote, setHitNote] = useState<{ id: number; kind: 'side' | 'front'; points: number; text: string } | null>(null);
+  const hitCount = useRef(0);
+  const hitTimer = useRef<number | undefined>(undefined);
+  const hitMessages = {
+    side: ['Nice flick!', 'Clean sideswipe!', 'Pinball pro!', 'Smooth knock!'],
+    front: ['Ouch, our condolences.', 'Rough head-on hit.', 'Sorry for your loss.', 'Oof, that one hurt.'],
+  };
+  const handleTrafficHit = useCallback((hit: TrafficHit) => {
+    const magnitude = Math.round(hit.speed * 2) + 5;
+    const points = hit.kind === 'side' ? magnitude : -magnitude;
+    const count = hitCount.current++;
+    const messages = hitMessages[hit.kind];
+    setScore(total => total + points);
+    setHitNote({ id: count, kind: hit.kind, points, text: messages[count % messages.length] });
+    window.clearTimeout(hitTimer.current);
+    hitTimer.current = window.setTimeout(() => setHitNote(null), 2200);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (streakLevel === 0) { setStreakShown(false); return; }
     setStreakShown(true);
@@ -136,6 +158,20 @@ export default function App() {
     const timer = setTimeout(() => setRoadWarning(true), 2000);
     return () => clearTimeout(timer);
   }, [offRoadNow]);
+  // Stuck: a pedal is held but the car has barely moved for a moment. Then a hint offers the back-to-road key.
+  const stuck = useRef({ time: 0, last: 0 });
+  const [stuckHint, setStuckHint] = useState(false);
+  useEffect(() => {
+    const now = performance.now();
+    const state = stuck.current;
+    const dt = state.last ? Math.min((now - state.last) / 1000, 0.5) : 0;
+    state.last = now;
+    const pressing = (data.throttle ?? 0) > 0.3 || controls.current.back;
+    state.time = started && !paused && pressing && data.speed < 3 ? state.time + dt : 0;
+    if (state.time > 1.5) setStuckHint(true);
+    else if (data.speed > 8 || !started) setStuckHint(false);
+  }, [data, started, paused]);
+  const recover = useCallback(() => { recoverToRoad(car.current); stuck.current.time = 0; setStuckHint(false); }, []);
   useEffect(() => {
     const update = () => setGamepad((navigator.getGamepads?.() ?? []).some(Boolean));
     window.addEventListener('gamepadconnected', update);
@@ -144,7 +180,7 @@ export default function App() {
   }, []);
   const controls = useRef(emptyControls());
   const car = useRef(initialLoopCar());
-  const reset = useCallback(() => { controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); }, []);
+  const reset = useCallback(() => { controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null); }, []);
   const start = () => { setStarted(true); setPaused(false); controls.current = emptyControls(); };
   const onReady = useCallback(() => setReady(true), []);
 
@@ -158,6 +194,7 @@ export default function App() {
       if (mapping[e.code] && !paused && !help) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
       if (e.repeat) return;
       if (e.code === 'KeyR' && started && !help) reset();
+      if (e.code === 'KeyF' && started && !paused && !help) recover();
       if (e.code === 'KeyC' && !help) setCameraMode(n => 1 - n);
       if (e.code === 'Escape') { clear(); if (help) setHelp(false); else if (started) setPaused(v => !v); }
     };
@@ -166,7 +203,7 @@ export default function App() {
     const visibility = () => { if (document.hidden) blur(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility);
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
-  }, [started, paused, help, reset]);
+  }, [started, paused, help, reset, recover]);
 
   useEffect(() => {
     if (started) return;
@@ -185,14 +222,16 @@ export default function App() {
     onLostPointerCapture: () => { controls.current[key] = false; },
   });
   return <main className={`app scale-study ${night ? 'night' : ''} ${started ? 'playing' : 'intro'} ${ready ? 'ready' : ''}`}>
-    <div className="scene"><SceneBoundary><Scene started={started} paused={paused || help} night={night} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} /></SceneBoundary></div>
+    <div className="scene"><SceneBoundary><Scene started={started} paused={paused || help} night={night} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} /></SceneBoundary></div>
     <div className="vignette" />
     <header className="topbar">
       <a href="#" className="brand" aria-label="Wander, home" onClick={e => { e.preventDefault(); setStarted(false); setPaused(false); reset(); }}>
         <div className="brand-icon"><svg viewBox="0 0 32 32" fill="none"><path d="M5 26 12 6h8l7 20h-6c-1-7-3-11-5-13-2 2-4 6-5 13H5Z" stroke="currentColor" strokeWidth="1.8" /><path d="M13 9h6M3 28h26" stroke="currentColor" strokeWidth="1.4" /></svg></div>
         <div><strong dir="ltr">Wander<span>.</span></strong><small>DRIVE · DISCOVER</small></div>
       </a>
-      {roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
+      {stuckHint
+        ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
+        : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
       <nav className="toolbar" aria-label="Game settings">
         <button aria-label={night ? 'Switch to evening' : 'Switch to night'} title={night ? 'Evening' : 'Night'} onClick={() => setNight(n => !n)}>{night ? <Sun /> : <Moon />}</button>
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
@@ -215,8 +254,9 @@ export default function App() {
 
     {started && <>
       <div className="speedometer"><svg className="speed-arc" viewBox="0 0 160 130"><path d="M 24 112 A 65 65 0 1 1 136 112" className="arc-track" /><path d="M 24 112 A 65 65 0 1 1 136 112" className="arc-fill" pathLength="100" strokeDasharray="0 100" ref={speedArc} /></svg><div className="speed-readout"><strong ref={speedText}>0</strong><small>km/h</small></div><div className="gear"><span>{car.current.speed < -0.1 ? 'R' : 'D'}</span><b>{formatNumber(data.distance)} m driven</b></div><div className="throttle-bar" aria-hidden="true"><span style={{ transform: `scaleX(${data.throttle ?? 0})` }} /></div><div className={`boost-bar${data.boosting ? ' firing' : ''}`} aria-label="Boost meter"><span style={{ transform: `scaleX(${data.boost ?? 1})` }} /></div></div>
+      {hitNote && <div key={hitNote.id} className={`hit-note ${hitNote.kind}`} role="status">{hitNote.text} <b>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b></div>}
       {streakShown && <div key={streakLevel} className="streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
-      <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span><kbd>Space</kbd> Brake</span><span><kbd>Shift</kbd> Boost</span><span><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
+      <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="score-chip">Score <b>{score}</b></span><span><kbd>Space</kbd> Brake</span><span><kbd>Shift</kbd> Boost</span><span><kbd>F</kbd> Back to road</span><span><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
       <div className="touch-controls" aria-label="Touch controls"><div><button aria-label="Steer left" {...touch('left')}><ArrowLeft /></button><button aria-label="Steer right" {...touch('right')}><ArrowRight /></button></div><div><button aria-label="Brake and reverse" {...touch('back')}><ArrowDown /></button><button aria-label="Accelerate" {...touch('forward')}><ArrowUp /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button></div></div>
     </>}
 

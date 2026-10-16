@@ -2,7 +2,7 @@ import { BLOCKS, CAR_CONFIG, DRIVE, JUICE_CONFIG, LOOP_DRIVE } from './config.ts
 import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
-import { obstacleAt } from './obstacles.ts';
+import { classifyTrafficHit, obstacleAt, reportTrafficHit, trafficContact } from './obstacles.ts';
 
 export type CarState = {
   // On the globe: longitude, latitude offset in metres, heading from the road tangent.
@@ -72,7 +72,7 @@ export function updateSpeed(car: CarState, controls: Controls, dt: number, offro
     const boosting = throttle > 0 && car.boosting > 0;
     const limit = throttle > 0 ? CAR_CONFIG.maxSpeed * (boosting ? CAR_CONFIG.boostSpeedFactor : 1) : CAR_CONFIG.reverseMaxSpeed;
     const engine = (throttle > 0 ? CAR_CONFIG.acceleration : CAR_CONFIG.reverseAcceleration) * (boosting ? CAR_CONFIG.boostAccelFactor : 1);
-    const taper = throttle > 0 ? CAR_CONFIG.accelTaper : 0.45;
+    const taper = throttle > 0 ? CAR_CONFIG.accelTaper : CAR_CONFIG.reverseTaper;
     car.speed += throttle * engine * Math.max(0, 1 - taper * Math.min(Math.abs(car.speed) / limit, 1) ** 2) * dt;
     coast();
   } else {
@@ -96,9 +96,15 @@ export function updateSteering(car: CarState, controls: Controls, dt: number): v
   car.steering += (steerTarget - car.steering) * (1 - Math.exp(-response * dt));
 }
 
-// No turning in place; reversing turns the other way; grip caps high-speed yaw.
+// No turning in place; reversing turns the other way; grip caps high-speed yaw. Low speeds get a floor on
+// steering so tight manoeuvres (backing out of a corner) don't need a long arc.
 export function turnRate(steer: number, speed: number, drifting = false): number {
-  const requested = steer * CAR_CONFIG.maxTurnRate * Math.min(Math.abs(speed) / CAR_CONFIG.maxSpeed, 1) * Math.sign(speed)
+  const absolute = Math.abs(speed);
+  const speedFactor = Math.max(
+    Math.min(absolute / CAR_CONFIG.maxSpeed, 1),
+    Math.min(absolute / CAR_CONFIG.lowSpeedTurnSpeed, 1) * CAR_CONFIG.lowSpeedTurnFactor,
+  );
+  const requested = steer * CAR_CONFIG.maxTurnRate * speedFactor * Math.sign(speed)
     * (drifting ? CAR_CONFIG.driftYawBoost : 1);
   const maxYaw = CAR_CONFIG.lateralGrip * (drifting ? CAR_CONFIG.driftGripBoost : 1) / Math.max(Math.abs(speed), 0.1);
   return Math.max(-maxYaw, Math.min(maxYaw, requested));
@@ -159,10 +165,11 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     && distanceToRoadNetwork(point.latitude, point.longitude) > LOOP_DRIVE.waterRoadMargin;
   if (respectWater && currentLand >= LOOP_DRIVE.waterSurfaceInfluence && isWater(movement)) {
     let dry: typeof movement | undefined;
+    let dryTurn = 0;
     for (let step = 1; step <= 12 && !dry; step++) {
       for (const side of [1, -1]) {
         const candidate = projectMovement(effectiveTravel, effectiveHalfTurn + side * step * CAR_CONFIG.shoreSlideStep);
-        if (!isWater(candidate)) { dry = candidate; break; }
+        if (!isWater(candidate)) { dry = candidate; dryTurn = side * step * CAR_CONFIG.shoreSlideStep; break; }
       }
     }
     if (!dry) {
@@ -170,6 +177,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
       car.yawRate = 0;
       return;
     }
+    if (turnTooSharp(car, dryTurn, dt)) return;
     movement = dry;
     car.speed *= 1 - CAR_CONFIG.shoreScrape * dt;
     nextLand = landInfluence(movement.latitude, movement.longitude);
@@ -204,6 +212,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
       for (const side of [1, -1]) {
         const candidate = projectMovement(effectiveTravel, effectiveHalfTurn + side * step * CAR_CONFIG.shoreSlideStep);
         if (!obstacleAt(candidate.latitude, candidate.longitude, CAR_CONFIG.collisionRadius) && !isWater(candidate)) {
+          if (turnTooSharp(car, side * step * CAR_CONFIG.shoreSlideStep, dt)) return;
           movement = candidate;
           car.speed *= 1 - CAR_CONFIG.shoreScrape * dt;
           obstacle = undefined;
@@ -214,13 +223,59 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   }
   if (obstacle) {
     obstacle.impact = Math.max(obstacle.impact ?? 0, Math.abs(car.speed));
-    if (obstacle.movable) {
-      if (!obstacle.ramCooldown) car.speed *= CAR_CONFIG.ramSpeedKeep;
-      obstacle.ramCooldown = 0.5;
-    } else {
-      car.speed *= -0.16;
-      car.yawRate = 0;
-      return;
+    car.speed *= -0.16;
+    car.yawRate = 0;
+    return;
+  }
+  // Traffic is solid too, but gets shoved: the hit car is told the impact, the player keeps most of its speed.
+  // A move that would push deeper into a car slides along it if it can, otherwise waits this step for the
+  // shoved car to clear. Moves that separate are always allowed, and any overlap is eased out.
+  const capsuleAt = (point: typeof movement) => trafficContact(point.latitude, point.longitude,
+    facingEastNorth(point.facing, point.latitude, point.longitude), CAR_CONFIG.collisionHalfLength, CAR_CONFIG.trafficRadius);
+  let contact = capsuleAt(movement);
+  if (contact && contact.gap < 0) {
+    const hit = contact.obstacle;
+    hit.impact = Math.max(hit.impact ?? 0, Math.abs(car.speed));
+    if (!hit.ramCooldown) {
+      const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
+      const kind = classifyTrafficHit(contact, facing);
+      if (kind && Math.abs(car.speed) > 3) {
+        hit.hitKind = kind;
+        reportTrafficHit({ kind, speed: Math.abs(car.speed) });
+      }
+      car.speed *= CAR_CONFIG.ramSpeedKeep;
+    }
+    hit.ramCooldown = 0.5;
+    const before = capsuleAt({ latitude: frame.latitude, longitude: car.x, facing: blend(frame.tangent, left, Math.cos(car.heading), Math.sin(car.heading)) });
+    const floor = Math.min(0, before?.gap ?? 0) - 1e-4;
+    if (contact.gap < floor) {
+      let slid = false;
+      for (let step = 1; step <= 6 && !slid; step++) {
+        for (const side of [1, -1]) {
+          const candidate = projectMovement(effectiveTravel, effectiveHalfTurn + side * step * CAR_CONFIG.shoreSlideStep);
+          const candidateContact = capsuleAt(candidate);
+          if ((candidateContact && candidateContact.gap < floor) || isWater(candidate)
+            || obstacleAt(candidate.latitude, candidate.longitude, CAR_CONFIG.collisionRadius)) continue;
+          if (turnTooSharp(car, side * step * CAR_CONFIG.shoreSlideStep, dt)) return;
+          movement = candidate;
+          contact = candidateContact;
+          slid = true;
+          break;
+        }
+      }
+      if (!slid) {
+        car.speed = toward(car.speed, 0, CAR_CONFIG.trafficHoldDecel * dt);
+        car.yawRate = 0;
+        return;
+      }
+    }
+    if (contact && contact.gap < 0) {
+      const push = -contact.gap * Math.min(1, CAR_CONFIG.trafficSeparateRate * dt);
+      movement = {
+        ...movement,
+        latitude: movement.latitude + contact.away[1] * push / GLOBE_RADIUS,
+        longitude: movement.longitude + contact.away[0] * push / (GLOBE_RADIUS * Math.max(0.2, Math.cos(movement.latitude))),
+      };
     }
   }
   car.acceleration = (car.speed - previousSpeed) / dt;
@@ -232,9 +287,31 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   const nextFrame = loopFrame(car.x, car.z);
   car.heading = Math.atan2(dot(movement.facing, cross(nextFrame.normal, nextFrame.tangent)), dot(movement.facing, nextFrame.tangent));
   if (respectWater && nextOnRoad) assistRoad(car, controls, previousZ, dt);
-  keepOnBridge(car);
+  keepOnBridge(car, dt);
   car.distance += Math.abs(effectiveTravel);
   car.wheelTravel += effectiveTravel;
+}
+
+// Back to road: puts the car on its own side of the road at the same spot, stopped and facing along the
+// road (whichever direction it was closer to facing). The globe and camera ease to the new pose.
+export function recoverToRoad(car: CarState) {
+  const side = car.z === 0 ? 1 : Math.sign(car.z);
+  car.z = side * Math.min(Math.abs(car.z), CAR_CONFIG.recoverLaneOffset);
+  car.heading = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
+  car.speed = 0;
+  car.steering = 0;
+  car.yawRate = 0;
+  car.acceleration = 0;
+  car.waterTravel = 0;
+}
+
+// A facing vector on the globe as a unit [east, north] pair at the given point.
+function facingEastNorth(facing: number[], latitude: number, longitude: number): [number, number] {
+  const east = Math.cos(longitude) * facing[0] - Math.sin(longitude) * facing[2];
+  const north = -Math.sin(latitude) * Math.sin(longitude) * facing[0] + Math.cos(latitude) * facing[1]
+    - Math.sin(latitude) * Math.cos(longitude) * facing[2];
+  const length = Math.hypot(east, north) || 1;
+  return [east / length, north / length];
 }
 
 // Hidden road assist: on the road the heading eases back toward the road direction when the
@@ -249,10 +326,22 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   car.heading = along + error * Math.exp(-rate * dt);
 }
 
+// Deflections off walls, trunks and the shore turn the car at a capped rate. If the free direction
+// needs a sharper turn than that, the car turns part of the way and scrapes instead of snapping round
+// (a snap would whip the camera, since the world turns to follow the car).
+function turnTooSharp(car: CarState, turn: number, dt: number) {
+  const allowed = CAR_CONFIG.deflectRate * dt;
+  if (Math.abs(turn) <= allowed) return false;
+  car.heading += Math.sign(turn) * allowed;
+  car.speed *= 1 - CAR_CONFIG.shoreScrape * dt;
+  car.yawRate = 0;
+  return true;
+}
+
 // The bridge railings are walls: clamp the car inside the deck and, on an angled hit,
 // turn it toward the bridge direction so it rolls across instead of sticking.
 const wrapAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-function keepOnBridge(car: CarState) {
+function keepOnBridge(car: CarState, dt: number) {
   if (Math.abs(wrapAngle(car.x - WORLD_SETTINGS.roads.bridgeLongitude)) > WORLD_SETTINGS.roads.bridgeHalfSpan) return;
   const rail = (WORLD_SETTINGS.roads.mainWidth + WORLD_SETTINGS.roads.shoulderExtra) * 0.5 - CAR_CONFIG.collisionRadius;
   // Only cars on the deck meet the railing; a car far off the road (e.g. in the water) is left alone.
@@ -260,8 +349,8 @@ function keepOnBridge(car: CarState) {
   car.z = Math.sign(car.z) * rail;
   const along = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
   const angle = wrapAngle(car.heading - along);
-  if (Math.abs(angle) > 0.05) car.speed *= 0.97;
-  car.heading = along + angle * CAR_CONFIG.bridgeStraighten;
+  if (Math.abs(angle) > 0.05) car.speed *= 1 - 2 * dt;
+  car.heading = along + angle * Math.exp(-CAR_CONFIG.bridgeStraightenRate * dt);
 }
 
 export function isBlocked(x: number, z: number): boolean {

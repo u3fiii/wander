@@ -1,0 +1,11 @@
+Model Information:
+* title:	Low Poly Well
+* source:	https://sketchfab.com/3d-models/low-poly-well-8420dd12c2b74f50b0b04cd7614774e2
+* author:	abdullahyeahyea (https://sketchfab.com/abdullahyeahyea)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Low Poly Well" (https://sketchfab.com/3d-models/low-poly-well-8420dd12c2b74f50b0b04cd7614774e2) by abdullahyeahyea (https://sketchfab.com/abdullahyeahyea) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

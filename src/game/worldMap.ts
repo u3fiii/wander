@@ -63,7 +63,34 @@ export function regionInfluence(region: RegionDefinition, latitude: number, long
   return smoothstep(edge, edge - 0.4, distance);
 }
 
+// The sea never comes closer to the road edge than this (metres), so the shoulder always has land beside it.
+const ROAD_SHORE_MARGIN = 3.6;
+// Single facets turned to water by hand: the wedge beside the bridge's south-east railing.
+const WATER_CUT: ReadonlyArray<readonly [number, number]> = [[0.300, 1.685]];
+const WATER_CUT_RADIUS = 0.03;
+
+// A water channel (lat, lon polyline) that passes under the road bridge, joining the sea on both sides.
+const BRIDGE_CHANNEL: ReadonlyArray<readonly [number, number]> = [[0.64, 1.3], [0.47, 1.45], [0.336, 1.56], [0.26, 1.85], [0.21, 2.25]];
+const BRIDGE_CHANNEL_HALF_WIDTH = 3.2;
+
+function distanceToChannel(latitude: number, longitude: number) {
+  let nearest = Infinity;
+  const cos = Math.cos(latitude);
+  for (let index = 1; index < BRIDGE_CHANNEL.length; index++) {
+    const [aLat, aLon] = BRIDGE_CHANNEL[index - 1];
+    const [bLat, bLon] = BRIDGE_CHANNEL[index];
+    const ax = wrapAngle(aLon - longitude) * cos, ay = aLat - latitude;
+    const bx = wrapAngle(bLon - longitude) * cos, by = bLat - latitude;
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / (dx * dx + dy * dy)));
+    nearest = Math.min(nearest, Math.hypot(ax + dx * t, ay + dy * t));
+  }
+  return nearest * GLOBE_RADIUS;
+}
+
 export function landInfluence(latitude: number, longitude: number) {
+  if (WATER_CUT.some(([cutLatitude, cutLongitude]) => Math.hypot(latitude - cutLatitude,
+    wrapAngle(longitude - cutLongitude) * Math.cos(latitude)) < WATER_CUT_RADIUS)) return 0;
   const [x, y, z] = sphereNormal(latitude, longitude);
   const noise = planetNoise(x, y, z);
   const region = Math.max(...REGIONS.map(candidate => regionInfluence(candidate, latitude, longitude)));
@@ -74,6 +101,13 @@ export function landInfluence(latitude: number, longitude: number) {
   const roadLand = !bridgeGap && lateralRoadDistance < WORLD_SETTINGS.roads.mainWidth * 0.5
     + WORLD_SETTINGS.roads.shoulderExtra + 1.4;
   let signal = Math.max(noise, regionalLand, roadLand ? PLANET_TERRAIN.threshold + 0.2 : 0);
+  if (signal < PLANET_TERRAIN.threshold + 0.06 && !bridgeGap && lateralRoadDistance < 14
+    && distanceToRoadNetwork(latitude, longitude) < ROAD_SHORE_MARGIN) {
+    signal = PLANET_TERRAIN.threshold + 0.2;
+  }
+  if (!roadLand && Math.abs(latitude - 0.42) < 0.4 && distanceToChannel(latitude, longitude) < BRIDGE_CHANNEL_HALF_WIDTH) {
+    signal = Math.min(signal, PLANET_TERRAIN.threshold - 0.2);
+  }
   if (bridgeGap && lateralRoadDistance < WORLD_SETTINGS.roads.mainWidth * 0.75) {
     signal = Math.min(signal, PLANET_TERRAIN.threshold - 0.2);
   }
@@ -96,6 +130,15 @@ export function roadTerrainElevation(longitude: number) {
 export function terrainElevation(latitude: number, longitude: number) {
   return naturalTerrainElevation(latitude, longitude);
 }
+
+export const MOUNTAIN_SITES = [
+  { latitude: 0.95, longitude: 4.68, scale: 4, rotation: 0.35, variant: 0 },
+  { latitude: -0.87, longitude: 1.89, scale: 4.3, rotation: 1.72, variant: 1 },
+  { latitude: 0.67, longitude: 3.96, scale: 3.4, rotation: 2.58, variant: 0 },
+  { latitude: 0.25, longitude: 5.58, scale: 3.8, rotation: 0.92, variant: 1 },
+  { latitude: -0.31, longitude: 1.98, scale: 3.2, rotation: 2.16, variant: 0 },
+  { latitude: -0.31, longitude: 5.4, scale: 3.5, rotation: 1.28, variant: 1 },
+] as const;
 
 // The land is drawn as flat icosahedron facets, so ground items must sit on the facet plane, not the sphere.
 type Facet = { normal: Vec3; offset: number; edges: [Vec3, Vec3, Vec3]; centroid: Vec3; land?: boolean };

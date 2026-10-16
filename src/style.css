@@ -102,4 +102,11 @@
 @keyframes streak-pop{0%{opacity:0;transform:translateX(-50%) scale(.6)}60%{opacity:1;transform:translateX(-50%) scale(1.12)}100%{opacity:1;transform:translateX(-50%) scale(1)}}
 .streak{position:absolute;bottom:58px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:40px;background:#173e3ce6;color:#f7efda;font-size:12px;letter-spacing:.3px;box-shadow:0 6px 20px #173e3c33;pointer-events:none;animation:streak-pop .45s cubic-bezier(.34,1.56,.64,1) both}
 .streak b{color:#f4b544;margin-left:4px}
+.hit-note{position:absolute;bottom:104px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:40px;background:#fffbef;color:#1e3a36;font-size:13px;font-weight:600;box-shadow:0 6px 20px #173e3c33;pointer-events:none;white-space:nowrap;animation:streak-pop .45s cubic-bezier(.34,1.56,.64,1) both}
+.hit-note b{margin-left:6px}
+.hit-note.side b{color:#2f8f5b}
+.hit-note.front{color:#7a2a1f}
+.hit-note.front b{color:#c0462b}
+.score-chip{color:#f7efda;font-size:12px;opacity:.85}
+.score-chip b{color:#f4b544;margin-left:2px}
 @media (prefers-reduced-motion:reduce){.streak{animation:none}}

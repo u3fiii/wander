@@ -11,9 +11,9 @@ export const PALETTE = {
   roadMarking: '#f2e6c4',
   bridgeAccent: '#e2795a',
   // Trees
-  mainTree: '#5f9e4f',
-  darkTree: '#3f7f4a',
-  lightTree: '#9cbc5a',
+  mainTree: '#86a84c',
+  darkTree: '#5f8a45',
+  lightTree: '#a8c060',
   accentTree: '#e0a948',
   trunk: '#8a6a4a',
   birchTrunk: '#f3ede0',

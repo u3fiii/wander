@@ -5,14 +5,14 @@ import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { GLOBE_RADIUS, roadLatitude, sphereNormal, spherePoint } from './globe';
-import { REGIONS, ROAD_PATHS, WORLD_SETTINGS, distanceToRoadNetwork, isLandAt, landInfluence, regionInfluence, roadPathFrame, roadPoint, roadSurfaceElevation, terrainElevation, groundNormal, terrainPoint } from './worldMap';
+import { MOUNTAIN_SITES, REGIONS, ROAD_PATHS, WORLD_SETTINGS, distanceToRoadNetwork, isLandAt, landInfluence, regionInfluence, roadPathFrame, roadPoint, roadSurfaceElevation, terrainElevation, groundNormal, terrainPoint } from './worldMap';
 import type { RoadPath } from './worldMap';
 import { clearObstacleGroup, setObstacleGroup } from './obstacles';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
 import { ART_DIRECTION } from './artDirection';
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
 import type { PaletteKey } from './palette';
-import { bakeRoles, houseRole, jitterAmount, logMaterials, paletteMaterial, planeRole, planterRole, roleMaterials, scaleRoleGeometry, textureSampler, treeRole } from './recolor';
+import { bakeRoles, houseRole, jitterAmount, logMaterials, paletteMaterial, planeRole, planterRole, roleMaterials, textureSampler, treeRole } from './recolor';
 import cityTextureUrl from '../assets/kenny city/Textures/colormap.png?url';
 import buildingAUrl from '../assets/kenny city/building-type-a.obj?url';
 import buildingCUrl from '../assets/kenny city/building-type-c.obj?url';
@@ -28,6 +28,7 @@ import japaneseGardenUrl from '../assets/japanese_bridge_garden/bridge-garden.gl
 import lowPolyTreesUrl from '../assets/low_poly_trees/trees.glb?url';
 import mountainModelUrl from '../assets/low_poly_mountain_free/mountain.glb?url';
 import ropeBridgeUrl from '../assets/old_ropebridge_low_poly/ropebridge.glb?url';
+import wellUrl from '../assets/low_poly_well/well.glb?url';
 import planeModelUrl from '../assets/low_poly_plane/plane.glb?url';
 
 const up = new THREE.Vector3(0, 1, 0);
@@ -49,14 +50,7 @@ const GARDEN_ROLES: Record<string, Record<string, PaletteKey>> = {
   lanterns: { 'Material.002': 'road', 'Material.004': 'accentTree', 'Material.006': 'mainTree' },
 };
 
-const mountainSites = [
-  { latitude: 0.95, longitude: 4.68, scale: 4, rotation: 0.35, variant: 0 },
-  { latitude: -0.87, longitude: 1.89, scale: 4.3, rotation: 1.72, variant: 1 },
-  { latitude: 0.67, longitude: 3.96, scale: 3.4, rotation: 2.58, variant: 0 },
-  { latitude: 0.25, longitude: 5.58, scale: 3.8, rotation: 0.92, variant: 1 },
-  { latitude: -0.31, longitude: 1.98, scale: 3.2, rotation: 2.16, variant: 0 },
-  { latitude: -0.31, longitude: 5.4, scale: 3.5, rotation: 1.28, variant: 1 },
-] as const;
+const mountainSites = MOUNTAIN_SITES;
 
 function distanceToMountainSites(latitude: number, longitude: number) {
   return Math.min(...mountainSites.map(site => {
@@ -545,7 +539,10 @@ function buildFacetedLand() {
   return { top, walls };
 }
 
-const TREE_TRUNK_SCALE = 0.35;
+// Stump/log models (almost no foliage) are drawn smaller so they sit in scale beside the trees.
+const STUMP_SCALE = 0.45;
+// The forest region is planted densely; the rest of the land gets the scattered trees.
+const FOREST_TREES = 110;
 const TREE_TRUNK_RADIUS = 0.45;
 
 const COAST_BEVEL = 0.35;
@@ -620,8 +617,8 @@ const cityRoleColor = (colors: CityColors) => (role: string): { key: PaletteKey;
   }
 };
 
-function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, rotation = 0, colors, planter = false }: {
-  modelUrl: string; latitude: number; longitude: number; scale?: number; rotation?: number; colors: CityColors; planter?: boolean;
+function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, colors, planter = false }: {
+  modelUrl: string; latitude: number; longitude: number; scale?: number; orientation: THREE.Quaternion; colors: CityColors; planter?: boolean;
 }) {
   const source = useLoader(OBJLoader, modelUrl);
   const texture = useLoader(THREE.TextureLoader, cityTextureUrl);
@@ -639,8 +636,7 @@ function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, rotation = 0, c
     });
     return clone;
   }, [source, texture, colors, planter]);
-  const position = useMemo(() => terrainPoint(latitude, longitude, 0.12), [latitude, longitude]);
-  const orientation = useMemo(() => frameAt(latitude, longitude).orientation, [latitude, longitude]);
+  const position = useMemo(() => terrainPoint(latitude, longitude, 0.05), [latitude, longitude]);
   useEffect(() => () => {
     model.traverse(child => {
       if (!(child instanceof THREE.Mesh)) return;
@@ -648,51 +644,111 @@ function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, rotation = 0, c
     });
   }, [model]);
   return <group position={position} quaternion={orientation}>
-    <group rotation-y={rotation}><primitive object={model} scale={scale} /></group>
+    <primitive object={model} scale={scale} />
   </group>;
 }
 
-const BUILDINGS = [
-  { modelUrl: buildingAUrl, lon: 0.34, side: 1, distance: 10.1, scale: 3.6, rotation: Math.PI },
-  { modelUrl: buildingCUrl, lon: 0.59, side: 1, distance: 10.5, scale: 3.5, rotation: Math.PI },
-  { modelUrl: buildingFUrl, lon: 0.84, side: 1, distance: 10.2, scale: 3.25, rotation: Math.PI },
-  { modelUrl: buildingHUrl, lon: 1.1, side: 1, distance: 10.1, scale: 3.7, rotation: Math.PI },
-  { modelUrl: buildingKUrl, lon: 0.36, side: -1, distance: 9.8, scale: 3.5, rotation: 0 },
-  { modelUrl: buildingNUrl, lon: 0.61, side: -1, distance: 9.7, scale: 3.1, rotation: 0 },
-  { modelUrl: buildingRUrl, lon: 0.86, side: -1, distance: 9.8, scale: 3.55, rotation: 0 },
-  { modelUrl: buildingUUrl, lon: 1.1, side: -1, distance: 9.5, scale: 3.25, rotation: 0 },
-].slice(0, WORLD_SETTINGS.regions.buildingDensity);
+// The village: houses line both sides of the road through the city region, staggered, each set back
+// from the road and turned so its front (+z) faces the street. Spots whose footprint would touch water
+// or the road are pushed back a little, and dropped if they still don't fit.
+const TOWN = {
+  fromLongitude: 0.22,
+  toLongitude: 1.28,
+  spacing: 7.6,
+  setback: 7.6,
+  setbackJitter: 0.6,
+  maxPushBack: 3,
+  yawJitter: 0.07,
+  footprint: 2.9,
+  roadGap: 1.9,
+  planterSetback: 5.4,
+};
+const HOUSE_MODELS = [
+  { modelUrl: buildingAUrl, scale: 3.6 }, { modelUrl: buildingKUrl, scale: 3.5 },
+  { modelUrl: buildingCUrl, scale: 3.5 }, { modelUrl: buildingNUrl, scale: 3.1 },
+  { modelUrl: buildingFUrl, scale: 3.25 }, { modelUrl: buildingRUrl, scale: 3.55 },
+  { modelUrl: buildingHUrl, scale: 3.7 }, { modelUrl: buildingUUrl, scale: 3.25 },
+];
 const NEIGHBOUR_DISTANCE = 9;
 
+const toLatLon = (point: THREE.Vector3) => {
+  const local = point.clone().setY(point.y + GLOBE_RADIUS);
+  return { latitude: Math.asin(THREE.MathUtils.clamp(local.y / local.length(), -1, 1)), longitude: Math.atan2(local.x, local.z) };
+};
+
+// A spot set back `distance` from the road at longitude `roadLongitude`, facing the road.
+function streetSpot(roadLongitude: number, side: number, distance: number, yaw: number) {
+  const frame = roadPathFrame(ROAD_PATHS[0], roadLongitude / turn);
+  const roadCenter = new THREE.Vector3(...frame.point);
+  const sideVector = new THREE.Vector3(...frame.side).multiplyScalar(side);
+  const { latitude, longitude } = toLatLon(roadCenter.clone().addScaledVector(sideVector, distance));
+  const normal = new THREE.Vector3(...groundNormal(latitude, longitude));
+  const forward = sideVector.clone().negate().projectOnPlane(normal).normalize().applyAxisAngle(normal, yaw);
+  const right = new THREE.Vector3().crossVectors(normal, forward);
+  const orientation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, normal, forward));
+  return { latitude, longitude, orientation };
+}
+
+function footprintFits(latitude: number, longitude: number, radius: number) {
+  for (let k = 0; k <= 8; k++) {
+    const angle = k * Math.PI / 4;
+    const reach = k === 8 ? 0 : radius / GLOBE_RADIUS;
+    const sampleLatitude = latitude + Math.sin(angle) * reach;
+    const sampleLongitude = longitude + Math.cos(angle) * reach / Math.max(0.3, Math.cos(latitude));
+    if (landInfluence(sampleLatitude, sampleLongitude) < 0.75) return false;
+    if (distanceToRoadNetwork(sampleLatitude, sampleLongitude) < TOWN.roadGap) return false;
+  }
+  return true;
+}
+
 function Town() {
-  const houses = useMemo(() => {
+  const { houses, planters } = useMemo(() => {
     const random = seededRandom(1207);
     const placed: Array<{ point: THREE.Vector3; roof: PaletteKey }> = [];
-    return BUILDINGS.map(building => {
-      const latitude = roadLatitude(building.lon, 1) + building.side * building.distance / GLOBE_RADIUS;
-      const point = new THREE.Vector3(...spherePoint(latitude, building.lon, 0));
-      const neighbourRoofs = new Set(placed.filter(other => other.point.distanceTo(point) < NEIGHBOUR_DISTANCE).map(other => other.roof));
-      const roof = weightedPick(random, ROOF_WEIGHTS, neighbourRoofs);
-      placed.push({ point, roof });
-      const colors: CityColors = {
-        roof,
-        wall: weightedPick(random, WALL_WEIGHTS),
-        bush: random() < 0.7 ? 'mainTree' : 'lightTree',
-        jitter: jitterAmount(random, JITTER.houses),
-      };
-      return { ...building, latitude, colors };
-    });
-  }, []);
-  const planters = useMemo(() => {
-    const random = seededRandom(733);
-    return [0.61, 0.86].map((longitude, index) => ({
-      longitude,
-      latitude: roadLatitude(longitude, 1) + (index ? -4.0 : 4.0) / GLOBE_RADIUS,
+    const houses: Array<{ modelUrl: string; scale: number; latitude: number; longitude: number; orientation: THREE.Quaternion; colors: CityColors }> = [];
+    const gaps: Array<{ longitude: number; side: number }> = [];
+    const step = TOWN.spacing / GLOBE_RADIUS;
+    let modelIndex = 0;
+    for (const side of [1, -1]) {
+      for (let roadLongitude = TOWN.fromLongitude + (side < 0 ? step / 2 : 0); roadLongitude <= TOWN.toLongitude; roadLongitude += step) {
+        const base = TOWN.setback + (random() * 2 - 1) * TOWN.setbackJitter;
+        const yaw = (random() * 2 - 1) * TOWN.yawJitter;
+        let spot = null;
+        for (let push = 0; push <= TOWN.maxPushBack && !spot; push += 1) {
+          const candidate = streetSpot(roadLongitude, side, base + push, yaw);
+          if (footprintFits(candidate.latitude, candidate.longitude, TOWN.footprint)) spot = candidate;
+        }
+        if (!spot) { gaps.push({ longitude: roadLongitude, side }); continue; }
+        const point = new THREE.Vector3(...spherePoint(spot.latitude, spot.longitude, 0));
+        const neighbourRoofs = new Set(placed.filter(other => other.point.distanceTo(point) < NEIGHBOUR_DISTANCE).map(other => other.roof));
+        const roof = weightedPick(random, ROOF_WEIGHTS, neighbourRoofs);
+        placed.push({ point, roof });
+        houses.push({
+          ...HOUSE_MODELS[modelIndex++ % HOUSE_MODELS.length],
+          ...spot,
+          colors: {
+            roof,
+            wall: weightedPick(random, WALL_WEIGHTS),
+            bush: random() < 0.7 ? 'mainTree' : 'lightTree',
+            jitter: jitterAmount(random, JITTER.houses),
+          },
+        });
+      }
+    }
+    // Planters sit by the road at the start and end of the street, and in any spot left without a house.
+    const planterSpots = [
+      { longitude: TOWN.fromLongitude - step * 0.6, side: 1 },
+      { longitude: TOWN.toLongitude + step * 0.2, side: -1 },
+      ...gaps,
+    ];
+    const planters = planterSpots.map(({ longitude, side }) => ({
+      ...streetSpot(longitude, side, TOWN.planterSetback, 0),
       colors: { roof: 'roofWarmBrown', wall: 'wallCream', bush: random() < 0.7 ? 'mainTree' : 'lightTree', jitter: jitterAmount(random, JITTER.houses) } as CityColors,
-    }));
+    })).filter(planter => footprintFits(planter.latitude, planter.longitude, 1));
+    return { houses, planters };
   }, []);
   useEffect(() => {
-    setObstacleGroup('houses', houses.map(house => ({ latitude: house.latitude, longitude: house.lon, radius: 3.2 })));
+    setObstacleGroup('houses', houses.map(house => ({ latitude: house.latitude, longitude: house.longitude, radius: 3.2 })));
     return () => clearObstacleGroup('houses');
   }, [houses]);
   return <>
@@ -700,18 +756,18 @@ function Town() {
       key={index}
       modelUrl={house.modelUrl}
       latitude={house.latitude}
-      longitude={house.lon}
+      longitude={house.longitude}
       scale={house.scale}
-      rotation={house.rotation}
+      orientation={house.orientation}
       colors={house.colors}
     />)}
-    {planters.map(planter => <CityAsset
-      key={`planter-${planter.longitude}`}
+    {planters.map((planter, index) => <CityAsset
+      key={`planter-${index}`}
       modelUrl={planterUrl}
       latitude={planter.latitude}
       longitude={planter.longitude}
       scale={3.2}
-      rotation={planter.longitude}
+      orientation={planter.orientation}
       colors={planter.colors}
       planter
     />)}
@@ -729,12 +785,16 @@ function LowPolyTrees() {
       const tree = original.clone(true);
       tree.matrix.copy(original.matrixWorld);
       tree.matrix.decompose(tree.position, tree.quaternion, tree.scale);
+      let leafFaces = 0, allFaces = 0;
       tree.traverse(child => {
         if (!(child instanceof THREE.Mesh)) return;
         const map = (Array.isArray(child.material) ? child.material[0] : child.material as THREE.MeshStandardMaterial).map;
         const baked = bakeRoles(child.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.mainTree), treeRole);
         child.geometry = baked.geometry;
-        scaleRoleGeometry(child.geometry, baked.roles, 'trunk', TREE_TRUNK_SCALE);
+        baked.geometry.groups.forEach(group => {
+          allFaces += group.count;
+          if (baked.roles[group.materialIndex!].startsWith('leaves')) leafFaces += group.count;
+        });
         child.userData.roles = baked.roles;
         child.castShadow = true;
         child.receiveShadow = true;
@@ -752,6 +812,7 @@ function LowPolyTrees() {
       const size = bounds.getSize(new THREE.Vector3());
       normalized.userData.conifer = height / Math.max(size.x, size.z) > 2;
       normalized.userData.bush = height / Math.max(size.x, size.z) < 1.15;
+      normalized.userData.stump = leafFaces / Math.max(allFaces, 1) < 0.15;
       return normalized;
     });
   }, [gltf.scene]);
@@ -794,6 +855,7 @@ function LowPolyTrees() {
       ));
       if (landInfluence(latitude, longitude) < 0.8 || distanceToRoadNetwork(latitude, longitude) < 6.4) continue;
       if (distanceToMountainSites(latitude, longitude) < 5.5) continue;
+      if (Math.hypot(latitude - WELL.latitude, (longitude - WELL.longitude) * Math.cos(latitude)) * GLOBE_RADIUS < 3) continue;
       if (regionInfluence(forest, latitude, longitude) > 0.28) continue;
       if (regionInfluence(city, latitude, longitude) > 0.72) continue;
       items.push({
@@ -803,12 +865,11 @@ function LowPolyTrees() {
         position: terrainPoint(latitude, longitude, 0.035),
         orientation: frameAt(latitude, longitude).orientation,
         rotation: (index * 1.731) % turn,
-        scale: 2.4 + ((index * 37) % 23) / 23 * 1.7,
+        scale: (2.4 + ((index * 37) % 23) / 23 * 1.7) * (templates[(index * 5 + 2) % templates.length].userData.stump ? STUMP_SCALE : 1),
       });
     }
     let forestTrees = 0;
-    for (let index = 0; index < WORLD_SETTINGS.regions.treeDensity * 8
-      && forestTrees < WORLD_SETTINGS.regions.treeDensity; index++) {
+    for (let index = 0; index < FOREST_TREES * 8 && forestTrees < FOREST_TREES; index++) {
       const angle = (index + 3) * 2.399963;
       const radius = 0.14 + ((index * 43 + 19) % 101) / 101 * 0.68;
       const latitude = forest.latitude + Math.sin(angle) * radius * forest.latitudeRadius;
@@ -823,7 +884,7 @@ function LowPolyTrees() {
         position: terrainPoint(latitude, longitude, 0.035),
         orientation: frameAt(latitude, longitude).orientation,
         rotation: (angle * 1.31) % turn,
-        scale: 2.4 + ((index * 31) % 17) / 17 * 1.7,
+        scale: (2.4 + ((index * 31) % 17) / 17 * 1.7) * (templates[(index * 5 + 2) % templates.length].userData.stump ? STUMP_SCALE : 1),
       });
       forestTrees++;
     }
@@ -847,7 +908,9 @@ function LowPolyTrees() {
 }
 
 // Spans a narrow strait away from the road; ends sit on the land on both shores.
-const ROPE_BRIDGE = { from: [-0.465, 1.253], to: [-0.3898, 1.0005] } as const;
+// Spans the strait between the northern peninsula and the eastern shore, in plain view from the intro camera.
+// Long spans stretch the model lengthwise only, so the posts and deck keep their natural size.
+const ROPE_BRIDGE = { from: [0.75, 5.023], to: [0.495, 5.352], naturalLength: 7.5 } as const;
 
 function RopeBridge() {
   const gltf = useLoader(GLTFLoader, ropeBridgeUrl);
@@ -874,15 +937,61 @@ function RopeBridge() {
     const center = bounds.getCenter(new THREE.Vector3());
     // The model spans +x with its posts' feet at the bottom of its bounds; sink them slightly.
     model.position.set(-center.x, -bounds.min.y - 0.12, -center.z);
+    const lengthScale = start.distanceTo(end) / (bounds.max.x - bounds.min.x);
+    const crossScale = Math.min(lengthScale, ROPE_BRIDGE.naturalLength / (bounds.max.x - bounds.min.x));
     return {
       model,
       position: middle.toArray() as [number, number, number],
       orientation: new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(along, upward, side)),
-      scale: start.distanceTo(end) / (bounds.max.x - bounds.min.x),
+      scale: [lengthScale, crossScale, crossScale] as [number, number, number],
     };
   }, [gltf.scene]);
   return <group position={placement.position} quaternion={placement.orientation} scale={placement.scale}>
     <primitive object={placement.model} />
+  </group>;
+}
+
+// A stone well in the open meadow of the northern peninsula; solid like the houses.
+const WELL = { latitude: 1.15, longitude: 3.9, height: 2.1, rotation: 0.6, radius: 1.1 } as const;
+const wellRoleColor = (name: string): PaletteKey => {
+  if (name.startsWith('plane')) return 'roofAccent';
+  if (name.startsWith('stone')) return 'roadShoulder';
+  if (name === 'water' || name.startsWith('blue')) return 'oceanDeep';
+  if (name.startsWith('grey')) return 'roadShoulder';
+  if (name.startsWith('dark')) return 'tires';
+  if (name === 'wood2' || name === 'Material.001') return 'doorsTrim';
+  return 'trunk';
+};
+
+function Well() {
+  const gltf = useLoader(GLTFLoader, wellUrl);
+  const placement = useMemo(() => {
+    const model = gltf.scene.clone(true);
+    logMaterials('well', model);
+    model.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const name = (child.material as THREE.Material).name;
+      child.material = paletteMaterial(wellRoleColor(name), { jitter: name === 'wood3' ? 0.04 : name === 'plane2' ? -0.06 : 0 });
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    model.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(model);
+    const center = bounds.getCenter(new THREE.Vector3());
+    model.position.set(-center.x, -bounds.min.y, -center.z);
+    return {
+      model,
+      position: terrainPoint(WELL.latitude, WELL.longitude, -0.02),
+      orientation: frameAt(WELL.latitude, WELL.longitude).orientation,
+      scale: WELL.height / (bounds.max.y - bounds.min.y),
+    };
+  }, [gltf.scene]);
+  useEffect(() => {
+    setObstacleGroup('well', [{ latitude: WELL.latitude, longitude: WELL.longitude, radius: WELL.radius }]);
+    return () => clearObstacleGroup('well');
+  }, []);
+  return <group position={placement.position} quaternion={placement.orientation}>
+    <group rotation-y={WELL.rotation} scale={placement.scale}><primitive object={placement.model} /></group>
   </group>;
 }
 
@@ -971,6 +1080,37 @@ function Airplane() {
   return <group ref={group}><primitive object={plane.model} scale={plane.scale} /></group>;
 }
 
+// Mountains are wide enough that a flat base floats over the curved globe at its edges: each copy's
+// vertices are dropped by the sphere's fall-off at their distance from the centre, then sunk a touch
+// more so the base also clears the flat land facets.
+const MOUNTAIN_SINK = 0.35;
+
+function bendToGlobe(template: THREE.Object3D, rotation: number, scale: number) {
+  const wrapper = new THREE.Group();
+  wrapper.rotation.y = rotation;
+  wrapper.scale.setScalar(scale);
+  wrapper.add(template.clone(true));
+  wrapper.updateMatrixWorld(true);
+  const radius = GLOBE_RADIUS + PLANET_TERRAIN.landHeight;
+  const vertex = new THREE.Vector3();
+  const inverse = new THREE.Matrix4();
+  wrapper.traverse(child => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.geometry = child.geometry.clone();
+    const position = child.geometry.getAttribute('position') as THREE.BufferAttribute;
+    inverse.copy(child.matrixWorld).invert();
+    for (let i = 0; i < position.count; i++) {
+      vertex.fromBufferAttribute(position, i).applyMatrix4(child.matrixWorld);
+      const reach = Math.min(Math.hypot(vertex.x, vertex.z), radius * 0.9);
+      vertex.y -= radius - Math.sqrt(radius * radius - reach * reach);
+      vertex.applyMatrix4(inverse);
+      position.setXYZ(i, vertex.x, vertex.y, vertex.z);
+    }
+    child.geometry.computeVertexNormals();
+  });
+  return wrapper;
+}
+
 function LowPolyMountains() {
   const gltf = useLoader(GLTFLoader, mountainModelUrl);
   const templates = useMemo(() => {
@@ -1017,8 +1157,8 @@ function LowPolyMountains() {
     .slice(0, WORLD_SETTINGS.regions.mountainDensity)
     .map((site, index) => ({
       ...site,
-      object: templates[site.variant].clone(true),
-      position: terrainPoint(site.latitude, site.longitude, -0.07 * site.scale),
+      object: bendToGlobe(templates[site.variant], site.rotation, site.scale),
+      position: terrainPoint(site.latitude, site.longitude, -MOUNTAIN_SINK),
       orientation: frameAt(site.latitude, site.longitude).orientation,
       key: `mountain-${index}`,
     })), [templates]);
@@ -1036,9 +1176,7 @@ function LowPolyMountains() {
     position={mountain.position}
     quaternion={mountain.orientation}
   >
-    <group rotation-y={mountain.rotation} scale={mountain.scale}>
-      <primitive object={mountain.object} />
-    </group>
+    <primitive object={mountain.object} />
   </group>)}</>;
 }
 
@@ -1145,7 +1283,7 @@ export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
     <Terrain />
     <JapaneseBridgeGarden />
     <LoopRoad />
-    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Airplane />
+    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><Airplane />
     <CloudLayer zoom={zoom} />
   </group>;
 }

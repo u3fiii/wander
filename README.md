@@ -70,4 +70,6 @@ The plane uses [Low Poly Plane](https://sketchfab.com/3d-models/low-poly-plane-7
 
 The rope bridge uses [old ropebridge low poly](https://sketchfab.com/3d-models/old-ropebridge-low-poly-6e88260f326b488a92778b9ef43fdd67) by [lucq22](https://sketchfab.com/lucq22), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/old_ropebridge_low_poly`.
 
+The well uses [Low Poly Well](https://sketchfab.com/3d-models/low-poly-well-8420dd12c2b74f50b0b04cd7614774e2) by [abdullahyeahyea](https://sketchfab.com/abdullahyeahyea), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_well`.
+
 The player vehicle uses [Low Poly Car](https://sketchfab.com/3d-models/low-poly-car-ffcf987149df4e528ebf1e2dec6a9f8a) by [ion_omat](https://sketchfab.com/ion_omat), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_car`.
