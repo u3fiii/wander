@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyControls, initialCar, initialLoopCar, isBlocked, stepCar, stepLoopCar } from './driving.ts';
+import { emptyControls, initialCar, initialLoopCar, isBlocked, onRoadSurface, stepCar, stepLoopCar } from './driving.ts';
 import type { CarState, Controls } from './driving.ts';
 import { CAR_CONFIG, LOOP_DRIVE } from './config.ts';
 import { FULL_TURN, GLOBE_RADIUS, LOOP_LENGTH, loopFrame, loopLatitude, loopPoint } from './globe.ts';
-import { distanceToRoadNetwork, landInfluence } from './worldMap.ts';
+import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
 
 function drive(car: CarState, input: Partial<Controls>, seconds: number, fps = 60) {
   for (let i = 0; i < Math.round(seconds * fps); i++) stepLoopCar(car, { ...emptyControls(), ...input }, 1 / fps);
@@ -190,11 +190,32 @@ test('the car cannot drive into water: it is turned along the shore and can stil
   for (let index = 0; index < 240; index++) {
     stepLoopCar(car, { ...emptyControls(), forward: true }, 1 / 60, true);
     const frame = loopFrame(car.x, car.z);
-    const onRoad = distanceToRoadNetwork(frame.latitude, car.x) <= LOOP_DRIVE.waterRoadMargin;
+    const onRoad = onRoadSurface(frame.latitude, car.x);
     assert.ok(onRoad || landInfluence(frame.latitude, car.x) >= LOOP_DRIVE.waterSurfaceInfluence, 'the car entered the water');
   }
   const before = car.distance;
   for (let index = 0; index < 60; index++) stepLoopCar(car, { ...emptyControls(), back: true }, 1 / 60, true);
   assert.ok(car.distance > before, 'reversing away from the shore should move the car');
   assert.ok(Object.values(car).every(Number.isFinite));
+});
+
+test('the bridge deck is drivable out to its railings, and the railings hold the car in', () => {
+  const bridge = WORLD_SETTINGS.roads.bridgeLongitude;
+  const railing = (WORLD_SETTINGS.roads.mainWidth + WORLD_SETTINGS.roads.shoulderExtra) * 0.5;
+  const scaleAt = (longitude: number) => {
+    const step = 1e-3;
+    const slope = (loopLatitude(longitude + step) - loopLatitude(longitude - step)) / (2 * step) / Math.cos(loopLatitude(longitude));
+    return 1 / Math.sqrt(1 + slope * slope);
+  };
+  for (const [lateral, heading] of [[2.6, 0], [-2.6, 0], [1, 0.35], [-1, -0.35]]) {
+    const start = bridge - 0.2;
+    const car = { ...initialLoopCar(), x: start, z: lateral / scaleAt(start), heading, speed: 10 };
+    let worst = 0;
+    for (let index = 0; index < 180 && car.x < bridge + 0.2; index++) {
+      stepLoopCar(car, { ...emptyControls(), forward: true }, 1 / 60, true);
+      if (Math.abs(car.x - bridge) < WORLD_SETTINGS.roads.bridgeDeckHalfSpan) worst = Math.max(worst, Math.abs(car.z) * scaleAt(car.x));
+    }
+    assert.ok(car.x > bridge + 0.12, `the car crossed the bridge (lateral ${lateral}, heading ${heading})`);
+    assert.ok(worst <= railing - CAR_CONFIG.trafficRadius + 0.05, `stayed inside the railings (reached ${worst.toFixed(2)} m)`);
+  }
 });

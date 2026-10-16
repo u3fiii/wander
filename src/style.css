@@ -25,7 +25,7 @@
 }
 
 /* sky-gradient */
-.scene{background:radial-gradient(circle at 18% 8%,rgba(241,253,246,.96) 0,rgba(214,248,247,.62) 13%,rgba(214,248,247,0) 31%),linear-gradient(180deg,#72cef0 0%,#a6e4f2 52%,#e6f7f3 100%)}
+.scene{background:radial-gradient(ellipse 40% 19% at var(--boost-light-x,50%) 25%,color-mix(in srgb,var(--boost-pink,transparent) var(--boost-pink-strength,0%),transparent) 0,transparent 100%),radial-gradient(ellipse 100% 55% at 50% 0%,color-mix(in srgb,var(--boost-violet,transparent) var(--boost-violet-strength,0%),transparent) 0,transparent 100%),radial-gradient(circle at 18% 8%,rgba(241,253,246,.96) 0,rgba(214,248,247,.62) 13%,rgba(214,248,247,0) 31%),linear-gradient(180deg,#72cef0 0%,#a6e4f2 52%,#e6f7f3 100%)}
 /* Night sky cross-fades over the day sky instead of switching. */
 .scene::before{content:'';position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1.6s ease;background:radial-gradient(circle at 76% 17%,rgba(191,213,237,.2) 0,rgba(191,213,237,0) 18%),linear-gradient(180deg,#07162d 0%,#173754 56%,#77726f 100%)}
 .night .scene::before{opacity:1}
@@ -102,11 +102,47 @@
 @keyframes streak-pop{0%{opacity:0;transform:translateX(-50%) scale(.6)}60%{opacity:1;transform:translateX(-50%) scale(1.12)}100%{opacity:1;transform:translateX(-50%) scale(1)}}
 .streak{position:absolute;bottom:58px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:40px;background:#173e3ce6;color:#f7efda;font-size:12px;letter-spacing:.3px;box-shadow:0 6px 20px #173e3c33;pointer-events:none;animation:streak-pop .45s cubic-bezier(.34,1.56,.64,1) both}
 .streak b{color:#f4b544;margin-left:4px}
-.hit-note{position:absolute;bottom:104px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:40px;background:#fffbef;color:#1e3a36;font-size:13px;font-weight:600;box-shadow:0 6px 20px #173e3c33;pointer-events:none;white-space:nowrap;animation:streak-pop .45s cubic-bezier(.34,1.56,.64,1) both}
-.hit-note b{margin-left:6px}
-.hit-note.side b{color:#2f8f5b}
-.hit-note.front{color:#7a2a1f}
-.hit-note.front b{color:#c0462b}
+/* Hit notes: green pill for a side clip, red for a head-on hit. They rise in softly, the points pop a beat
+   later, and the pill drifts up and fades before it is removed (shown for 2.2 s). */
+.hit-note{position:absolute;bottom:104px;left:50%;display:flex;align-items:center;gap:8px;padding:8px 14px 8px 16px;border-radius:40px;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;pointer-events:none;white-space:nowrap;transform:translateX(-50%);animation:hit-note-in .42s cubic-bezier(.2,.9,.3,1.15) both,hit-note-out .4s ease-in 1.8s forwards}
+.hit-note b{padding:2px 8px;border-radius:20px;background:#ffffff2e;font-weight:700;animation:hit-points-pop .5s cubic-bezier(.3,1.6,.5,1) .12s both}
+.hit-note.side{background:#2f9a62;box-shadow:0 6px 22px #2f9a6255,inset 0 1px 0 #ffffff33}
+.hit-note.front{background:#c94a33;box-shadow:0 6px 22px #c94a3355,inset 0 1px 0 #ffffff33}
+.hit-note.front{animation:hit-note-in .42s cubic-bezier(.2,.9,.3,1.15) both,hit-note-shake .36s ease-in-out .38s,hit-note-out .4s ease-in 1.8s forwards}
+@keyframes hit-note-in{0%{opacity:0;transform:translate(-50%,10px) scale(.94)}100%{opacity:1;transform:translate(-50%,0) scale(1)}}
+@keyframes hit-note-out{to{opacity:0;transform:translate(-50%,-10px) scale(.98)}}
+@keyframes hit-points-pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes hit-note-shake{0%,100%{transform:translate(-50%,0)}25%{transform:translate(calc(-50% - 3px),0)}75%{transform:translate(calc(-50% + 3px),0)}}
+@media (prefers-reduced-motion:reduce){.hit-note,.hit-note.front,.hit-note b{animation:none}}
 .score-chip{color:#f7efda;font-size:12px;opacity:.85}
 .score-chip b{color:#f4b544;margin-left:2px}
 @media (prefers-reduced-motion:reduce){.streak{animation:none}}
+
+/* Night sky */
+.night-sky{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1.6s ease;overflow:hidden}
+.night .night-sky{opacity:1}
+.stars{position:absolute;left:0;top:0;width:1px;height:1px;border-radius:50%;animation:star-twinkle 4.5s ease-in-out infinite}
+.stars-1{animation-duration:6.5s;animation-delay:-2s}
+.stars-2{animation-duration:3.2s;animation-delay:-1s;filter:drop-shadow(0 0 3px #fff6dd)}
+@keyframes star-twinkle{0%,100%{opacity:1}50%{opacity:.45}}
+.aurora{position:absolute;left:-10%;right:-10%;top:-6%;height:58%;filter:blur(38px);opacity:.42;mix-blend-mode:screen}
+.aurora span{position:absolute;left:0;right:0;height:38%;border-radius:50%;animation:aurora-drift 18s ease-in-out infinite alternate}
+.aurora span:nth-child(1){top:12%;background:linear-gradient(90deg,transparent 5%,#43d6a4 30%,#6fe0c4 52%,transparent 80%)}
+.aurora span:nth-child(2){top:28%;background:linear-gradient(90deg,transparent 18%,#3fb7c8 42%,#7c8ff0 66%,transparent 92%);animation-duration:24s;animation-delay:-7s}
+.aurora span:nth-child(3){top:4%;background:linear-gradient(90deg,transparent 40%,#a17be6 62%,transparent 88%);animation-duration:30s;animation-delay:-13s;opacity:.7}
+@keyframes aurora-drift{0%{transform:translateX(-6%) rotate(-6deg) scaleY(.85)}50%{transform:translateX(3%) rotate(-2deg) scaleY(1.15)}100%{transform:translateX(7%) rotate(3deg) scaleY(.9)}}
+@media (prefers-reduced-motion:reduce){.stars,.aurora span{animation:none}}
+
+/* Boost: a light warm grade over the scene, a touch stronger toward the edges, easing in and out. */
+.boost-tint{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .45s ease;mix-blend-mode:soft-light;background:radial-gradient(ellipse at 50% 55%,#ffb46a55 0%,#ff8a3d88 70%,#ff6a2aa8 100%)}
+.boost-tint.on{opacity:.55;transition-duration:.25s}
+
+/* Night intro: text and button switch to the moonlit palette (cream on the dark sky, a light pill button). */
+.night .intro-card h1,.night .intro-card h1 .ch{color:#f4ecd4}
+.night .intro-card p,.night .intro-card .eyebrow,.night .intro-controls,.night .intro-caption{color:#c9d2df}
+.night .intro-card kbd{color:#2a3a4a;background:#e9e4d4e6;border-color:#c9c3b080}
+.night .start-button{background:#f4ecd4;border-color:#f4ecd4;color:#14223a;box-shadow:0 8px 28px #0006,0 0 32px #f4ecd422}
+.night .start-button svg{color:#14223a}
+.intro-card h1,.intro-card h1 .ch,.intro-card p,.intro-card .eyebrow,.intro-controls,.intro-caption,.intro-card kbd{transition:color 1.2s ease,background-color 1.2s ease,border-color 1.2s ease}
+
+

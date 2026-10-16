@@ -1,0 +1,11 @@
+Model Information:
+* title:	Float Low Poly
+* source:	https://sketchfab.com/3d-models/float-low-poly-0002d6c3b5414b85a18a38cdf7419696
+* author:	NonConnecte (https://sketchfab.com/NonConnecte)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Float Low Poly" (https://sketchfab.com/3d-models/float-low-poly-0002d6c3b5414b85a18a38cdf7419696) by NonConnecte (https://sketchfab.com/NonConnecte) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

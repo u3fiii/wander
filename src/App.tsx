@@ -35,6 +35,22 @@ function Help({ close }: { close: () => void }) {
   </section></div>;
 }
 
+// Night sky behind the globe: twinkling stars and a slow aurora (the moon is 3D, in the scene). Fades in with night mode.
+const STAR_LAYERS = [0, 1, 2].map(layer => {
+  let seed = 7 + layer * 131;
+  const random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  return Array.from({ length: [70, 40, 18][layer] }, () => {
+    const x = (random() * 100).toFixed(2), y = (random() * 72).toFixed(2);
+    return `${x}vw ${y}vh 0 ${[0, 0.4, 0.8][layer]}px rgba(255,248,230,${(0.55 + random() * 0.45).toFixed(2)})`;
+  }).join(',');
+});
+function NightSky() {
+  return <div className="night-sky" aria-hidden="true">
+    <div className="aurora"><span /><span /><span /></div>
+    {STAR_LAYERS.map((shadow, layer) => <i key={layer} className={`stars stars-${layer}`} style={{ boxShadow: shadow }} />)}
+  </div>;
+}
+
 export default function App() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -60,13 +76,17 @@ export default function App() {
     side: ['Nice flick!', 'Clean sideswipe!', 'Pinball pro!', 'Smooth knock!'],
     front: ['Ouch, our condolences.', 'Rough head-on hit.', 'Sorry for your loss.', 'Oof, that one hurt.'],
   };
+  // A negative hit tints the frame red for the length of the crash cut-in (restarted on every new crash).
+
+  // Under boost every hit is a win: the car is a bulldozer, so no condolences, only awe (and bonus points).
+  const boostMessages = ['Who even are you?!', 'Absolute unit!', 'Out of my way!', 'Unstoppable!', 'Bulldozer mode!', 'Way too strong!'];
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
     const magnitude = Math.round(hit.speed * 2) + 5;
-    const points = hit.kind === 'side' ? magnitude : -magnitude;
+    const points = hit.boosted ? Math.round(magnitude * 1.5) : hit.kind === 'side' ? magnitude : -magnitude;
     const count = hitCount.current++;
-    const messages = hitMessages[hit.kind];
+    const messages = hit.boosted ? boostMessages : hitMessages[hit.kind];
     setScore(total => total + points);
-    setHitNote({ id: count, kind: hit.kind, points, text: messages[count % messages.length] });
+    setHitNote({ id: count, kind: hit.boosted ? 'side' : hit.kind, points, text: messages[count % messages.length] });
     window.clearTimeout(hitTimer.current);
     hitTimer.current = window.setTimeout(() => setHitNote(null), 2200);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -222,7 +242,7 @@ export default function App() {
     onLostPointerCapture: () => { controls.current[key] = false; },
   });
   return <main className={`app scale-study ${night ? 'night' : ''} ${started ? 'playing' : 'intro'} ${ready ? 'ready' : ''}`}>
-    <div className="scene"><SceneBoundary><Scene started={started} paused={paused || help} night={night} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} /></SceneBoundary></div>
+    <div className="scene"><NightSky /><SceneBoundary><Scene started={started} paused={paused || help} night={night} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className="topbar">
       <a href="#" className="brand" aria-label="Wander, home" onClick={e => { e.preventDefault(); setStarted(false); setPaused(false); reset(); }}>

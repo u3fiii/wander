@@ -14,6 +14,9 @@ import { clearObstacleGroup, drainTrafficHits, setObstacleGroup } from './obstac
 import type { Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
 import MiniatureWorld from './MiniatureWorld';
+import IntroDepthOfField from './IntroDepthOfField';
+import { cinematicState } from './cinematic';
+import { nightState } from './nightState';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
@@ -31,7 +34,7 @@ import deliveryModelUrl from '../assets/kenny cars/delivery.obj?url';
 // Atmosphere tunables. Distances are in world units; colors come from PALETTE.
 const ATMOSPHERE = {
   fog: { nearFactor: 0.04, farFactor: 1.0, damping: 4 },
-  glow: { radius: 1.15, intensity: 0.6, power: 1.6, drivingFade: 0.45 },
+  glow: { radius: 1.3, intensity: 0.48, power: 1.35, drivingFade: 0.45, nightIntensity: 0.2, nightPower: 3 },
   light: { hemisphereIntensity: 1.1, sunIntensity: 2.0, sunColor: PALETTE.sunWarm, shadowRadius: 4, rimIntensity: 0.2 },
   post: {
     exposure: 1.05,
@@ -192,13 +195,16 @@ function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
 const NIGHT_FADE_RATE = 2.2;
 
 // Head and tail lamps that glow at night (additive cores + soft halos), faded by the night blend.
+// Night lights are warm and soft everywhere: amber headlamps and beams, like the street lamps and windows.
+const WARM_LIGHT = { headlamp: '#ffd9a0', headlampHalo: '#ffb870', beam: '#ffcf8f' };
+
 function CarLamps({ blend, halfWidth, front, rear, height }: {
   blend: React.RefObject<number>; halfWidth: number; front: number; rear: number; height: number;
 }) {
   const geometry = useMemo(() => new THREE.SphereGeometry(1, 10, 8), []);
   const materials = useMemo(() => {
     const glow = (hex: string) => new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-    return { head: glow(PALETTE.roadMarking), headHalo: glow(PALETTE.roadMarking), tail: glow(PALETTE.carRed), tailHalo: glow(PALETTE.carRed) };
+    return { head: glow(WARM_LIGHT.headlamp), headHalo: glow(WARM_LIGHT.headlampHalo), tail: glow(PALETTE.carRed), tailHalo: glow(PALETTE.carRed) };
   }, []);
   useEffect(() => () => { geometry.dispose(); Object.values(materials).forEach(material => material.dispose()); }, [geometry, materials]);
   useFrame(() => {
@@ -225,7 +231,7 @@ function HeadlightBeam({ blend }: { blend: React.RefObject<number> }) {
   useEffect(() => { spot.current.target = target; }, [target]);
   useFrame(() => { spot.current.intensity = blend.current * 80; });
   return <>
-    <spotLight ref={spot} color={PALETTE.roadMarking} position={[0, 0.7, -1.3]} angle={0.55} penumbra={0.6} distance={26} decay={1.5} intensity={0} />
+    <spotLight ref={spot} color={WARM_LIGHT.beam} position={[0, 0.7, -1.3]} angle={0.58} penumbra={0.85} distance={26} decay={1.6} intensity={0} />
     <primitive object={target} position={[0, 0, -10]} />
   </>;
 }
@@ -301,14 +307,39 @@ const NPC = {
   pushTransfer: 0.75, spinTransfer: 0.2, maxPush: 9, shoveForward: 0.7, hitCooldown: 0.4,
   laneReturn: 2.2, pushDamping: 3.2, spinStiffness: 14, spinDamping: 3.2,
 };
-// A clip from the side is the good kind of crash, so it gets a show: the struck car is thrown harder,
-// time slows for a beat, and the camera pulls back with a shake. A head-on hit only gets a jolt.
+// Positive side hits throw the struck traffic car aside without interrupting the player.
 const SIDE_HIT = {
-  fling: 1.8, hop: 1.5, roll: 1.4,
-  slowMoScale: 0.3, slowMoHold: 0.15, slowMoRamp: 0.45,
-  dolly: 4, dollyDecay: 2.5, fovKick: 7, shake: 0.55,
-  frontShake: 0.35,
+  fling: 1.15, hop: 0.65, roll: 0.65,
+  maxLateralVelocity: 3.4, maxSpinVelocity: 1.5,
 };
+// A car hit by a boosting player is shoved clear of the lane, whatever the angle.
+const BOOST_HIT = { fling: 1.6, minLateralVelocity: 5, maxLateralVelocity: 8, hop: 1.2 };
+// Negative hits (nose or tail into traffic) get a clean cinematic cut-in, all on real time: the camera snaps
+// in toward the crash on an extreme ease-out, holds while time crawls, then glides back. The aim swings onto
+// the crash, the lens tightens, the frame tilts a touch, and the depth of field locks on (see cinematic.ts).
+const CRASH_CAM = {
+  duration: 1.7, snap: 0.24, hold: 0.85,
+  push: 0.5, lookPull: 0.7, fovPunch: 9, dutch: 0.06, slowScale: 0.18, shake: 0.35,
+  // Seconds after a cut-in ends before another can start.
+  rest: 1.5,
+};
+const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+const crashEnvelope = (time: number) => {
+  if (time < 0 || time > CRASH_CAM.duration) return 0;
+  if (time < CRASH_CAM.snap) return easeOutExpo(time / CRASH_CAM.snap);
+  if (time < CRASH_CAM.hold) return 1;
+  return 1 - easeInOutCubic((time - CRASH_CAM.hold) / (CRASH_CAM.duration - CRASH_CAM.hold));
+};
+// Positive side hits get their own camera beat that never touches the car's motion: a quick dutch tilt that
+// wobbles back, a glance toward the car being thrown, and a little FOV kick. All on real time.
+const SIDE_HIT_CAMERA = {
+  dutchKick: 1.1, dutchStiffness: 55, dutchDamping: 6.5, maxDutch: 0.09,
+  swing: 2.2, swingDecay: 2.6, fovKick: 5, shake: 0.18,
+};
+// Holding a boost: the camera eases up and back (on a smooth in-out curve) and stays there for the whole burst,
+// with a fine hum and a quick nodding tilt, as if the car is shaking with rage and power (the depth of field and
+// warm grade are handled elsewhere).
+const BOOST_FEEL = { pullBack: 5.2, rise: 3.2, attack: 2.2, release: 1.6, vibration: 0.035, tilt: 0.0045, tiltRate: 72, tiltFine: 0.002, tiltFineRate: 121 };
 // Shared game-time scale (slow motion); traffic reads it so the whole world slows together.
 const gameTime = { scale: 1 };
 
@@ -385,19 +416,35 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     m.cooldown = Math.max(0, m.cooldown - dt);
     obstacle.ramCooldown = Math.max(0, (obstacle.ramCooldown ?? 0) - dt);
     if (obstacle.impact && m.cooldown === 0) {
-      const side = obstacle.hitKind === 'side';
+      const boosted = !!obstacle.boostHit;
+      const side = obstacle.hitKind === 'side' && !boosted;
+      const front = obstacle.hitKind === 'front' && !boosted;
       obstacle.hitKind = undefined;
-      const fling = side ? SIDE_HIT.fling : 1;
+      obstacle.boostHit = false;
+      const fling = boosted ? BOOST_HIT.fling : side ? SIDE_HIT.fling : 1;
       const away = lateral > 0 ? -1 : 1;
       const sideways = Math.min(1, Math.abs(lateral) / NPC.laneHalfWidth);
       m.pushVelocity += away * obstacle.impact * NPC.pushTransfer * Math.max(sideways, 0.35) * fling;
       m.spinVelocity += away * obstacle.impact * NPC.spinTransfer * fling;
-      // A hit from behind shoves the car forward; a hit from the front stops it dead.
-      m.speed = ahead < 0 ? m.speed + obstacle.impact * NPC.shoveForward * (1 - sideways) : m.speed * 0.3;
+      if (side) {
+        // Cap the initial shove so high-speed overlaps read as a firm nudge, not a launch.
+        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -SIDE_HIT.maxLateralVelocity, SIDE_HIT.maxLateralVelocity);
+        m.spinVelocity = THREE.MathUtils.clamp(m.spinVelocity, -SIDE_HIT.maxSpinVelocity, SIDE_HIT.maxSpinVelocity);
+      }
+      if (front) {
+        // A frontal hit should clear the lane without stopping either car abruptly.
+        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -4.4, 4.4);
+      }
+      if (boosted) {
+        const direction = m.pushVelocity === 0 ? away : Math.sign(m.pushVelocity);
+        m.pushVelocity = direction * THREE.MathUtils.clamp(Math.abs(m.pushVelocity), BOOST_HIT.minLateralVelocity, BOOST_HIT.maxLateralVelocity);
+      }
+      // A rear hit shoves the car forward; a frontal hit slows it while steering it clear.
+      m.speed = ahead < 0 ? m.speed + obstacle.impact * NPC.shoveForward * (1 - sideways) : m.speed * (front ? 0.72 : 0.3);
       m.cooldown = NPC.hitCooldown;
       const strength = THREE.MathUtils.clamp(obstacle.impact / NPC_HIT.strengthSpeed, 0, 1);
       const h = hit.current;
-      h.hopVelocity = Math.max(h.hopVelocity, THREE.MathUtils.lerp(NPC_HIT.hopMin, NPC_HIT.hopMax, strength) * (side ? SIDE_HIT.hop : 1));
+      h.hopVelocity = Math.max(h.hopVelocity, THREE.MathUtils.lerp(NPC_HIT.hopMin, NPC_HIT.hopMax, strength) * (boosted ? BOOST_HIT.hop : side ? SIDE_HIT.hop : 1));
       // Tip away from the hit: the body is shoved while the tyres grip, so the roof leans the way it's pushed
       // (+z roll lifts the right side). A rear hit still gets a little roll so it reads as a bump.
       h.rollVelocity += -away * THREE.MathUtils.lerp(NPC_HIT.rollKick, NPC_HIT.rollKickMax, strength) * Math.max(sideways, 0.3) * (side ? SIDE_HIT.roll : 1);
@@ -461,20 +508,31 @@ const WHEEL_ZOOM = { closer: 0.23, duration: 0.55, tilt: 0.12 };
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 
-function AtmosphereGlow({ amount }: { amount: React.RefObject<number> }) {
+// At night the white haze would read as a grey dome on the dark sky, so it fades to a thin, faint blue rim.
+function AtmosphereGlow({ amount, night }: { amount: React.RefObject<number>; night: React.RefObject<number> }) {
+  const [dayColor, nightColor] = useMemo(() => [new THREE.Color(PALETTE.atmosphere), new THREE.Color(PALETTE.lightNightSkyFill)], []);
   const uniforms = useMemo(() => ({
-    uColor: { value: new THREE.Color(PALETTE.atmosphere) },
+    uColor: { value: dayColor.clone() },
     uIntensity: { value: ATMOSPHERE.glow.intensity },
     uPower: { value: ATMOSPHERE.glow.power },
     uFade: { value: 1 },
-  }), []);
-  useFrame(() => { uniforms.uFade.value = amount.current; });
-  return <mesh>
+    // How far round the back of the shell the globe's silhouette sits, so the glow peaks right at the globe.
+    uEdge: { value: Math.sqrt(1 - 1 / ATMOSPHERE.glow.radius ** 2) },
+  }), [dayColor]);
+  useFrame(() => {
+    const n = night.current;
+    uniforms.uFade.value = amount.current;
+    uniforms.uColor.value.copy(dayColor).lerp(nightColor, n);
+    uniforms.uIntensity.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.intensity, ATMOSPHERE.glow.nightIntensity, n);
+    uniforms.uPower.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.power, ATMOSPHERE.glow.nightPower, n);
+  });
+  return <mesh renderOrder={-1}>
     <sphereGeometry args={[GLOBE_RADIUS * ATMOSPHERE.glow.radius, 64, 48]} />
     <shaderMaterial
       uniforms={uniforms}
       transparent
       depthWrite={false}
+      depthTest
       side={THREE.BackSide}
       blending={THREE.AdditiveBlending}
       vertexShader={`varying vec3 vNormal;
@@ -484,12 +542,86 @@ function AtmosphereGlow({ amount }: { amount: React.RefObject<number> }) {
         uniform float uPower;
         uniform float uFade;
         varying vec3 vNormal;
+        uniform float uEdge;
         void main() {
-          float rim = clamp(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 0.0, 1.0);
+          // 1 at the globe's silhouette, falling smoothly to 0 at the shell's own edge (no hard outer ring).
+          float rim = clamp(-vNormal.z / uEdge, 0.0, 1.0);
           gl_FragColor = vec4(uColor, pow(rim, uPower) * uIntensity * uFade);
         }`}
     />
   </mesh>;
+}
+
+// The full moon: a low-poly disc of the world's style, very far away (the depth of field leaves it sharp). It
+// behaves like a big distant body: quick camera turns and shakes move it naturally across the frame, and it then
+// drifts back, very slowly, to its usual spot in the upper right of the sky, so it never wanders far. Flat creamy facets
+// with a little variation, a few soft crater patches and gentle darkening toward the rim, unlit so it glows on
+// its own, with a soft halo. Fades in with night.
+const MOON = {
+  view: new THREE.Vector3(0.15, 0.28, -1).normalize(), distance: 360, radius: 13, detail: 2,
+  glow: 1.55, halo: 96, settle: 0.35,
+  craters: [[0.35, 0.3, 0.26], [-0.3, 0.42, 0.18], [-0.12, -0.38, 0.22], [0.45, -0.25, 0.14], [-0.5, -0.05, 0.12]] as Array<[number, number, number]>,
+};
+
+function buildMoonGeometry() {
+  const geometry = new THREE.IcosahedronGeometry(MOON.radius, MOON.detail);
+  const position = geometry.getAttribute('position');
+  const cream = new THREE.Color('#f7f0dc'), crater = new THREE.Color('#ddd2b8');
+  const colors: number[] = [];
+  const centre = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (let i = 0; i < position.count; i += 3) {
+    a.fromBufferAttribute(position, i); b.fromBufferAttribute(position, i + 1); c.fromBufferAttribute(position, i + 2);
+    centre.copy(a).add(b).add(c).normalize();
+    // Facing the camera is +z; craters sit on that face, judged by the facet centre's x/y.
+    let darkness = 0;
+    for (const [x, y, size] of MOON.craters) darkness = Math.max(darkness, 1 - Math.hypot(centre.x - x, centre.y - y) / size);
+    const color = cream.clone().lerp(crater, THREE.MathUtils.clamp(darkness, 0, 1) * 0.85);
+    color.multiplyScalar((0.97 + Math.sin(i * 12.9898) * 0.03) * (0.8 + 0.2 * Math.max(centre.z, 0)));
+    for (let k = 0; k < 3; k++) colors.push(color.r, color.g, color.b);
+  }
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  return geometry;
+}
+
+function Moon({ night }: { night: React.RefObject<number> }) {
+  const { camera } = useThree();
+  const group = useRef<THREE.Group>(null!);
+  const geometry = useMemo(buildMoonGeometry, []);
+  // Bright on purpose: the depth-of-field output pass tone-maps everything, the moon included.
+  const material = useMemo(() => new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(1, 1, 1).multiplyScalar(MOON.glow), fog: false, transparent: true, opacity: 0, toneMapped: false }), []);
+  const halo = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 128;
+    const context = canvas.getContext('2d')!;
+    const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
+    gradient.addColorStop(0, 'rgba(255,246,224,0.45)');
+    gradient.addColorStop(0.25, 'rgba(250,240,222,0.26)');
+    gradient.addColorStop(0.55, 'rgba(215,226,255,0.08)');
+    gradient.addColorStop(1, 'rgba(200,215,255,0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 128, 128);
+    return new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0 });
+  }, []);
+  const offset = useMemo(() => new THREE.Vector3(), []);
+  const sky = useRef<THREE.Quaternion | null>(null);
+  useEffect(() => () => { geometry.dispose(); material.dispose(); halo.map?.dispose(); halo.dispose(); }, [geometry, material, halo]);
+  // Runs after the camera has moved this frame (priority between the scene and the render), so it never lags.
+  useFrame((_, delta) => {
+    const n = night.current;
+    group.current.visible = n > 0.01;
+    // The moon's place in the sky follows the camera's long-term view, not its every move.
+    if (!sky.current) sky.current = camera.quaternion.clone();
+    sky.current.slerp(camera.quaternion, 1 - Math.exp(-MOON.settle * Math.min(delta, 0.05)));
+    offset.copy(MOON.view).applyQuaternion(sky.current).multiplyScalar(MOON.distance);
+    group.current.position.copy(camera.position).add(offset);
+    group.current.quaternion.copy(camera.quaternion);
+    material.opacity = n;
+    halo.opacity = n;
+  }, 0.5);
+  return <group ref={group}>
+    <sprite material={halo} scale={[MOON.halo, MOON.halo, 1]} renderOrder={-2} />
+    <mesh geometry={geometry} material={material} />
+  </group>;
 }
 
 function DrivingScene(props: SceneProps) {
@@ -569,6 +701,7 @@ function DrivingScene(props: SceneProps) {
       dayGround: c(PALETTE.land), nightGround: c(night.groundFillColor),
       daySun: c(ATMOSPHERE.light.sunColor), nightSun: c(night.sunColor),
       dayRim: c(day.rimColor), nightRim: c(night.rimColor),
+      boostRim: c(PALETTE.boostRim),
       dayBounce: c(day.bounceColor), nightBounce: c(night.bounceColor),
       dayFog: c(PALETTE.haze), nightFog: c(night.fogColor),
     };
@@ -577,11 +710,27 @@ function DrivingScene(props: SceneProps) {
   const bodyRoll = useRef(0);
   const fovKick = useRef(0);
   const trauma = useRef(0);
-  const slowMo = useRef(0);
-  const dolly = useRef(0);
-  const dollyDirection = useMemo(() => new THREE.Vector3(), []);
+  const crashTime = useRef(-1);
+  const crashSide = useRef(1);
+  // Whether the current cut-in is a cool (hard side) hit, which gets the faded, bleached grade instead of the red.
+  const crashCool = useRef(false);
+  const coolBlend = useRef(0);
+  const crashRest = useRef(0);
+  const crashLevel = useRef(0);
+  const crashApplied = useMemo(() => new THREE.Vector3(), []);
+  const crashFovApplied = useRef(0);
+  const crashLook = useMemo(() => new THREE.Vector3(), []);
   const cameraLag = useRef(0);
   const wasBoosting = useRef(0);
+  const boostCameraPulse = useRef(0);
+  const dutch = useRef(0);
+  const boostHold = useRef(0);
+  const cameraSpeed = useRef(0);
+  const cameraAcceleration = useRef(0);
+  const boostBack = useMemo(() => new THREE.Vector3(), []);
+  const dutchVelocity = useRef(0);
+  const lookSwing = useRef(0);
+  const boostAtmosphere = useRef(0);
   const tireMarks = useMemo(createTireMarks, []);
   const speedLines = useMemo(createSpeedLines, []);
   const dust = useMemo(createDust, []);
@@ -694,10 +843,20 @@ function DrivingScene(props: SceneProps) {
 
   useFrame((_, delta) => {
     const realDt = Math.min(delta, 0.05);
-    slowMo.current = Math.max(0, slowMo.current - realDt);
-    gameTime.scale = slowMo.current > SIDE_HIT.slowMoRamp
-      ? SIDE_HIT.slowMoScale
-      : THREE.MathUtils.lerp(1, SIDE_HIT.slowMoScale, easeInOutCubic(slowMo.current / SIDE_HIT.slowMoRamp));
+    // Crash cut-in clock (real time) and its slow motion (the only thing that bends game time).
+    crashRest.current = Math.max(0, crashRest.current - realDt);
+    if (crashTime.current >= 0) {
+      crashTime.current += realDt;
+      if (crashTime.current > CRASH_CAM.duration) { crashTime.current = -1; crashRest.current = CRASH_CAM.rest; }
+    }
+    crashLevel.current = crashEnvelope(crashTime.current);
+    // No slow motion while boosting, even if a cut-in started just before: the boost never pauses.
+    gameTime.scale = props.car.current.boosting > 0 ? 1 : THREE.MathUtils.lerp(1, CRASH_CAM.slowScale, crashLevel.current);
+    cinematicState.crash = crashLevel.current;
+    // Which look the cut-in has (red or cool) changes smoothly, never in one frame: in a long tussle the hits
+    // alternate between head-on and side, and an instant switch made the red grade and the contrast blink.
+    coolBlend.current = THREE.MathUtils.damp(coolBlend.current, crashCool.current ? 1 : 0, 6, realDt);
+    cinematicState.cool = coolBlend.current * crashLevel.current;
     const dt = realDt * gameTime.scale;
     if (!readied.current) { readied.current = true; props.onReady(); }
     arrivalTime.current += dt;
@@ -716,6 +875,21 @@ function DrivingScene(props: SceneProps) {
     introZoomCta.current = THREE.MathUtils.damp(introZoomCta.current, introZoom.current, 7, dt);
     document.documentElement.style.setProperty('--intro-zoom-cta', introZoomCta.current.toFixed(4));
     const car = props.car.current;
+    boostAtmosphere.current = THREE.MathUtils.damp(
+      boostAtmosphere.current,
+      props.started && !props.paused ? car.boosting : 0,
+      car.boosting > 0 ? 3.2 : 2.4,
+      realDt,
+    );
+    const sky = gl.domElement.parentElement;
+    if (sky) {
+      const boostStrength = boostAtmosphere.current;
+      sky.style.setProperty('--boost-violet', PALETTE.boostViolet);
+      sky.style.setProperty('--boost-pink', PALETTE.boostPink);
+      sky.style.setProperty('--boost-violet-strength', `${(boostStrength * 29).toFixed(1)}%`);
+      sky.style.setProperty('--boost-pink-strength', `${(boostStrength * 34).toFixed(1)}%`);
+      sky.style.setProperty('--boost-light-x', `${(50 + Math.sin(arrivalTime.current * 0.8) * 17).toFixed(1)}%`);
+    }
     const globeAlignmentError = globeQuat.angleTo(driveQuat);
     zoomProgress.current = THREE.MathUtils.damp(zoomProgress.current, props.started ? 1 : 0, props.started ? 1.45 : 1.2, dt);
     const cameraPhase = THREE.MathUtils.clamp((zoomProgress.current - 0.1) / 0.9, 0, 1);
@@ -783,14 +957,30 @@ function DrivingScene(props: SceneProps) {
     const intro = !props.started && zoomProgress.current < 0.02;
     if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true);
     for (const hit of drainTrafficHits()) {
-      if (hit.kind === 'side') {
-        slowMo.current = SIDE_HIT.slowMoHold + SIDE_HIT.slowMoRamp;
-        dolly.current = SIDE_HIT.dolly;
-        fovKick.current += SIDE_HIT.fovKick;
-        trauma.current = Math.min(1, trauma.current + SIDE_HIT.shake);
+      // The cinematic cut-in plays for head-on hits (with the red grade, in the HUD) and for hard side clips (no
+      // red). Never under boost: then the car just bulldozes through without a pause, so those hits get the light
+      // side beat. A new cut-in waits until the current one has started letting go, so a string of hits doesn't
+      // stutter the camera.
+      const cinematic = !hit.boosted && (hit.kind === 'front' || hit.speed >= JUICE_CONFIG.coolSideSpeed);
+      if (cinematic) {
+        // A cut-in always plays through and fades out cleanly; the next one can only start after a short rest.
+        // (Re-triggering it during a tussle made the red grade and the contrast pulse on and off.)
+        if (crashTime.current < 0 && crashRest.current <= 0) {
+          crashTime.current = 0;
+          crashSide.current = hit.side;
+          crashCool.current = hit.kind === 'side';
+          coolBlend.current = crashCool.current ? 1 : 0;
+        } else if (crashTime.current >= 0 && hit.kind === 'front') {
+          // A head-on hit during a cool cut-in turns it red (the blend below makes that a smooth change).
+          crashCool.current = false;
+        }
+        trauma.current = Math.min(1, trauma.current + CRASH_CAM.shake);
         playWhoosh();
       } else {
-        trauma.current = Math.min(1, trauma.current + SIDE_HIT.frontShake);
+        dutchVelocity.current += -hit.side * SIDE_HIT_CAMERA.dutchKick;
+        lookSwing.current = hit.side * SIDE_HIT_CAMERA.swing;
+        fovKick.current += SIDE_HIT_CAMERA.fovKick;
+        trauma.current = Math.min(1, trauma.current + SIDE_HIT_CAMERA.shake);
       }
       props.onTrafficHit?.(hit);
     }
@@ -843,6 +1033,7 @@ function DrivingScene(props: SceneProps) {
     // Day/night cross-fade: every light, the fog and exposure blend over ~1.5s instead of switching.
     nightBlend.current = THREE.MathUtils.damp(nightBlend.current, props.night ? 1 : 0, NIGHT_FADE_RATE, dt);
     const n = nightBlend.current;
+    nightState.blend = n;
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
     ambientLight.current.intensity = THREE.MathUtils.lerp(day.ambientIntensity, night.ambientIntensity, n);
     ambientLight.current.color.lerpColors(lightColors.dayAmbient, lightColors.nightAmbient, n);
@@ -851,8 +1042,8 @@ function DrivingScene(props: SceneProps) {
     hemisphereLight.current.groundColor.lerpColors(lightColors.dayGround, lightColors.nightGround, n);
     sun.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.sunIntensity, night.sunIntensity, n);
     sun.current.color.lerpColors(lightColors.daySun, lightColors.nightSun, n);
-    rimLight.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.rimIntensity, night.rimIntensity, n);
-    rimLight.current.color.lerpColors(lightColors.dayRim, lightColors.nightRim, n);
+    rimLight.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.rimIntensity, night.rimIntensity, n) + boostAtmosphere.current * 0.12;
+    rimLight.current.color.lerpColors(lightColors.dayRim, lightColors.nightRim, n).lerp(lightColors.boostRim, boostAtmosphere.current * 0.32);
     bounceLight.current.intensity = THREE.MathUtils.lerp(0.24, 0.12, n);
     bounceLight.current.color.lerpColors(lightColors.dayBounce, lightColors.nightBounce, n);
     fog.color.lerpColors(lightColors.dayFog, lightColors.nightFog, n);
@@ -871,12 +1062,16 @@ function DrivingScene(props: SceneProps) {
     sun.current.position.copy(sunOverviewPosition).lerp(sunLocalPosition, zoom);
     sunTarget.position.copy(globeCenter).lerp(groundVehiclePosition, zoom);
     sunTarget.updateMatrixWorld();
+    // The camera reads a smoothed speed and acceleration: hard braking (or the acceleration flickering near a
+    // stop) would otherwise move its targets in steps and make the pull-in look choppy.
+    cameraSpeed.current = THREE.MathUtils.damp(cameraSpeed.current, Math.abs(car.speed), 3, dt);
+    cameraAcceleration.current = THREE.MathUtils.damp(cameraAcceleration.current, car.acceleration, 5, dt);
     const drivingFov = updateCamera(
       gameCamera, gameLook, groundVehiclePosition, vehicleTangent, surfaceUp,
-      props.cameraMode, car.speed, landingCameraBlend.current, landingHeight.current,
+      props.cameraMode, cameraSpeed.current, landingCameraBlend.current, landingHeight.current,
     );
     // Camera falls back on hard acceleration and catches up afterwards.
-    cameraLag.current = THREE.MathUtils.damp(cameraLag.current, THREE.MathUtils.clamp(car.acceleration * JUICE_CONFIG.cameraLag, -2, 2), JUICE_CONFIG.cameraLagStiffness, dt);
+    cameraLag.current = THREE.MathUtils.damp(cameraLag.current, THREE.MathUtils.clamp(cameraAcceleration.current * JUICE_CONFIG.cameraLag, -2, 2), JUICE_CONFIG.cameraLagStiffness, dt);
     gameCamera.addScaledVector(vehicleTangent, -cameraLag.current);
     cameraStartDirection.copy(introCamera).sub(globeCenter);
     cameraEndDirection.copy(gameCamera).sub(globeCenter);
@@ -892,11 +1087,18 @@ function DrivingScene(props: SceneProps) {
       .multiplyScalar((THREE.MathUtils.lerp(startRadius, endRadius, zoom) + cinematicLift) * (1 - settle * (1 - ARRIVAL.zoom)) * (1 - introZoom.current * WHEEL_ZOOM.closer))
       .add(globeCenter);
     desiredLook.copy(introLook).lerp(gameLook, zoom);
+    boostCameraPulse.current = THREE.MathUtils.damp(boostCameraPulse.current, 0, JUICE_CONFIG.boostCameraPulseDecay, realDt);
+    desiredCamera.addScaledVector(vehicleTangent, -boostCameraPulse.current * JUICE_CONFIG.boostCameraPullback * zoom);
+    desiredLook.addScaledVector(vehicleTangent, boostCameraPulse.current * JUICE_CONFIG.boostCameraLookAhead * zoom);
+    const boosting = props.started && !props.paused && car.boosting > 0;
+    boostHold.current = THREE.MathUtils.damp(boostHold.current, boosting ? 1 : 0, boosting ? BOOST_FEEL.attack : BOOST_FEEL.release, realDt);
+    const boostLift = easeInOutCubic(boostHold.current) * zoom;
+    desiredCamera.addScaledVector(boostBack.copy(desiredCamera).sub(desiredLook).normalize(), boostLift * BOOST_FEEL.pullBack);
+    desiredCamera.addScaledVector(surfaceUp, boostLift * BOOST_FEEL.rise);
     const ease = 1 - Math.exp(-CAR_CONFIG.cameraSmoothing * dt);
-    // Side-hit pull-back: the camera's target backs away from the car and eases in again in real time,
-    // so the camera glides out during the slow motion and settles as it ends.
-    dolly.current = THREE.MathUtils.damp(dolly.current, 0, SIDE_HIT.dollyDecay, realDt);
-    if (dolly.current > 0.01) desiredCamera.addScaledVector(dollyDirection.copy(desiredCamera).sub(desiredLook).normalize(), dolly.current * zoom);
+    // The crash cut-in is laid on top of the smoothed camera each frame (taken off again before smoothing),
+    // so its extreme ease-out reads crisply instead of being softened by the follow lag.
+    camera.position.sub(crashApplied);
     camera.position.lerp(desiredCamera, ease);
     // Never let the smoothed camera cut through the planet.
     cameraOffset.copy(camera.position).sub(globeCenter);
@@ -919,24 +1121,46 @@ function DrivingScene(props: SceneProps) {
     if (boostStarted) {
       trauma.current = Math.min(1, trauma.current + JUICE_CONFIG.shakeBoost);
       fovKick.current += JUICE_CONFIG.boostFovKick;
+      boostCameraPulse.current = 1;
       playWhoosh();
     }
-    if (driving && car.acceleration < -JUICE_CONFIG.hardBrakeAccel) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBrake);
+    if (driving && cameraAcceleration.current < -JUICE_CONFIG.hardBrakeAccel && Math.abs(car.speed) > 8) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBrake);
     if (offRoadDriving) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
     fovKick.current = THREE.MathUtils.damp(fovKick.current, 0, JUICE_CONFIG.fovKickDecay, dt);
     const shake = trauma.current * trauma.current * JUICE_CONFIG.shakeMax * zoom;
     const t = arrivalTime.current;
     camera.position.addScaledVector(surfaceUp, Math.sin(t * 61) * shake);
     camera.position.addScaledVector(vehicleTangent, Math.sin(t * 47 + 1.3) * shake * 0.6);
+    // Boost vibration: a fine, steady hum rather than a shake.
+    const hum = boostHold.current * BOOST_FEEL.vibration * zoom;
+    camera.position.addScaledVector(surfaceUp, (Math.sin(t * 71) * 0.6 + Math.sin(t * 113 + 0.7) * 0.4) * hum);
+    camera.position.addScaledVector(vehicleRight, Math.sin(t * 89 + 2.1) * hum * 0.7);
+    const crash = crashLevel.current;
+    if (vehicle.current) vehicle.current.getWorldPosition(cinematicState.focus).addScaledVector(surfaceUp, 0.5);
+    crashApplied.copy(cinematicState.focus).sub(camera.position).multiplyScalar(crash * CRASH_CAM.push * zoom);
+    camera.position.add(crashApplied);
+    // Side-hit glance toward the thrown car.
+    lookSwing.current = THREE.MathUtils.damp(lookSwing.current, 0, SIDE_HIT_CAMERA.swingDecay, realDt);
+    desiredLook.addScaledVector(vehicleRight, lookSwing.current * zoom);
     smoothedLook.lerp(desiredLook, ease);
     targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).normalize();
     smoothedUp.lerp(targetCameraUp, 1 - Math.exp(-6 * dt)).normalize();
     camera.up.copy(smoothedUp);
-    camera.lookAt(smoothedLook);
+    crashLook.copy(smoothedLook).lerp(cinematicState.focus, crash * CRASH_CAM.lookPull * zoom);
+    camera.lookAt(crashLook);
     camera.rotateZ(-bodyRoll.current * JUICE_CONFIG.cameraRollFactor * zoom);
+    camera.rotateZ(-crashSide.current * crash * CRASH_CAM.dutch * zoom);
+    // Boost tremor: a quick nodding tilt, layered with a finer, faster one.
+    camera.rotateX((Math.sin(t * BOOST_FEEL.tiltRate) * BOOST_FEEL.tilt + Math.sin(t * BOOST_FEEL.tiltFineRate + 1.1) * BOOST_FEEL.tiltFine) * boostHold.current * zoom);
+    dutchVelocity.current += (-dutch.current * SIDE_HIT_CAMERA.dutchStiffness - dutchVelocity.current * SIDE_HIT_CAMERA.dutchDamping) * realDt;
+    dutch.current = THREE.MathUtils.clamp(dutch.current + dutchVelocity.current * realDt, -SIDE_HIT_CAMERA.maxDutch, SIDE_HIT_CAMERA.maxDutch);
+    camera.rotateZ(dutch.current * zoom);
     if (camera instanceof THREE.PerspectiveCamera) {
       const targetFov = THREE.MathUtils.lerp(48, drivingFov + fovKick.current, zoom) - Math.sin(Math.PI * zoom) * 5;
-      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, CAR_CONFIG.fovSmoothing, dt);
+      // The crash lens punch sits on top of the smoothed FOV, like the cut-in on the position.
+      camera.fov = THREE.MathUtils.damp(camera.fov - crashFovApplied.current, targetFov, CAR_CONFIG.fovSmoothing, dt);
+      crashFovApplied.current = -crashLevel.current * CRASH_CAM.fovPunch * zoom;
+      camera.fov += crashFovApplied.current;
       const introScreenOffset = 0.43;
       const centeredFilmOffset = introScreenOffset
         * camera.getFilmWidth()
@@ -958,6 +1182,7 @@ function DrivingScene(props: SceneProps) {
   });
 
   return <>
+    <IntroDepthOfField zoom={zoomProgress} globe={globeGroup} vehicle={vehicle} car={props.car} active={props.started && !props.paused} />
     <ambientLight ref={ambientLight} intensity={ART_DIRECTION.day.ambientIntensity} color={ART_DIRECTION.day.ambientColor} />
     <hemisphereLight ref={hemisphereLight} args={[PALETTE.lightDaySkyFill, PALETTE.land, ATMOSPHERE.light.hemisphereIntensity]} />
     <directionalLight
@@ -980,8 +1205,9 @@ function DrivingScene(props: SceneProps) {
     <directionalLight ref={rimLight} position={[58, 18, -48]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={ATMOSPHERE.light.rimIntensity} color={ART_DIRECTION.day.rimColor} />
     <directionalLight ref={bounceLight} position={[18, -38, -62]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={0.24} color={ART_DIRECTION.day.bounceColor} />
     <primitive object={speedLines.group} />
+    <Moon night={nightBlend} />
     <group ref={globeGroup} position={[0, -GLOBE_RADIUS, 0]}>
-      <AtmosphereGlow amount={glowAmount} />
+      <AtmosphereGlow amount={glowAmount} night={nightBlend} />
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld zoom={zoomProgress} />
         <Traffic paused={props.paused} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} />

@@ -17,10 +17,11 @@ export const CAR_CONFIG = {
   brakeRampDownTime: 0.15,
   gentleThrottleCap: 0.5,
   // Boost (Shift): a timed burst of extra speed and pull, then a cooldown before it can fire again.
-  boostSpeedFactor: 1.3,
-  boostAccelFactor: 1.5,
-  boostDuration: 1.5,
-  boostCooldown: 4,
+  // A long, heavy push rather than a speed spike: the point of boost is the power to bulldoze traffic.
+  boostSpeedFactor: 1.12,
+  boostAccelFactor: 1.25,
+  boostDuration: 3.2,
+  boostCooldown: 5,
   boostOverspeedDecel: 8,
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.
   gamepadDeadzone: 0.1,
@@ -45,6 +46,15 @@ export const CAR_CONFIG = {
   roadAssist: 0.8,
   roadEdgeAssist: 3,
   roadEdgeStart: 1.8,
+  // Boost makes holding the road easy: the road assist is this many times stronger (and reaches this far past
+  // the road's edge, in metres), and steering turns in quicker with more grip.
+  boostRoadAssistFactor: 3.5,
+  boostAssistReach: 3,
+  boostSteerFactor: 1.3,
+  boostGripFactor: 1.6,
+  // After a head-on hit: extra heading pull back to the road (per second) and for how long.
+  crashAssist: 3.5,
+  crashAssistTime: 1.2,
   // Back to road (F): how far from the road centre the car is put back, at most.
   recoverLaneOffset: 1.4,
   // Off-road (on land, away from the road)
@@ -76,11 +86,23 @@ export const CAR_CONFIG = {
   trafficRadius: 0.65,
   // Share of speed kept when ramming traffic; the player car is much heavier than NPCs.
   ramSpeedKeep: 0.85,
+  // A side clip barely slows the player (it's the fun kind of hit).
+  sideRamSpeedKeep: 0.95,
+  // Ramming while boosting: the car bulldozes traffic aside, front or side alike, and only feels a little of
+  // it: share of speed kept per hit, and how much of the usual heading nudge it takes.
+  boostRamSpeedKeep: 0.97,
+  // Heading nudge away from a struck car at full speed (radians).
+  ramNudge: 0.05,
+  boostRamNudgeFactor: 0.25,
+  // Under boost the overlap with a struck car is eased out this much more gently (the other car moves, not you).
+  boostSeparateFactor: 0.3,
   // Speed lost per second while pressed against a car that hasn't been shoved clear yet, and how fast an overlap is eased out.
   trafficHoldDecel: 3,
   trafficSeparateRate: 10,
   // On a railing hit, how fast the heading straightens toward the bridge direction (per second).
   bridgeStraightenRate: 3,
+  // How far past the deck model's ends (in longitude, radians) the railings and their end posts reach.
+  bridgeEndOverlap: 0.012,
   // Fastest the car may be turned by a wall, trunk or shoreline it glances off (rad/s).
   deflectRate: 2.5,
   // Shoreline: heading step tried when sliding along the water's edge, and speed lost per second while scraping it.
@@ -145,14 +167,17 @@ export const JUICE_CONFIG = {
   tireMarkWidth: 0.22,
   tireMarkSpacing: 0.25,
   // Camera
-  boostFovKick: 5,
+  boostFovKick: 7.5,
+  boostCameraPullback: 1.1,
+  boostCameraLookAhead: 0.5,
+  boostCameraPulseDecay: 3.8,
   fovKickDecay: 3,
   cameraLag: 0.15,
   cameraLagStiffness: 6,
   shakeMax: 0.35,
   shakeDecay: 1.8,
   shakeBoost: 0.6,
-  shakeBrake: 0.45,
+  shakeBrake: 0.15,
   shakeBump: 0.25,
   hardBrakeAccel: 12,
   cameraRollFactor: 0.3,
@@ -173,6 +198,8 @@ export const JUICE_CONFIG = {
   streakShowTime: 2,
   hudSpringStiffness: 120,
   hudSpringDamping: 12,
+  // A side clip at least this fast (m/s) is a cool hit: it gets the cinematic cut-in and a faded, bleached grade.
+  coolSideSpeed: 9,
   // Sound
   soundEnabled: true,
   engineVolume: 0.03,

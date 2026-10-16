@@ -72,4 +72,14 @@ The rope bridge uses [old ropebridge low poly](https://sketchfab.com/3d-models/o
 
 The well uses [Low Poly Well](https://sketchfab.com/3d-models/low-poly-well-8420dd12c2b74f50b0b04cd7614774e2) by [abdullahyeahyea](https://sketchfab.com/abdullahyeahyea), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_well`.
 
+The street lamps use [simple collection of low poly street lights](https://sketchfab.com/3d-models/simple-collection-of-low-poly-street-lights-b0736b51fc0d4c75b58d5991615f5385) and the benches, bins and mailboxes use [simple low poly street props v2](https://sketchfab.com/3d-models/simple-low-poly-street-props-v2-7734db54cba144c9b5a7020bc341daf3), both by [lupas](https://sketchfab.com/ivan.anton.albarracin), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Source files, runtime GLB conversions and licenses are in `src/assets/simple_collection_of_low_poly_street_lights` and `src/assets/simple_low_poly_street_props_v2`.
+
+The swim rings use [Float Low Poly](https://sketchfab.com/3d-models/float-low-poly-0002d6c3b5414b85a18a38cdf7419696) by [NonConnecte](https://sketchfab.com/NonConnecte), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Source files, runtime GLB conversion and license are in `src/assets/float_low_poly`.
+
+The big rocks and boulders use [Rock low poly](https://sketchfab.com/3d-models/rock-low-poly-2c88f234671c4aceb6a6449270b168b0) by [Elbolillo](https://sketchfab.com/Elbolilloduro), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Source files, runtime GLB conversion and license are in `src/assets/rock_low_poly`.
+
+The football pitch uses [Football Field (Free)](https://sketchfab.com/3d-models/football-field-free-77ffca674aa043eba81d283f26d015e2) by [coolalext](https://sketchfab.com/coolalext), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). Source files, runtime GLB conversion and license are in `src/assets/football_field_free`.
+
+The palm island uses [Island](https://sketchfab.com/3d-models/island-3dd8d58630ff4d5e913b1ea045d3fe48) by [BConnolly](https://sketchfab.com/BConnolly), licensed under [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) — **non-commercial only**: remove it (the `PalmIsland` component) or get the author's permission before any commercial use. Source files, runtime GLB conversion and license are in `src/assets/island`.
+
 The player vehicle uses [Low Poly Car](https://sketchfab.com/3d-models/low-poly-car-ffcf987149df4e528ebf1e2dec6a9f8a) by [ion_omat](https://sketchfab.com/ion_omat), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_car`.

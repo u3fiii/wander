@@ -10,13 +10,16 @@ export type Obstacle = {
   forward?: [number, number]; halfLength?: number;
   // How the player's last hit on this obstacle was scored, so the struck car can react to match.
   hitKind?: 'side' | 'front';
+  // The player was boosting when it hit this car: it gets thrown clear much harder.
+  boostHit?: boolean;
 };
 
 // Hitboxes are smaller than the visible objects so near-misses don't count as crashes.
 export const HITBOX_SCALE = 0.7;
 
 // Player hits on traffic, read by the HUD: 'side' is a clip from beside, 'front' is a head-on nose-first hit.
-export type TrafficHit = { kind: 'side' | 'front'; speed: number };
+// `side` is where the struck car was: 1 on the player's right, -1 on its left.
+export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean };
 const trafficHits: TrafficHit[] = [];
 export function reportTrafficHit(hit: TrafficHit) { trafficHits.push(hit); }
 export function drainTrafficHits(): TrafficHit[] { return trafficHits.splice(0); }

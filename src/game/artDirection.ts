@@ -8,6 +8,38 @@ export const VISUAL_QUALITY: VisualQuality = 'high';
 
 export const ART_DIRECTION = {
   quality: VISUAL_QUALITY,
+  // Miniature focus. Low quality bypasses both overview and driving effects.
+  introDepthOfField: {
+    enabled: true,
+    focusRangeFactor: 0.4,
+    surfaceOffset: 1,
+    aperture: 0.0003,
+    maxBlur: 0.0035,
+    damping: 5,
+  },
+  drivingDepthOfField: {
+    enabled: true,
+    focusRange: 11,
+    lookAhead: 5,
+    aperture: 0.00015,
+    maxBlur: 0.0016,
+    transitionEnd: 0.65,
+  },
+  // Crash cut-in on a negative hit: a razor-thin sharp band locked on the crash, heavy blur front and back.
+  crashDepthOfField: {
+    focusRange: 2.2,
+    aperture: 0.0028,
+    maxBlur: 0.016,
+  },
+  // Short cinematic emphasis during a real boost burst; near-field blur stays off.
+  boostDepthOfField: {
+    enabled: true,
+    focusRange: 4,
+    aperture: 0.0016,
+    maxBlur: 0.011,
+    attack: 10,
+    release: 4,
+  },
   day: {
     exposure: 1.03,
     sunColor: PALETTE.lightDaySun,
@@ -25,12 +57,13 @@ export const ART_DIRECTION = {
   night: {
     exposure: 0.82,
     sunColor: PALETTE.lightNightSun,
-    sunIntensity: 1.05,
+    // Moonlight: cool and a little lower, so the warm windows and street lamps carry the night.
+    sunIntensity: 0.85,
     skyFillColor: PALETTE.lightNightSkyFill,
     groundFillColor: PALETTE.lightNightGroundFill,
-    hemisphereIntensity: 0.72,
+    hemisphereIntensity: 0.6,
     ambientColor: PALETTE.lightNightAmbient,
-    ambientIntensity: 0.18,
+    ambientIntensity: 0.14,
     rimColor: PALETTE.lightNightRim,
     rimIntensity: 0.25,
     fogColor: PALETTE.lightNightFog,
@@ -52,13 +85,13 @@ export const ART_DIRECTION = {
   },
   materials: {
     asphaltRoughness: 0.95,
-    waterRoughness: 0.86,
+    waterRoughness: 0.97,
     assetRoughness: 0.88,
     vehicleRoughness: 0.9,
   },
   qualityProfiles: {
-    low: { shadowMapSize: 1536, maxDpr: 1.25 },
-    high: { shadowMapSize: 3072, maxDpr: 1.6 },
+    low: { shadowMapSize: 1536, maxDpr: 1.25, depthOfField: false },
+    high: { shadowMapSize: 3072, maxDpr: 1.6, depthOfField: true },
   },
 } as const;
 

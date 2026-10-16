@@ -3,6 +3,12 @@ export const PALETTE = {
   // Base (~60%)
   land: '#aebc70',
   coastWall: '#b8a46a',
+  sand: '#ecd9a4',
+  // Football pitch: a fresher green than the land, warm stone for its walls and the path paving.
+  pitchGreen: '#6f9f47',
+  fieldStone: '#dccaa2',
+  pavingLight: '#d8c7a0',
+  pavingDark: '#b9a57e',
   oceanDeep: '#4f9ccc',
   oceanShallow: '#8fd0ec',
   // Road
@@ -55,6 +61,9 @@ export const PALETTE = {
   lightNightRim: '#58779f',
   lightNightFog: '#29445b',
   lightNightBounce: '#38537d',
+  boostViolet: '#9b84f4',
+  boostPink: '#f08fce',
+  boostRim: '#dda2ff',
 } as const;
 
 export type PaletteKey = keyof typeof PALETTE;

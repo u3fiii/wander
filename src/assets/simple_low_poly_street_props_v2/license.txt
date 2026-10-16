@@ -1,0 +1,11 @@
+Model Information:
+* title:	simple low poly street props v2
+* source:	https://sketchfab.com/3d-models/simple-low-poly-street-props-v2-7734db54cba144c9b5a7020bc341daf3
+* author:	lupas (https://sketchfab.com/ivan.anton.albarracin)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "simple low poly street props v2" (https://sketchfab.com/3d-models/simple-low-poly-street-props-v2-7734db54cba144c9b5a7020bc341daf3) by lupas (https://sketchfab.com/ivan.anton.albarracin) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
