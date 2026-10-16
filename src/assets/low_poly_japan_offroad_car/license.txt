@@ -1,0 +1,11 @@
+Model Information:
+* title:	Low poly Japan Offroad Car
+* source:	https://sketchfab.com/3d-models/low-poly-japan-offroad-car-5bde8c57de3d4be880ed6457f88636ad
+* author:	Han66st (https://sketchfab.com/Han66st)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Low poly Japan Offroad Car" (https://sketchfab.com/3d-models/low-poly-japan-offroad-car-5bde8c57de3d4be880ed6457f88636ad) by Han66st (https://sketchfab.com/Han66st) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

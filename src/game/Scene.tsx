@@ -1,224 +1,746 @@
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { CAMERA, STOPS } from './config';
-import { initialCar, isBlocked, stepCar } from './driving';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CAR_CONFIG, LOOP_DRIVE } from './config';
+import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
+import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
+import { ROAD_PATHS, distanceToRoadNetwork, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
+import { initialLoopCar, stepLoopCar } from './driving';
+import { clearObstacleGroup, setObstacleGroup } from './obstacles';
+import type { Obstacle } from './obstacles';
 import type { CarState, Controls } from './driving';
-import { boxes, trees, signs } from './world';
-import type { Box, Sign } from './world';
+import MiniatureWorld from './MiniatureWorld';
+import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
+import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
+import type { PaletteKey } from './palette';
+import { bakeRoles, jitterAmount, kenneyCarKey, logMaterials, playerCarRole, resolveKenneyCar, roleMaterials, textureSampler } from './recolor';
+import carTextureUrl from '../assets/kenny cars/Textures/colormap.png?url';
+import playerModelUrl from '../assets/low_poly_car/low-poly-car.glb?url';
+import taxiModelUrl from '../assets/kenny cars/taxi.obj?url';
+import policeModelUrl from '../assets/kenny cars/police.obj?url';
+import suvModelUrl from '../assets/kenny cars/suv.obj?url';
+import vanModelUrl from '../assets/kenny cars/van.obj?url';
+import ambulanceModelUrl from '../assets/kenny cars/ambulance.obj?url';
+import truckModelUrl from '../assets/kenny cars/truck.obj?url';
+import deliveryModelUrl from '../assets/kenny cars/delivery.obj?url';
+
+// Atmosphere tunables. Distances are in world units; colors come from PALETTE.
+const ATMOSPHERE = {
+  fog: { nearFactor: 0.04, farFactor: 1.0, damping: 4 },
+  glow: { radius: 1.06, intensity: 0.55, power: 2.2, drivingFade: 0.85 },
+  light: { hemisphereIntensity: 1.1, sunIntensity: 2.0, sunColor: PALETTE.sunWarm, shadowRadius: 4, rimIntensity: 0.2 },
+  post: {
+    exposure: 1.05,
+  },
+};
+
 
 export type Telemetry = { speed: number; distance: number; x: number; z: number; heading: number };
 export type SceneProps = {
   started: boolean; paused: boolean; night: boolean; cameraMode: number; resetKey: number;
-  controls: React.RefObject<Controls>; car: React.RefObject<CarState>; stop: number;
-  onTelemetry: (data: Telemetry) => void; onStop: () => void; onReady: () => void;
+  controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
+  onTelemetry: (data: Telemetry) => void; onReady: () => void;
 };
 
-function BoxBatch({ items, color }: { items: Box[]; color: string }) {
-  const ref = useRef<THREE.InstancedMesh>(null!);
-  useLayoutEffect(() => {
-    const dummy = new THREE.Object3D();
-    items.forEach((item, i) => {
-      dummy.position.set(...item.p); dummy.scale.set(...item.s); dummy.rotation.set(0, item.r ?? 0, 0);
-      dummy.updateMatrix(); ref.current.setMatrixAt(i, dummy.matrix);
+const localUp = new THREE.Vector3(0, 1, 0);
+const localGlobeCenter = new THREE.Vector3(0, -GLOBE_RADIUS, 0);
+const scenicSpawnAngles = [0.32, 0.78, 1.92, 2.55, 3.82, 4.46, 5.7] as const;
+const TRAFFIC_LANE_OFFSET = 1.22;
+const SPAWN_LANE_OFFSET = -TRAFFIC_LANE_OFFSET;
+const LANDING_HEIGHT = 4.6;
+
+const circularAngleDistance = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
+// Fixed start spot so the globe turn and camera move are the same every time.
+const SPAWN_INDEX = 0;
+const PLAYER_COLOR: PaletteKey = 'carRed';
+
+const carRoleColor = (body: PaletteKey) => (role: string): { key: PaletteKey; roughness?: number } => {
+  switch (role) {
+    case 'body': return { key: body };
+    case 'window': return { key: 'windows', roughness: 0.5 };
+    case 'tire': return { key: 'tires' };
+    case 'light': return { key: 'carRed' };
+    case 'lamp': return { key: 'carYellow' };
+    case 'accent': return { key: body === 'carCream' ? 'carBlue' : 'carCream' };
+    default: return { key: 'roadShoulder' };
+  }
+};
+
+function KenneyCar({ modelUrl, scale = 1.35, color, jitter }: { modelUrl: string; scale?: number; color: PaletteKey; jitter: number }) {
+  const source = useLoader(OBJLoader, modelUrl);
+  const texture = useLoader(THREE.TextureLoader, carTextureUrl);
+  const model = useMemo(() => {
+    const clone = source.clone(true);
+    logMaterials('kenney car', clone);
+    const sample = textureSampler(texture);
+    clone.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const baked = bakeRoles(child.geometry, sample, kenneyCarKey, resolveKenneyCar);
+      child.geometry = baked.geometry;
+      child.material = roleMaterials(baked.roles, carRoleColor(color), jitter);
+      child.castShadow = true;
+      child.receiveShadow = true;
     });
-    ref.current.instanceMatrix.needsUpdate = true;
-    ref.current.computeBoundingSphere();
-  }, [items]);
-  return <instancedMesh ref={ref} args={[undefined, undefined, items.length]} castShadow receiveShadow>
-    <boxGeometry /><meshStandardMaterial color={color} roughness={0.88} />
-  </instancedMesh>;
-}
-function Trees() {
-  const trunk = useRef<THREE.InstancedMesh>(null!);
-  const leaves = useRef<THREE.InstancedMesh>(null!);
-  useLayoutEffect(() => {
-    const dummy = new THREE.Object3D(); const color = new THREE.Color();
-    trees.forEach((t, i) => {
-      dummy.position.set(t.x, 2.6 * t.scale, t.z); dummy.scale.set(0.4 * t.scale, 5.2 * t.scale, 0.4 * t.scale);
-      dummy.updateMatrix(); trunk.current.setMatrixAt(i, dummy.matrix);
-      dummy.position.set(t.x, 6.2 * t.scale, t.z); dummy.scale.set(2.65 * t.scale, 3.4 * t.scale, 2.65 * t.scale);
-      dummy.rotation.y = i * 2.3; dummy.updateMatrix(); leaves.current.setMatrixAt(i, dummy.matrix);
-      leaves.current.setColorAt(i, color.set(['#788749', '#8a9456', '#647c47', '#9c9b58'][i % 4]));
+    return clone;
+  }, [source, texture, color, jitter]);
+  useEffect(() => () => {
+    model.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      (Array.isArray(child.material) ? child.material : [child.material]).forEach(material => material.dispose());
     });
-    trunk.current.instanceMatrix.needsUpdate = true; leaves.current.instanceMatrix.needsUpdate = true;
-    if (leaves.current.instanceColor) leaves.current.instanceColor.needsUpdate = true;
-    trunk.current.computeBoundingSphere(); leaves.current.computeBoundingSphere();
-  }, []);
-  return <>
-    <instancedMesh ref={trunk} args={[undefined, undefined, trees.length]} castShadow><cylinderGeometry args={[0.7, 1, 1, 6]} /><meshStandardMaterial color="#837259" /></instancedMesh>
-    <instancedMesh ref={leaves} args={[undefined, undefined, trees.length]} castShadow receiveShadow><icosahedronGeometry args={[1, 1]} /><meshStandardMaterial roughness={1} flatShading /></instancedMesh>
-  </>;
-}
-function ShopSign({ sign }: { sign: Sign }) {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas'); canvas.width = 768; canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = sign.color; ctx.fillRect(0, 0, 768, 128);
-    ctx.strokeStyle = '#d9c99f'; ctx.lineWidth = 3; ctx.strokeRect(9, 9, 750, 110);
-    ctx.fillStyle = '#f7eed7'; ctx.direction = 'rtl'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = 'bold 69px Vazirmatn, sans-serif'; ctx.fillText(sign.text, 384, 65);
-    const map = new THREE.CanvasTexture(canvas); map.colorSpace = THREE.SRGBColorSpace; return map;
-  }, [sign]);
-  useEffect(() => () => texture.dispose(), [texture]);
-  return <mesh position={[sign.x, sign.y, sign.z]} rotation={[0, sign.rotation ?? 0, 0]}><planeGeometry args={[sign.width, 1.65]} /><meshStandardMaterial map={texture} roughness={0.8} /></mesh>;
-}
-function Azadi() {
-  const geometry = useMemo(() => {
-    const s = new THREE.Shape();
-    s.moveTo(-7, 0); s.lineTo(-4.7, 0); s.quadraticCurveTo(-3.1, 7.5, 0, 10.1);
-    s.quadraticCurveTo(3.1, 7.5, 4.7, 0); s.lineTo(7, 0); s.lineTo(3.1, 16); s.lineTo(-3.1, 16); s.closePath();
-    return new THREE.ExtrudeGeometry(s, { depth: 3, bevelEnabled: false, curveSegments: 12 });
-  }, []);
-  useEffect(() => () => geometry.dispose(), [geometry]);
-  return <group position={[-27, 0.45, 27]}>
-    <mesh position={[0, 0.2, 0]} receiveShadow><boxGeometry args={[20, 0.4, 17]} /><meshStandardMaterial color="#e1d6bd" /></mesh>
-    <mesh geometry={geometry} position={[0, 0.4, -1.5]} castShadow receiveShadow><meshStandardMaterial color="#f4e5c5" roughness={0.8} /></mesh>
-    <mesh geometry={geometry} position={[-1.5, 0.4, 0]} rotation={[0, Math.PI / 2, 0]} castShadow><meshStandardMaterial color="#e7d5b3" roughness={0.8} /></mesh>
-    <mesh position={[0, 16.6, 0]}><boxGeometry args={[6.8, 0.5, 6.8]} /><meshStandardMaterial color="#e6d2ae" /></mesh>
-    {[-2, -1, 0, 1, 2].map(x => <mesh key={x} position={[x, 14.4, 3.42]}><boxGeometry args={[0.22, 2.4, 0.06]} /><meshStandardMaterial color="#8d9d91" /></mesh>)}
-  </group>;
-}
-function Mountains() {
-  return <group>
-    {Array.from({ length: 12 }, (_, i) => {
-      const h = 36 + Math.sin(i * 2.1) * 16;
-      return <group key={i} position={[(i - 5.5) * 39, 0, -225 - (i % 3) * 15]}>
-        <mesh position={[0, h / 2 - 2, 0]} rotation={[0, i, 0]}><coneGeometry args={[49, h, 5]} /><meshStandardMaterial color={i % 2 ? '#a9a99a' : '#a0a89e'} flatShading /></mesh>
-        {h > 42 && <mesh position={[0, h - 7, 0]} rotation={[0, i, 0]}><coneGeometry args={[10, 10, 5]} /><meshStandardMaterial color="#e2dfcf" flatShading /></mesh>}
-      </group>;
-    })}
-    <group position={[110, 0, -170]}>
-      <mesh position={[0, 24, 0]}><cylinderGeometry args={[0.8, 2, 48, 8]} /><meshStandardMaterial color="#adac96" /></mesh>
-      <mesh position={[0, 48, 0]}><cylinderGeometry args={[3.5, 5.5, 8, 8]} /><meshStandardMaterial color="#909d95" /></mesh>
-      <mesh position={[0, 57, 0]}><cylinderGeometry args={[0.12, 0.6, 14, 6]} /><meshStandardMaterial color="#a2a491" /></mesh>
-    </group>
-  </group>;
-}
-function World() {
-  const batches = useMemo(() => {
-    const groups: Record<string, Box[]> = {};
-    boxes.forEach(box => (groups[box.c] ??= []).push(box)); return Object.entries(groups);
-  }, []);
-  return <group>
-    <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow><planeGeometry args={[1400, 1400]} /><meshStandardMaterial color="#b4b099" /></mesh>
-    {batches.map(([color, items]) => <BoxBatch key={color} color={color} items={items} />)}
-    <Trees /><Azadi /><Mountains />
-    {signs.map((sign, i) => <ShopSign key={i} sign={sign} />)}
-  </group>;
+  }, [model]);
+  // Kenney vehicles face local +Z, while the scene's vehicle basis uses -Z as forward.
+  return <primitive object={model} scale={scale * 0.729} rotation={[0, Math.PI, 0]} />;
 }
 
-function Part({ position, size, color, rotation }: { position: [number, number, number]; size: [number, number, number]; color: string; rotation?: [number, number, number] }) {
-  return <mesh position={position} rotation={rotation} castShadow><boxGeometry args={size} /><meshStandardMaterial color={color} roughness={0.48} metalness={0.12} /></mesh>;
+const PLAYER_CAR_LENGTH = 2.4;
+
+function surfaceAt(car: CarState) {
+  const latitude = loopFrame(car.x, car.z).latitude;
+  return { onRoad: distanceToRoadNetwork(latitude, car.x) < 0.7, onLand: landInfluence(latitude, car.x) >= 0.5 };
 }
-function CarModel({ car, night }: { car: React.RefObject<CarState>; night: boolean }) {
-  const wheels = useRef<THREE.Group>(null!);
-  const body = useRef<THREE.Group>(null!);
-  useFrame((_, dt) => {
-    wheels.current.children.forEach((wheel, i) => {
-      if (i < 2) wheel.rotation.y = car.current.steering * 0.35;
-      wheel.children[0].rotation.x -= car.current.speed * dt / 0.38;
+
+function PlayerCar({ car }: { car: React.RefObject<CarState> }) {
+  const gltf = useLoader(GLTFLoader, playerModelUrl);
+  const model = useMemo(() => {
+    const clone = gltf.scene.clone(true);
+    if (CAR_CONFIG.logModelNodes) logModelNodes(clone);
+    logMaterials('player car', clone);
+    const jitter = jitterAmount(seededRandom(77), JITTER.cars);
+    clone.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const map = (child.material as THREE.MeshStandardMaterial).map;
+      if (map) {
+        const baked = bakeRoles(child.geometry, textureSampler(map), playerCarRole);
+        child.geometry = baked.geometry;
+        child.material = roleMaterials(baked.roles, carRoleColor(PLAYER_COLOR), jitter);
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
     });
-    body.current.rotation.z = THREE.MathUtils.damp(body.current.rotation.z, -car.current.steering * car.current.speed * 0.0017, 5, dt);
+    const rawSize = new THREE.Box3().setFromObject(clone).getSize(new THREE.Vector3());
+    clone.scale.setScalar(PLAYER_CAR_LENGTH / Math.max(rawSize.x, rawSize.z));
+    clone.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(clone);
+    const center = bounds.getCenter(new THREE.Vector3());
+    clone.position.set(-center.x, -bounds.min.y, -center.z);
+    return clone;
+  }, [gltf.scene]);
+  const rig = useMemo(() => buildCarRig(model), [model]);
+  const lastTravel = useRef<number | null>(null);
+  useFrame(() => {
+    const state = car.current;
+    const travel = lastTravel.current === null ? 0 : state.wheelTravel - lastTravel.current;
+    lastTravel.current = state.wheelTravel;
+    updateWheels(rig, state.steering, Math.abs(travel) < 1 ? travel : 0);
   });
-  return <group>
-    <group ref={body}>
-      <Part position={[0, 0.69, 0]} size={[1.86, 0.53, 4.1]} color="#398e91" />
-      <Part position={[0, 0.94, -1.42]} size={[1.85, 0.2, 1.15]} color="#54a3a1" />
-      <Part position={[0, 0.95, 1.55]} size={[1.84, 0.18, 0.85]} color="#54a3a1" />
-      <Part position={[0, 1.28, 0.1]} size={[1.62, 0.68, 1.95]} color="#293e3c" />
-      <Part position={[0, 1.66, 0.17]} size={[1.68, 0.13, 1.83]} color="#e7dec5" />
-      <Part position={[0, 1.24, -0.91]} size={[1.52, 0.66, 0.06]} color="#759d9b" rotation={[-0.22, 0, 0]} />
-      <Part position={[0, 1.24, 1.08]} size={[1.51, 0.63, 0.06]} color="#6c9290" rotation={[0.25, 0, 0]} />
-      {[-1, 1].map(side => <group key={side}>
-        <Part position={[side * 0.82, 1.28, 0.16]} size={[0.05, 0.65, 0.1]} color="#e4dbc3" />
-        <Part position={[side * 0.84, 1.28, -0.78]} size={[0.08, 0.65, 0.1]} color="#e4dbc3" />
-        <Part position={[side * 0.84, 1.28, 1.03]} size={[0.08, 0.65, 0.1]} color="#e4dbc3" />
-        <Part position={[side * 0.96, 0.74, 0]} size={[0.03, 0.05, 3.6]} color="#d4d7c8" />
-        <Part position={[side * 1.04, 1.15, -0.68]} size={[0.26, 0.16, 0.24]} color="#d9dbc9" />
-        <Part position={[side * 0.95, 0.96, 0.6]} size={[0.04, 0.05, 0.25]} color="#e5dcc1" />
-        <mesh position={[side * 0.66, 0.82, -2.07]}><boxGeometry args={[0.46, 0.25, 0.05]} /><meshStandardMaterial color="#fff0b2" emissive="#ffce79" emissiveIntensity={night ? 3 : 0.4} /></mesh>
-        <mesh position={[side * 0.68, 0.81, 2.07]}><boxGeometry args={[0.37, 0.2, 0.04]} /><meshStandardMaterial color="#c64e32" emissive="#ff351d" emissiveIntensity={night ? 1.7 : 0.2} /></mesh>
-      </group>)}
-      <Part position={[0, 0.55, -2.1]} size={[1.9, 0.16, 0.12]} color="#d2d6cb" />
-      <Part position={[0, 0.55, 2.1]} size={[1.9, 0.16, 0.12]} color="#d2d6cb" />
-      <Part position={[0, 0.82, -2.08]} size={[0.7, 0.22, 0.04]} color="#283f3d" />
-      <Part position={[0, 0.74, 2.11]} size={[0.48, 0.14, 0.025]} color="#f3efdc" />
-    </group>
-    <group ref={wheels}>{[-1.28, 1.3].flatMap(z => [-1, 1].map(side => <group key={`${z}${side}`} position={[side * 0.91, 0.4, z]}>
-      <group>
-        <mesh rotation={[0, 0, Math.PI / 2]} castShadow><cylinderGeometry args={[0.39, 0.39, 0.27, 16]} /><meshStandardMaterial color="#29302e" roughness={0.96} /></mesh>
-        <mesh position={[side * 0.15, 0, 0]} rotation={[0, 0, Math.PI / 2]}><cylinderGeometry args={[0.23, 0.23, 0.025, 12]} /><meshStandardMaterial color="#c7c9bc" metalness={0.6} roughness={0.3} /></mesh>
-      </group>
-    </group>))}</group>
-    {night && <pointLight position={[0, 1.2, -3]} color="#ffdaa0" intensity={22} distance={19} />}
-  </group>;
+  useEffect(() => () => {
+    rig.dispose();
+    model.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      if (Array.isArray(child.material)) child.material.forEach(material => material.dispose());
+      else child.material.dispose();
+    });
+  }, [model, rig]);
+  return <primitive object={rig.frame} />;
 }
-function Marker({ stop }: { stop: number }) {
+
+function CarModel({ car, active, landingCompression, landingActive }: {
+  car: React.RefObject<CarState>;
+  active: boolean;
+  landingCompression: React.RefObject<number>;
+  landingActive: React.RefObject<boolean>;
+}) {
+  const body = useRef<THREE.Group>(null!);
+  const spring = useMemo(createBodySpring, []);
+  const landing = useRef(0);
+  useFrame((_, delta) => {
+    const state = car.current;
+    const dt = Math.min(delta, LOOP_DRIVE.maxFrameDelta);
+    updateBodySpring(spring, state, dt, active && !landingActive.current, !surfaceAt(state).onRoad);
+    landing.current = THREE.MathUtils.damp(landing.current, landingCompression.current, 13, dt);
+    body.current.rotation.x = spring.pitch + landing.current * 0.09;
+    body.current.rotation.z = spring.roll;
+    body.current.scale.y = 1 - landing.current * 0.34;
+    body.current.position.y = spring.bounce - landing.current * 0.22;
+  });
+  return <group ref={body} name="carBody"><PlayerCar car={car} /></group>;
+}
+
+// Seeded body colors; cars that are next to each other on the loop never share one.
+function trafficColors(count: number, order: number[]) {
+  const random = seededRandom(9001);
+  const colors: PaletteKey[] = new Array(count);
+  order.forEach((carIndex, position) => {
+    const previous = position > 0 ? colors[order[position - 1]] : undefined;
+    const first = position === order.length - 1 ? colors[order[0]] : undefined;
+    const options = CAR_COLORS.filter(key => key !== previous && key !== first);
+    colors[carIndex] = options[Math.floor(random() * options.length)];
+  });
+  return colors;
+}
+
+const traffic = [
+  { modelUrl: taxiModelUrl, pathIndex: 0, progress: 0.12, speed: 6.2, scale: 1.26 },
+  { modelUrl: policeModelUrl, pathIndex: 0, progress: 0.35, speed: 7.4, scale: 1.2 },
+  { modelUrl: suvModelUrl, pathIndex: 0, progress: 0.69, speed: 5.8, scale: 1.28 },
+  { modelUrl: vanModelUrl, pathIndex: 0, progress: 0.56, speed: -5.2, scale: 1.22 },
+  { modelUrl: ambulanceModelUrl, pathIndex: 0, progress: 0.27, speed: -6.7, scale: 1.16 },
+  { modelUrl: truckModelUrl, pathIndex: 0, progress: 0.83, speed: 4.8, scale: 1.22 },
+  { modelUrl: deliveryModelUrl, pathIndex: 0, progress: 0.92, speed: -4.6, scale: 1.18 },
+];
+const TRAFFIC_COLORS = trafficColors(traffic.length, traffic.map((_, index) => index).sort((a, b) => traffic[a].progress - traffic[b].progress));
+const TRAFFIC_JITTER = (() => { const random = seededRandom(9002); return traffic.map(() => jitterAmount(random, JITTER.cars)); })();
+
+const TRAFFIC_COLLISION_RADIUS = 1.1;
+// Basic traffic reactions: stop for the player ahead in the lane, and take a push when hit.
+const NPC = {
+  stopDistance: 10, minGap: 3.5, laneHalfWidth: 2.4, braking: 3, followDistance: 9, followGap: 4.5,
+  pushTransfer: 0.9, spinTransfer: 0.25, maxPush: 6, shoveForward: 0.7, hitCooldown: 0.4,
+  laneReturn: 2.5, pushDamping: 3, spinStiffness: 12, spinDamping: 4,
+};
+
+function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale, paused, progressIndex, progresses, obstacle, player, reactive }: typeof traffic[number] & {
+  paused: boolean;
+  progressIndex: number;
+  progresses: React.RefObject<number[]>;
+  obstacle: Obstacle;
+  player: React.RefObject<CarState>;
+  reactive: boolean;
+}) {
+  const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0 });
+  const playerPoint = useMemo(() => new THREE.Vector3(), []);
+  const toPlayer = useMemo(() => new THREE.Vector3(), []);
   const group = useRef<THREE.Group>(null!);
-  const point = STOPS[stop];
-  useFrame(({ clock }) => { if (group.current) group.current.position.y = 2.6 + Math.sin(clock.elapsedTime * 2) * 0.25; });
-  if (!point) return null;
-  return <group position={[point.x, 0, point.z]}>
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.12, 0]}><ringGeometry args={[2.5, 2.9, 48]} /><meshBasicMaterial color="#f4cb77" side={THREE.DoubleSide} /></mesh>
-    <group ref={group}>
-      <mesh rotation={[0, 0, Math.PI]}><coneGeometry args={[0.55, 0.9, 4]} /><meshStandardMaterial color="#f3c772" emissive="#dca751" emissiveIntensity={0.3} /></mesh>
-    </group>
-  </group>;
+  const progress = useRef(startProgress);
+  const path = ROAD_PATHS[pathIndex];
+  const normal = useMemo(() => new THREE.Vector3(), []);
+  const tangent = useMemo(() => new THREE.Vector3(), []);
+  const right = useMemo(() => new THREE.Vector3(), []);
+  const back = useMemo(() => new THREE.Vector3(), []);
+  const basis = useMemo(() => new THREE.Matrix4(), []);
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    const m = motion.current;
+    if (!paused) progress.current = (progress.current + Math.sign(speed) * m.speed * dt / roadPathMetric(path, progress.current) + 1) % 1;
+    progresses.current[progressIndex] = progress.current;
+    const frame = roadPathFrame(path, progress.current, 0.075);
+    normal.set(...frame.normal);
+    tangent.set(...frame.tangent).multiplyScalar(Math.sign(speed));
+    right.crossVectors(tangent, normal).normalize();
+    group.current.position.set(...frame.point).addScaledVector(right, TRAFFIC_LANE_OFFSET + m.push);
+    const surfaceRadius = Math.hypot(frame.point[0], frame.point[1] + GLOBE_RADIUS, frame.point[2]);
+    group.current.position.sub(localGlobeCenter).normalize().multiplyScalar(surfaceRadius).add(localGlobeCenter);
+    back.copy(tangent).negate();
+    basis.makeBasis(right, normal, back);
+    group.current.quaternion.setFromRotationMatrix(basis);
+
+    // Where is the player relative to this car's travel direction and lane?
+    const car = player.current;
+    playerPoint.set(...spherePoint(loopLatitude(car.x) + car.z / GLOBE_RADIUS, car.x, 0));
+    toPlayer.copy(playerPoint).sub(group.current.position);
+    const ahead = toPlayer.dot(tangent);
+    const lateral = toPlayer.dot(right);
+    // Already overlapping the player? Keep moving so the cars separate instead of locking together.
+    const blocked = reactive && ahead > 1.5 && ahead < NPC.stopDistance && Math.abs(lateral) < NPC.laneHalfWidth;
+    const cruise = Math.abs(speed);
+    let followGap = Infinity;
+    traffic.forEach((other, index) => {
+      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed)) return;
+      const fraction = ((progresses.current[index] - progress.current) * Math.sign(speed) + 1) % 1;
+      followGap = Math.min(followGap, fraction * roadPathMetric(path, progress.current));
+    });
+    const follow = THREE.MathUtils.clamp((followGap - NPC.followGap) / (NPC.followDistance - NPC.followGap), 0, 1);
+    const targetSpeed = Math.min(
+      blocked ? cruise * THREE.MathUtils.clamp((ahead - NPC.minGap) / (NPC.stopDistance - NPC.minGap), 0, 1) : cruise,
+      cruise * follow,
+    );
+    m.speed = THREE.MathUtils.damp(m.speed, targetSpeed, NPC.braking, dt);
+    m.cooldown = Math.max(0, m.cooldown - dt);
+    obstacle.ramCooldown = Math.max(0, (obstacle.ramCooldown ?? 0) - dt);
+    if (obstacle.impact && m.cooldown === 0) {
+      const away = lateral > 0 ? -1 : 1;
+      const sideways = Math.min(1, Math.abs(lateral) / NPC.laneHalfWidth);
+      m.pushVelocity += away * obstacle.impact * NPC.pushTransfer * Math.max(sideways, 0.35);
+      m.spinVelocity += away * obstacle.impact * NPC.spinTransfer;
+      // A hit from behind shoves the car forward; a hit from the front stops it dead.
+      m.speed = ahead < 0 ? m.speed + obstacle.impact * NPC.shoveForward * (1 - sideways) : m.speed * 0.3;
+      m.cooldown = NPC.hitCooldown;
+    }
+    obstacle.impact = 0;
+    m.pushVelocity += (-m.push * NPC.laneReturn - m.pushVelocity * NPC.pushDamping) * dt;
+    m.push = THREE.MathUtils.clamp(m.push + m.pushVelocity * dt, -NPC.maxPush, NPC.maxPush);
+    m.spinVelocity += (-m.spin * NPC.spinStiffness - m.spinVelocity * NPC.spinDamping) * dt;
+    m.spin += m.spinVelocity * dt;
+    group.current.rotateY(m.spin);
+    // Keep this car's collision circle on its current position (planet centre is localGlobeCenter).
+    const p = group.current.position;
+    const r = Math.hypot(p.x - localGlobeCenter.x, p.y - localGlobeCenter.y, p.z - localGlobeCenter.z);
+    obstacle.latitude = Math.asin(THREE.MathUtils.clamp((p.y - localGlobeCenter.y) / r, -1, 1));
+    obstacle.longitude = Math.atan2(p.x - localGlobeCenter.x, p.z - localGlobeCenter.z);
+  });
+  return <group ref={group}><KenneyCar modelUrl={modelUrl} scale={scale} color={TRAFFIC_COLORS[progressIndex]} jitter={TRAFFIC_JITTER[progressIndex]} /></group>;
 }
+
+function Traffic({ paused, progresses, player, reactive }: { paused: boolean; progresses: React.RefObject<number[]>; player: React.RefObject<CarState>; reactive: boolean }) {
+  const obstacles = useMemo<Obstacle[]>(() => traffic.map(() => ({ latitude: 0, longitude: 0, radius: TRAFFIC_COLLISION_RADIUS, movable: true })), []);
+  useEffect(() => {
+    setObstacleGroup('traffic', obstacles);
+    return () => clearObstacleGroup('traffic');
+  }, [obstacles]);
+  return <>{traffic.map((car, index) => <TrafficCar key={`${car.modelUrl}-${index}`} {...car} paused={paused} progressIndex={index} progresses={progresses} obstacle={obstacles[index]} player={player} reactive={reactive} />)}</>;
+}
+
+const ARRIVAL = { duration: 2.6, yaw: -1.1, pitch: 0.5, zoom: 0.62 };
+const WHEEL_ZOOM = { closer: 0.23, duration: 0.55, tilt: 0.12 };
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+
+function AtmosphereGlow({ amount }: { amount: React.RefObject<number> }) {
+  const uniforms = useMemo(() => ({
+    uColor: { value: new THREE.Color(PALETTE.atmosphere) },
+    uIntensity: { value: ATMOSPHERE.glow.intensity },
+    uPower: { value: ATMOSPHERE.glow.power },
+    uFade: { value: 1 },
+  }), []);
+  useFrame(() => { uniforms.uFade.value = amount.current; });
+  return <mesh>
+    <sphereGeometry args={[GLOBE_RADIUS * ATMOSPHERE.glow.radius, 64, 48]} />
+    <shaderMaterial
+      uniforms={uniforms}
+      transparent
+      depthWrite={false}
+      side={THREE.BackSide}
+      blending={THREE.AdditiveBlending}
+      vertexShader={`varying vec3 vNormal;
+        void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`}
+      fragmentShader={`uniform vec3 uColor;
+        uniform float uIntensity;
+        uniform float uPower;
+        uniform float uFade;
+        varying vec3 vNormal;
+        void main() {
+          float rim = clamp(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 0.0, 1.0);
+          gl_FragColor = vec4(uColor, pow(rim, uPower) * uIntensity * uFade);
+        }`}
+    />
+  </mesh>;
+}
+
 function DrivingScene(props: SceneProps) {
   const vehicle = useRef<THREE.Group>(null!);
-  const { camera } = useThree();
-  const target = useMemo(() => new THREE.Vector3(), []);
-  const lookAt = useMemo(() => new THREE.Vector3(), []);
-  const smoothedLook = useMemo(() => new THREE.Vector3(0, 1, 15), []);
-  const tick = useRef(0);
-  const lastStop = useRef(-1);
-  useEffect(() => { props.onReady(); }, [props.onReady]);
+  const globeGroup = useRef<THREE.Group>(null!);
+  const scaleGroup = useRef<THREE.Group>(null!);
+  const { camera, gl, scene } = useThree();
+  // Keep the intro camera aimed through the globe's center. The asymmetric
+  // composition is created with lens shift below, so the spherical silhouette
+  // stays circular instead of becoming an off-axis perspective ellipse.
+  const introCamera = useMemo(() => new THREE.Vector3(0, 40, 94), []);
+  const introLook = useMemo(() => new THREE.Vector3(0, -GLOBE_RADIUS, 0), []);
+  const gameCamera = useMemo(() => new THREE.Vector3(), []);
+  const gameLook = useMemo(() => new THREE.Vector3(), []);
+  const desiredCamera = useMemo(() => new THREE.Vector3(), []);
+  const desiredLook = useMemo(() => new THREE.Vector3(), []);
+  const globeCenter = useMemo(() => new THREE.Vector3(0, -GLOBE_RADIUS, 0), []);
+  const cameraStartDirection = useMemo(() => new THREE.Vector3(), []);
+  const cameraEndDirection = useMemo(() => new THREE.Vector3(), []);
+  const cameraArc = useMemo(() => new THREE.Quaternion(), []);
+  const cameraArcStep = useMemo(() => new THREE.Quaternion(), []);
+  const smoothedLook = useMemo(() => introLook.clone(), [introLook]);
+  const smoothedUp = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  const surfaceUp = useMemo(() => new THREE.Vector3(), []);
+  const vehiclePosition = useMemo(() => new THREE.Vector3(), []);
+  const groundVehiclePosition = useMemo(() => new THREE.Vector3(), []);
+  const vehicleUp = useMemo(() => new THREE.Vector3(), []);
+  const vehicleTangent = useMemo(() => new THREE.Vector3(), []);
+  const vehicleNorth = useMemo(() => new THREE.Vector3(), []);
+  const vehicleRight = useMemo(() => new THREE.Vector3(), []);
+  const vehicleBack = useMemo(() => new THREE.Vector3(), []);
+  const vehicleBasis = useMemo(() => new THREE.Matrix4(), []);
+  const targetVehicleQuaternion = useMemo(() => new THREE.Quaternion(), []);
+  const targetCameraUp = useMemo(() => new THREE.Vector3(), []);
+  const rotation = useRef(Math.PI * 140 / 180);
+  const pitch = useRef(0);
+  const introPan = useRef(new THREE.Vector2());
+  const dragging = useRef(false);
+  const panning = useRef(false);
+  const lastPointer = useRef({ x: 0, y: 0 });
+  const zoomProgress = useRef(0);
+  const smoothedElevation = useRef<number | null>(null);
+  const poseInitialized = useRef(false);
+  const readied = useRef(false);
+  const introZoom = useRef(0);
+  const introZoomTarget = useRef(0);
+  const introZoomFrom = useRef(0);
+  const introZoomClock = useRef(0);
+  const introZoomCta = useRef(0);
+  const glowAmount = useRef(1);
+  const arrivalTime = useRef(0);
+  const trafficProgresses = useRef(traffic.map(car => car.progress));
+  const lastSpawnIndex = useRef(-1);
+  const wasStarted = useRef(false);
+  const landingHeight = useRef(0);
+  const landingVelocity = useRef(0);
+  const landingCompression = useRef(0);
+  const landingActive = useRef(false);
+  const landingReleased = useRef(false);
+  const landingCameraBlend = useRef(0);
+  const globeAligned = useRef(false);
+  const roughShake = useRef(0);
+  const wasOnRoad = useRef<boolean | null>(null);
+  const telemetryTime = useRef(0);
+  const sun = useRef<THREE.DirectionalLight>(null!);
+  const sunTarget = useMemo(() => new THREE.Object3D(), []);
+  const sunOverviewPosition = useMemo(() => new THREE.Vector3(-52, 78, 62), []);
+  const sunLocalPosition = useMemo(() => new THREE.Vector3(), []);
+  const sunPlanarDirection = useMemo(() => new THREE.Vector3(), []);
+  const fog = useMemo(() => new THREE.Fog(
+    ART_DIRECTION.day.fogColor,
+    ART_DIRECTION.atmosphere.overviewNear,
+    ART_DIRECTION.atmosphere.overviewFar,
+  ), []);
+
   useEffect(() => {
-    props.car.current = initialCar(); lastStop.current = -1;
-    camera.position.set(4.2, 11, 51); smoothedLook.set(4.5, 1, 27);
-  }, [props.resetKey, camera, props.car, smoothedLook]);
-  useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.05); const car = props.car.current;
-    if (props.started && !props.paused) stepCar(car, props.controls.current, dt);
-    vehicle.current.position.set(car.x, 0.08, car.z); vehicle.current.rotation.y = car.heading;
-    if (!props.started && props.cameraMode === 0) {
-      target.set(car.x + 0.7, 11, car.z + 16); lookAt.set(car.x + 1, 1, car.z - 8);
-    } else if (props.cameraMode === 1) {
-      target.set(car.x + 12, 36, car.z + 21); lookAt.set(car.x, 0, car.z - 3);
-    } else {
-      let distance = CAMERA.followDistance + Math.abs(car.speed) * 0.12;
-      // Shorten the boom at corners so the view does not enter a building.
-      for (let d = 2; d <= distance; d += 0.5) {
-        if (isBlocked(car.x + Math.sin(car.heading) * d, car.z + Math.cos(car.heading) * d)) { distance = Math.max(2, d - 1); break; }
+    gl.toneMapping = THREE.ACESFilmicToneMapping;
+    gl.toneMappingExposure = props.night ? ART_DIRECTION.night.exposure : ATMOSPHERE.post.exposure;
+    gl.outputColorSpace = THREE.SRGBColorSpace;
+    gl.shadowMap.type = THREE.PCFSoftShadowMap;
+  }, [gl, props.night]);
+  useEffect(() => {
+    scene.fog = fog;
+    sun.current.target = sunTarget;
+    scene.add(sunTarget);
+    return () => {
+      if (scene.fog === fog) scene.fog = null;
+      scene.remove(sunTarget);
+    };
+  }, [fog, scene, sunTarget]);
+  useEffect(() => {
+    const spawnIndex = SPAWN_INDEX;
+    lastSpawnIndex.current = spawnIndex;
+    props.car.current = { ...initialLoopCar(), x: scenicSpawnAngles[spawnIndex], z: SPAWN_LANE_OFFSET };
+    smoothedElevation.current = null;
+    poseInitialized.current = false;
+    landingHeight.current = props.started ? LANDING_HEIGHT + (spawnIndex % 3) * 0.3 : 0;
+    landingVelocity.current = 0;
+    landingCompression.current = 0;
+    landingActive.current = props.started;
+    landingReleased.current = false;
+    wasOnRoad.current = null;
+  }, [props.resetKey, props.car]);
+  useEffect(() => {
+    if (props.started && !wasStarted.current) {
+      const spawnIndex = SPAWN_INDEX;
+      lastSpawnIndex.current = spawnIndex;
+      props.car.current = { ...initialLoopCar(), x: scenicSpawnAngles[spawnIndex], z: SPAWN_LANE_OFFSET };
+      smoothedElevation.current = null;
+      landingHeight.current = LANDING_HEIGHT + (lastSpawnIndex.current % 3) * 0.3;
+      landingVelocity.current = 0;
+      landingCompression.current = 0;
+      landingActive.current = true;
+      landingReleased.current = false;
+      poseInitialized.current = false;
+      wasOnRoad.current = null;
+    } else if (!props.started) {
+      landingHeight.current = 0;
+      landingVelocity.current = 0;
+      landingCompression.current = 0;
+      landingActive.current = false;
+      landingReleased.current = false;
+    }
+    wasStarted.current = props.started;
+  }, [props.started]);
+  useEffect(() => {
+    const canvas = gl.domElement;
+    canvas.style.cursor = props.started ? 'default' : 'grab';
+    const down = (event: PointerEvent) => {
+      if (props.started || zoomProgress.current > 0.02 || event.button !== 0) return;
+      dragging.current = true;
+      panning.current = event.shiftKey;
+      lastPointer.current = { x: event.clientX, y: event.clientY };
+      canvas.setPointerCapture(event.pointerId);
+      canvas.style.cursor = 'grabbing';
+    };
+    const move = (event: PointerEvent) => {
+      if (!dragging.current || props.started) return;
+      const dx = event.clientX - lastPointer.current.x;
+      const dy = event.clientY - lastPointer.current.y;
+      if (panning.current) {
+        introPan.current.x = THREE.MathUtils.clamp(introPan.current.x + dx * 0.035, -10, 10);
+        introPan.current.y = THREE.MathUtils.clamp(introPan.current.y - dy * 0.035, -7, 7);
+      } else {
+        rotation.current += dx * 0.006;
       }
-      target.set(car.x + Math.sin(car.heading) * distance, CAMERA.followHeight, car.z + Math.cos(car.heading) * distance);
-      lookAt.set(car.x - Math.sin(car.heading) * 5, 1.1, car.z - Math.cos(car.heading) * 5);
+      lastPointer.current = { x: event.clientX, y: event.clientY };
+    };
+    const up = (event: PointerEvent) => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      panning.current = false;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      canvas.style.cursor = props.started ? 'default' : 'grab';
+    };
+    canvas.addEventListener('pointerdown', down);
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    const wheel = (event: WheelEvent) => {
+      if (props.started || Math.abs(event.deltaY) < 2) return;
+      event.preventDefault();
+      const target = event.deltaY < 0 ? 1 : 0;
+      if (target === introZoomTarget.current) return;
+      introZoomFrom.current = introZoom.current;
+      introZoomTarget.current = target;
+      introZoomClock.current = 0;
+    };
+    canvas.addEventListener('pointercancel', up);
+    canvas.addEventListener('wheel', wheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', wheel);
+      canvas.style.cursor = '';
+      canvas.removeEventListener('pointerdown', down);
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', up);
+    };
+  }, [gl, props.started]);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    if (!readied.current) { readied.current = true; props.onReady(); }
+    arrivalTime.current += dt;
+    const settle = 1 - easeOutCubic(Math.min(arrivalTime.current / ARRIVAL.duration, 1));
+    if (props.started) {
+      introZoom.current = THREE.MathUtils.damp(introZoom.current, 0, 6, dt);
+      introZoomTarget.current = 0;
+      introZoomFrom.current = 0;
+      introZoomClock.current = WHEEL_ZOOM.duration;
+    } else {
+      introZoomClock.current += dt;
+      const zoomT = easeInOutCubic(Math.min(introZoomClock.current / WHEEL_ZOOM.duration, 1));
+      introZoom.current = THREE.MathUtils.lerp(introZoomFrom.current, introZoomTarget.current, zoomT);
     }
-    const ease = 1 - Math.exp(-CAMERA.smoothing * dt);
-    camera.position.lerp(target, ease); smoothedLook.lerp(lookAt, ease); camera.lookAt(smoothedLook);
-    const stop = STOPS[props.stop];
-    if (props.started && !props.paused && stop && lastStop.current !== props.stop && Math.hypot(car.x - stop.x, car.z - stop.z) < 4) {
-      lastStop.current = props.stop; props.onStop();
+    document.documentElement.style.setProperty('--intro-zoom', introZoom.current.toFixed(4));
+    introZoomCta.current = THREE.MathUtils.damp(introZoomCta.current, introZoom.current, 7, dt);
+    document.documentElement.style.setProperty('--intro-zoom-cta', introZoomCta.current.toFixed(4));
+    const car = props.car.current;
+    let globeAlignmentError = 0;
+    if (props.started) {
+      const targetRotation = -car.x;
+      const rotationError = Math.atan2(Math.sin(targetRotation - rotation.current), Math.cos(targetRotation - rotation.current));
+      globeAlignmentError = Math.abs(rotationError);
+      if (globeAlignmentError < 0.03) globeAligned.current = true;
+      rotation.current += rotationError * (1 - Math.exp(-2 * dt));
+    } else {
+      globeAligned.current = false;
     }
-    tick.current += dt;
-    if (tick.current > 0.1) { props.onTelemetry({ ...car, speed: Math.abs(car.speed) * 3.6 }); tick.current = 0; }
+    zoomProgress.current = THREE.MathUtils.damp(
+      zoomProgress.current,
+      props.started && globeAligned.current ? 1 : 0,
+      props.started ? 1.45 : 1.2,
+      dt,
+    );
+    const cameraPhase = THREE.MathUtils.clamp((zoomProgress.current - 0.1) / 0.9, 0, 1);
+    const zoom = cameraPhase * cameraPhase * cameraPhase * (cameraPhase * (cameraPhase * 6 - 15) + 10);
+    landingCameraBlend.current = THREE.MathUtils.damp(
+      landingCameraBlend.current,
+      landingActive.current ? 1 : 0,
+      landingActive.current ? 4.8 : 1.8,
+      dt,
+    );
+    if (landingActive.current) {
+      // Release only after the globe has faced the spawn and the camera has
+      // nearly reached its close landing shot. This prevents a mid-orbit drop.
+      if (!landingReleased.current && cameraPhase >= 0.82 && globeAlignmentError < 0.08) landingReleased.current = true;
+      if (landingReleased.current) {
+        landingVelocity.current -= 24 * dt;
+        landingHeight.current += landingVelocity.current * dt;
+        if (landingHeight.current <= 0) {
+          const impactSpeed = Math.max(0, -landingVelocity.current);
+          landingHeight.current = 0;
+          if (impactSpeed > 1.35) {
+            landingVelocity.current = impactSpeed * 0.34;
+            landingCompression.current = Math.max(
+              landingCompression.current,
+              THREE.MathUtils.clamp(impactSpeed / 24, 0.12, 0.46),
+            );
+          } else {
+            landingVelocity.current = 0;
+            landingActive.current = false;
+          }
+        }
+      }
+    }
+    landingCompression.current = THREE.MathUtils.damp(landingCompression.current, 0, 6.5, dt);
+    scaleGroup.current.scale.setScalar(1);
+    if (!props.started && zoomProgress.current < 0.02 && !dragging.current) rotation.current += dt * 0.11;
+    if (props.started) {
+      pitch.current = THREE.MathUtils.damp(pitch.current, 0, 9, dt);
+      introPan.current.x = THREE.MathUtils.damp(introPan.current.x, 0, 9, dt);
+      introPan.current.y = THREE.MathUtils.damp(introPan.current.y, 0, 9, dt);
+    }
+    globeGroup.current.position.set(introPan.current.x, -GLOBE_RADIUS + introPan.current.y, 0);
+    globeGroup.current.rotation.y = rotation.current + settle * ARRIVAL.yaw;
+    globeGroup.current.rotation.x = pitch.current + settle * ARRIVAL.pitch + Math.sin(Math.PI * introZoom.current) * WHEEL_ZOOM.tilt;
+    if (props.started && !props.paused && !landingActive.current) stepLoopCar(car, props.controls.current, dt, true);
+
+    const carFrame = loopFrame(car.x, car.z);
+    const latitude = carFrame.latitude;
+    const onRoad = distanceToRoadNetwork(latitude, car.x) < 0.7;
+    if (wasOnRoad.current !== null && wasOnRoad.current !== onRoad && !landingActive.current) {
+      landingCompression.current = Math.max(landingCompression.current, onRoad ? 0.11 : 0.2);
+    }
+    wasOnRoad.current = onRoad;
+    const elevation = onRoad ? roadSurfaceElevation(latitude, car.x) : terrainElevation(latitude, car.x);
+    const targetElevation = elevation + (onRoad ? 0.075 : 0.025);
+    smoothedElevation.current = smoothedElevation.current === null
+      ? targetElevation
+      : THREE.MathUtils.damp(smoothedElevation.current, targetElevation, 8, dt);
+    groundVehiclePosition.set(...spherePoint(latitude, car.x, smoothedElevation.current));
+    vehicle.current.position.set(...spherePoint(latitude, car.x, smoothedElevation.current + landingHeight.current));
+    vehicleUp.set(...terrainNormal(latitude, car.x));
+    vehicleTangent.set(...carFrame.tangent);
+    vehicleTangent.addScaledVector(vehicleUp, -vehicleTangent.dot(vehicleUp)).normalize();
+    vehicleNorth.crossVectors(vehicleUp, vehicleTangent).normalize();
+    vehicleTangent.multiplyScalar(Math.cos(car.heading)).addScaledVector(vehicleNorth, Math.sin(car.heading)).normalize();
+    vehicleRight.crossVectors(vehicleTangent, vehicleUp);
+    vehicleBack.copy(vehicleTangent).negate();
+    vehicleBasis.makeBasis(vehicleRight, vehicleUp, vehicleBack);
+    targetVehicleQuaternion.setFromRotationMatrix(vehicleBasis);
+    if (!poseInitialized.current) {
+      vehicle.current.quaternion.copy(targetVehicleQuaternion);
+      poseInitialized.current = true;
+    } else {
+      vehicle.current.quaternion.slerp(targetVehicleQuaternion, 1 - Math.exp(-11 * dt));
+    }
+
+    vehiclePosition.copy(vehicle.current.position).applyAxisAngle(localUp, rotation.current);
+    groundVehiclePosition.applyAxisAngle(localUp, rotation.current);
+    vehicleTangent.applyAxisAngle(localUp, rotation.current);
+    surfaceUp.copy(vehicleUp).applyAxisAngle(localUp, rotation.current);
+    const lightStyle = props.night ? ART_DIRECTION.night : ART_DIRECTION.day;
+    fog.color.set(props.night ? lightStyle.fogColor : PALETTE.haze);
+    const cameraDistance = camera.position.distanceTo(globeCenter);
+    const fogEase = 1 - Math.exp(-ATMOSPHERE.fog.damping * dt);
+    fog.near = THREE.MathUtils.lerp(fog.near, cameraDistance - GLOBE_RADIUS * ATMOSPHERE.fog.nearFactor, fogEase);
+    fog.far = THREE.MathUtils.lerp(fog.far, cameraDistance + GLOBE_RADIUS * ATMOSPHERE.fog.farFactor, fogEase);
+    glowAmount.current = 1 - zoomProgress.current * ATMOSPHERE.glow.drivingFade;
+    // Follow the local tangent plane while driving so the sun keeps a gentle
+    // three-quarter angle even when the car reaches another side of the globe.
+    sunPlanarDirection.set(-0.72, 0.16, 0.68).projectOnPlane(surfaceUp).normalize();
+    sunLocalPosition.copy(groundVehiclePosition)
+      .addScaledVector(surfaceUp, 58)
+      .addScaledVector(sunPlanarDirection, 40);
+    sun.current.position.copy(sunOverviewPosition).lerp(sunLocalPosition, zoom);
+    sunTarget.position.copy(globeCenter).lerp(groundVehiclePosition, zoom);
+    sunTarget.updateMatrixWorld();
+    const drivingFov = updateCamera(
+      gameCamera, gameLook, groundVehiclePosition, vehicleTangent, surfaceUp,
+      props.cameraMode, car.speed, landingCameraBlend.current, landingHeight.current,
+    );
+    cameraStartDirection.copy(introCamera).sub(globeCenter);
+    cameraEndDirection.copy(gameCamera).sub(globeCenter);
+    const startRadius = cameraStartDirection.length();
+    const endRadius = cameraEndDirection.length();
+    cameraStartDirection.normalize();
+    cameraEndDirection.normalize();
+    cameraArc.setFromUnitVectors(cameraStartDirection, cameraEndDirection);
+    cameraArcStep.identity().slerp(cameraArc, zoom);
+    const cinematicLift = Math.sin(Math.PI * zoom) * 4.5;
+    desiredCamera.copy(cameraStartDirection)
+      .applyQuaternion(cameraArcStep)
+      .multiplyScalar((THREE.MathUtils.lerp(startRadius, endRadius, zoom) + cinematicLift) * (1 - settle * (1 - ARRIVAL.zoom)) * (1 - introZoom.current * WHEEL_ZOOM.closer))
+      .add(globeCenter);
+    desiredLook.copy(introLook).lerp(gameLook, zoom);
+    const ease = 1 - Math.exp(-CAR_CONFIG.cameraSmoothing * dt);
+    camera.position.lerp(desiredCamera, ease);
+    const offRoadDriving = props.started && !props.paused && !onRoad && landInfluence(latitude, car.x) >= 0.5;
+    roughShake.current = THREE.MathUtils.damp(
+      roughShake.current,
+      offRoadDriving ? (Math.abs(car.speed) / CAR_CONFIG.maxSpeed) * 0.05 : 0,
+      8,
+      dt,
+    );
+    const rumble = Math.sin(arrivalTime.current * 21) * 0.6 + Math.sin(arrivalTime.current * 33 + 1.7) * 0.4;
+    camera.position.addScaledVector(surfaceUp, rumble * roughShake.current);
+    smoothedLook.lerp(desiredLook, ease);
+    targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).normalize();
+    smoothedUp.lerp(targetCameraUp, 1 - Math.exp(-6 * dt)).normalize();
+    camera.up.copy(smoothedUp);
+    camera.lookAt(smoothedLook);
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const targetFov = THREE.MathUtils.lerp(48, drivingFov, zoom) - Math.sin(Math.PI * zoom) * 5;
+      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, CAR_CONFIG.fovSmoothing, dt);
+      const introScreenOffset = 0.43;
+      const centeredFilmOffset = introScreenOffset
+        * camera.getFilmWidth()
+        * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5))
+        * camera.aspect;
+      camera.filmOffset = centeredFilmOffset * (1 - zoom) * (1 - settle);
+      camera.updateProjectionMatrix();
+    }
+
+    telemetryTime.current += dt;
+    if (telemetryTime.current > 0.1) {
+      props.onTelemetry({ ...car, speed: Math.abs(car.speed) * 3.6 });
+      telemetryTime.current = 0;
+    }
   });
+
   return <>
-    <color attach="background" args={[props.night ? '#182c3c' : '#d9d8bd']} />
-    <fog attach="fog" args={[props.night ? '#182c3c' : '#d9d8bd', props.night ? 85 : 130, props.night ? 270 : 470]} />
-    <ambientLight intensity={props.night ? 0.65 : 1.15} color={props.night ? '#90b5dd' : '#ffefd4'} />
-    <hemisphereLight args={[props.night ? '#a5bee4' : '#f8edcf', '#7a8875', props.night ? 0.65 : 1.4]} />
-    <directionalLight position={[-55, 95, 45]} intensity={props.night ? 0.65 : 3.3} color={props.night ? '#b0c9ed' : '#ffe0a5'} castShadow shadow-mapSize={[2048, 2048]} shadow-camera-left={-140} shadow-camera-right={140} shadow-camera-top={140} shadow-camera-bottom={-140} shadow-camera-near={1} shadow-camera-far={340} shadow-bias={-0.0006} shadow-normalBias={0.09} />
-    <World />
-    <group ref={vehicle}><CarModel car={props.car} night={props.night} /></group>
-    {props.started && <Marker stop={props.stop} />}
+    <ambientLight
+      intensity={props.night ? ART_DIRECTION.night.ambientIntensity : ART_DIRECTION.day.ambientIntensity}
+      color={props.night ? ART_DIRECTION.night.ambientColor : ART_DIRECTION.day.ambientColor}
+    />
+    <hemisphereLight args={[
+      props.night ? ART_DIRECTION.night.skyFillColor : PALETTE.lightDaySkyFill,
+      props.night ? ART_DIRECTION.night.groundFillColor : PALETTE.land,
+      props.night ? ART_DIRECTION.night.hemisphereIntensity : ATMOSPHERE.light.hemisphereIntensity,
+    ]} />
+    <directionalLight
+      ref={sun}
+      position={sunOverviewPosition}
+      intensity={props.night ? ART_DIRECTION.night.sunIntensity : ATMOSPHERE.light.sunIntensity}
+      color={props.night ? ART_DIRECTION.night.sunColor : ATMOSPHERE.light.sunColor}
+      castShadow
+      shadow-mapSize={[ACTIVE_QUALITY.shadowMapSize, ACTIVE_QUALITY.shadowMapSize]}
+      shadow-camera-near={ART_DIRECTION.shadows.near}
+      shadow-camera-far={ART_DIRECTION.shadows.far}
+      shadow-camera-left={-ART_DIRECTION.shadows.extent}
+      shadow-camera-right={ART_DIRECTION.shadows.extent}
+      shadow-camera-top={ART_DIRECTION.shadows.extent}
+      shadow-camera-bottom={-ART_DIRECTION.shadows.extent}
+      shadow-bias={ART_DIRECTION.shadows.bias}
+      shadow-normalBias={ART_DIRECTION.shadows.normalBias}
+      shadow-radius={ATMOSPHERE.light.shadowRadius}
+    />
+    <directionalLight
+      position={[58, 18, -48]}
+      target-position={[0, -GLOBE_RADIUS, 0]}
+      intensity={props.night ? ART_DIRECTION.night.rimIntensity : ATMOSPHERE.light.rimIntensity}
+      color={props.night ? ART_DIRECTION.night.rimColor : ART_DIRECTION.day.rimColor}
+    />
+    <directionalLight
+      position={[18, -38, -62]}
+      target-position={[0, -GLOBE_RADIUS, 0]}
+      intensity={props.night ? 0.12 : 0.24}
+      color={props.night ? ART_DIRECTION.night.bounceColor : ART_DIRECTION.day.bounceColor}
+    />
+    <group ref={globeGroup} position={[0, -GLOBE_RADIUS, 0]}>
+      <AtmosphereGlow amount={glowAmount} />
+      <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
+        <MiniatureWorld zoom={zoomProgress} />
+        <Traffic paused={props.paused} progresses={trafficProgresses} player={props.car} reactive={props.started} />
+        <group ref={vehicle}><CarModel car={props.car} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} /></group>
+      </group>
+    </group>
   </>;
 }
 
 export default function Scene(props: SceneProps) {
-  return <Canvas shadows dpr={[1, 1.6]} camera={{ position: [19, 17, 55], fov: 48, near: 0.1, far: 600 }} gl={{ antialias: true, powerPreference: 'high-performance' }}>
+  return <Canvas shadows dpr={[1, ACTIVE_QUALITY.maxDpr]} camera={{ position: [0, 40, 94], fov: 48, near: 0.1, far: 400 }} gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }} onCreated={({ gl }) => gl.setClearAlpha(0)}>
     <Suspense fallback={null}><DrivingScene {...props} /></Suspense>
   </Canvas>;
 }
