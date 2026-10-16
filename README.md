@@ -82,4 +82,6 @@ The football pitch uses [Football Field (Free)](https://sketchfab.com/3d-models/
 
 The palm island uses [Island](https://sketchfab.com/3d-models/island-3dd8d58630ff4d5e913b1ea045d3fe48) by [BConnolly](https://sketchfab.com/BConnolly), licensed under [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) — **non-commercial only**: remove it (the `PalmIsland` component) or get the author's permission before any commercial use. Source files, runtime GLB conversion and license are in `src/assets/island`.
 
+The fishing boat uses [Fishing Boat](https://sketchfab.com/3d-models/fishing-boat-e07c8b9cc38543879a4e2fe145e62df6) by [JasperTobias](https://sketchfab.com/JasperTobias), licensed under [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) — **non-commercial only**, like the island. Source files, runtime GLB conversion and license are in `src/assets/fishing_boat`.
+
 The player vehicle uses [Low Poly Car](https://sketchfab.com/3d-models/low-poly-car-ffcf987149df4e528ebf1e2dec6a9f8a) by [ion_omat](https://sketchfab.com/ion_omat), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_car`.

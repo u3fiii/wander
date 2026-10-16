@@ -40,9 +40,12 @@ import swimRingUrl from '../assets/float_low_poly/float.glb?url';
 import bouldersUrl from '../assets/rock_low_poly/rocks.glb?url';
 import fieldUrl from '../assets/football_field_free/field.glb?url';
 import islandUrl from '../assets/island/island.glb?url';
+import fishingBoatUrl from '../assets/fishing_boat/boat.glb?url';
 import streetLightsUrl from '../assets/simple_collection_of_low_poly_street_lights/street-lights.glb?url';
 import streetPropsUrl from '../assets/simple_low_poly_street_props_v2/street-props.glb?url';
+import streetWorkUrl from '../assets/simple_low_poly_street_work_stuff/scene.gltf?url';
 import planeModelUrl from '../assets/low_poly_plane/plane.glb?url';
+import medievalHouseUrl from '../assets/low_poly_medieval_house/scene.gltf?url';
 
 const up = new THREE.Vector3(0, 1, 0);
 const turn = Math.PI * 2;
@@ -936,7 +939,7 @@ const cityRoleColor = (colors: CityColors) => (role: string): { key: PaletteKey;
 
 // `planter` models (planters, trees) are split into foliage / soil / pot; `stone` models are drawn all in stone.
 // Lit windows glow warm after dark (each house is lit or not, so the village doesn't look uniform).
-const WINDOW_GLOW = { color: '#ffc77a', intensity: 1.1 };
+const WINDOW_GLOW = { color: '#ffc77a', intensity: 2.2 };
 
 function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, colors, planter = false, stone = false, sink = 0, windowsLit = false }: {
   modelUrl: string; latitude: number; longitude: number; scale?: number; orientation: THREE.Quaternion; colors: CityColors;
@@ -1395,7 +1398,7 @@ function Well() {
     model.position.set(-center.x, -bounds.min.y, -center.z);
     return {
       model,
-      position: terrainPoint(WELL.latitude, WELL.longitude, -0.1),
+      position: terrainPoint(WELL.latitude, WELL.longitude, -0.6),
       orientation: frameAt(WELL.latitude, WELL.longitude).orientation,
       scale: WELL.height / (bounds.max.y - bounds.min.y),
     };
@@ -1409,6 +1412,47 @@ function Well() {
   </group>;
 }
 
+// A small medieval cottage in the meadow between the football pitch and the well.
+// Keep its supplied textured material; bend its broad footprint to follow the globe.
+const MEADOW_HOUSE = { latitude: 0.22, longitude: 5.53, height: 3.8, rotation: -0.45, radius: 3.4 } as const;
+
+function MeadowHouse() {
+  const gltf = useLoader(GLTFLoader, medievalHouseUrl);
+  const placement = useMemo(() => {
+    const model = gltf.scene.clone(true);
+    model.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach(material => {
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.roughness = 0.9;
+          material.metalness = 0;
+        }
+      });
+    });
+    model.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(model);
+    const center = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    model.position.set(-center.x, -bounds.min.y, -center.z);
+    // The model is wider than it is deep; its front faces toward the nearby open meadow.
+    const scale = MEADOW_HOUSE.height / size.y;
+    const object = bendToGlobe(model, MEADOW_HOUSE.rotation, scale);
+    return {
+      object,
+      position: terrainPoint(MEADOW_HOUSE.latitude, MEADOW_HOUSE.longitude, 0.04),
+      orientation: frameAt(MEADOW_HOUSE.latitude, MEADOW_HOUSE.longitude).orientation,
+    };
+  }, [gltf.scene]);
+  useEffect(() => {
+    setObstacleGroup('meadow-house', [{ latitude: MEADOW_HOUSE.latitude, longitude: MEADOW_HOUSE.longitude, radius: MEADOW_HOUSE.radius }]);
+    return () => clearObstacleGroup('meadow-house');
+  }, []);
+  return <group position={placement.position} quaternion={placement.orientation}><primitive object={placement.object} /></group>;
+}
+
 // Street furniture from the two "simple low poly" packs, used sparingly: classic lamps along the village
 // street, at both ends of the road bridge and by the beach, plus a few benches, bins and mailboxes. At night
 // the lamp heads light up with a small halo and a faceted pool of warm light on the ground beneath them.
@@ -1416,7 +1460,7 @@ const STREET = {
   lampScale: 1.3, lampSetback: 4.5, propScale: 1.1, benchSetback: 5.3, mailboxSetback: 4.7,
   lampColor: '#ffc27a', headGlow: 1.9,
   // Six faint, closely spaced steps fading to nothing: velvety and soft, yet still faceted like the world.
-  pool: { radii: [0.8, 1.4, 2.0, 2.6, 3.2, 3.8], strength: [0.08, 0.068, 0.052, 0.036, 0.021, 0.008], segments: 12, lift: 0.06 },
+  pool: { radii: [0.8, 1.4, 2.0, 2.6, 3.2, 3.8], strength: [0.15, 0.125, 0.095, 0.066, 0.038, 0.015], segments: 12, lift: 0.06 },
 };
 
 type PropTemplate = { object: THREE.Object3D; head: THREE.Vector3 };
@@ -1425,7 +1469,8 @@ type PropTemplate = { object: THREE.Object3D; head: THREE.Vector3 };
 // position of its top (a lamp's head) measured relative to that foot.
 function extractStreetProp(scene: THREE.Object3D, name: string, prepare: (mesh: THREE.Mesh) => void): PropTemplate {
   scene.updateMatrixWorld(true);
-  const original = scene.getObjectByName(name);
+  // GLTFLoader strips dots and other reserved characters from node names ("cono.004" loads as "cono004").
+  const original = scene.getObjectByName(name) ?? scene.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
   if (!original) throw new Error(`Missing street prop ${name}`);
   const object = original.clone(true);
   original.matrixWorld.decompose(object.position, object.quaternion, object.scale);
@@ -1611,9 +1656,9 @@ function StreetFurniture() {
   const glowGroup = useRef<THREE.Group>(null!);
   useFrame(() => {
     const n = nightState.blend;
-    shared.lampHead.emissiveIntensity = n * 2.2;
+    shared.lampHead.emissiveIntensity = n * 3.4;
     shared.pool.opacity = n;
-    shared.glow.opacity = n * 0.5;
+    shared.glow.opacity = n * 0.8;
     glowGroup.current.visible = n > 0.01;
   });
   return <>
@@ -1623,6 +1668,45 @@ function StreetFurniture() {
       {placed.glows.map((position, index) => <sprite key={`glow-${index}`} material={shared.glow} position={position} scale={[STREET.headGlow, STREET.headGlow, 1]} />)}
     </group>
   </>;
+}
+
+// A compact roadworks detail on the town road: two barriers and a pair of cones,
+// kept on the verge so they add life without narrowing the drivable lane.
+const STREET_WORK = { roadLongitudes: [0.45, 0.59], side: -1, setback: 5.35, barrierScale: 0.85, coneScale: 0.9 } as const;
+
+function StreetWork() {
+  const gltf = useLoader(GLTFLoader, streetWorkUrl);
+  const placed = useMemo(() => {
+    const prepare = (mesh: THREE.Mesh) => {
+      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      const map = (material as THREE.MeshStandardMaterial).map;
+      const baked = bakeRoles(mesh.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.roadShoulder), streetPropRole);
+      mesh.geometry = baked.geometry;
+      mesh.material = roleMaterials(baked.roles, role => ({ key: role as PaletteKey }));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    };
+    const barrier = extractStreetProp(gltf.scene, 'valla_nueva', prepare);
+    const cone = extractStreetProp(gltf.scene, 'cono.004', prepare);
+    const items: Array<{ object: THREE.Object3D; position: [number, number, number]; orientation: THREE.Quaternion; latitude: number; longitude: number }> = [];
+    const place = (template: PropTemplate, roadLongitude: number, setback: number, scale: number, yaw: number) => {
+      const spot = streetSpot(roadLongitude, STREET_WORK.side, setback, 0);
+      if (landInfluence(spot.latitude, spot.longitude) < 0.75) return;
+      const object = template.object.clone(true);
+      object.rotation.y = yaw;
+      object.scale.setScalar(scale);
+      items.push({ object, position: terrainPoint(spot.latitude, spot.longitude, 0.035), orientation: spot.orientation, latitude: spot.latitude, longitude: spot.longitude });
+    };
+    STREET_WORK.roadLongitudes.forEach(longitude => place(barrier, longitude, STREET_WORK.setback, STREET_WORK.barrierScale, Math.PI / 2));
+    place(cone, STREET_WORK.roadLongitudes[0] - 0.065, STREET_WORK.setback + 0.35, STREET_WORK.coneScale, 0);
+    place(cone, STREET_WORK.roadLongitudes[1] + 0.065, STREET_WORK.setback + 0.35, STREET_WORK.coneScale, 0);
+    return items;
+  }, [gltf.scene]);
+  useEffect(() => {
+    setObstacleGroup('street-work', placed.map(item => ({ latitude: item.latitude, longitude: item.longitude, radius: 0.35 })));
+    return () => clearObstacleGroup('street-work');
+  }, [placed]);
+  return <>{placed.map((item, index) => <group key={`street-work-${index}`} position={item.position} quaternion={item.orientation}><primitive object={item.object} /></group>)}</>;
 }
 
 // A wooden rowboat moored a few metres off the sunbathing beach. It rides the same swells as the sea shader:
@@ -1895,15 +1979,16 @@ function Boulders() {
 // don't float. The goals are solid; the grass can be driven over. Trees and stones keep off it.
 // The pitch stands on a low concrete plinth raised `lift` above the ground (its sides run `footing` metres down
 // into the land), so the faceted ground never pokes through the grass.
-const FIELD = { latitude: 0.95, longitude: 3.6, length: 7.7, lift: 0.5, footing: 1.4, plinthMargin: 1.04, keepClear: 6, dropNodes: ['Object_8', 'Object_112'], pitchNodes: ['Object_4', 'Object_6'] };
+const FIELD = { latitude: 1.07, longitude: 3.645, length: 7.7, lift: 0.5, footing: 1.4, plinthMargin: 1.04, keepClear: 6, dropNodes: ['Object_8', 'Object_112'], pitchNodes: ['Object_4', 'Object_6'] };
 
 // Field colours chosen to harmonise with the world rather than copy it: a fresher green pitch (with mowing stripes)
 // and warm white lines, warm stone walls, and coral seats echoing the village roofs.
 function fieldRole(pitch: boolean) {
   return ({ hue, saturation, lightness }: FaceSample): PaletteKey => {
     if (lightness > 0.78) return 'wallWarmWhite';
-    if (pitch) return 'pitchGreen';
-    if (hue >= 60 && hue < 170 && saturation > 0.2) return 'pitchGreen';
+    // The pitch is one colour: its baked dark shading (the circles) is dropped, and only its white lines are kept.
+    if (pitch) return 'pitchOrange';
+    if (hue >= 60 && hue < 170 && saturation > 0.2) return 'pitchOrange';
     if (hue >= 12 && hue < 50 && saturation > 0.25) return 'roofAccent';
     if (saturation > 0.4 && (hue < 12 || hue >= 340)) return 'roofAccent';
     if (lightness < 0.18) return 'doorsTrim';
@@ -1920,7 +2005,7 @@ function mowingStripes(geometry: THREE.BufferGeometry, roles: string[]) {
   const long = box.max.x - box.min.x >= box.max.z - box.min.z ? 'x' : 'z';
   const span = long === 'x' ? box.max.x - box.min.x : box.max.z - box.min.z;
   geometry.groups.forEach(group => {
-    if (roles[group.materialIndex!] !== 'pitchGreen') return;
+    if (roles[group.materialIndex!] !== 'pitchOrange') return;
     for (let i = group.start; i < group.start + group.count; i += 3) {
       const along = ((long === 'x' ? position.getX(i) + position.getX(i + 1) + position.getX(i + 2) : position.getZ(i) + position.getZ(i + 1) + position.getZ(i + 2)) / 3
         - (long === 'x' ? box.min.x : box.min.z)) / (span || 1);
@@ -2070,11 +2155,45 @@ function FootballField() {
       // Its top sits a hair under the pitch so the grass always draws over it.
       new THREE.BoxGeometry(size.x * FIELD.plinthMargin, plinthHeight, size.z * FIELD.plinthMargin, 14, 1, 10).translate(0, -plinthHeight / 2 - 0.06 / scaleToWorld, 0),
       // Box faces: +x, -x, +y (top), -y, +z, -z. The top is grass (it shows through the gaps in the model's pitch).
-      [0, 1, 2, 3, 4, 5].map(side => paletteMaterial(side === 2 ? 'pitchGreen' : 'fieldStone', { roughness: 0.95 })),
+      [0, 1, 2, 3, 4, 5].map(side => paletteMaterial(side === 2 ? 'pitchOrange' : 'fieldStone', { roughness: 0.95 })),
     );
     plinth.castShadow = true;
     plinth.receiveShadow = true;
     holder.add(plinth);
+    // The supplied pitch model has no working floodlights, so add four compact
+    // corner masts with inward-facing heads and real, soft spot lights.
+    const towerScale = scaleToWorld;
+    const mastHeight = 2.55 / towerScale;
+    const mastGeometry = new THREE.CylinderGeometry(0.065 / towerScale, 0.11 / towerScale, mastHeight, 6);
+    const housingGeometry = new THREE.BoxGeometry(0.62 / towerScale, 0.23 / towerScale, 0.34 / towerScale);
+    const lensGeometry = new THREE.BoxGeometry(0.48 / towerScale, 0.12 / towerScale, 0.035 / towerScale);
+    const mastMaterial = paletteMaterial('roadShoulder', { roughness: 0.9 });
+    const housingMaterial = paletteMaterial('tires', { roughness: 0.85 });
+    const lensMaterial = new THREE.MeshStandardMaterial({ color: PALETTE.flowerCream, emissive: PALETTE.flowerCream, emissiveIntensity: 0, roughness: 0.72 });
+    const spots: THREE.SpotLight[] = [];
+    const cornerX = size.x * 0.46, cornerZ = size.z * 0.46;
+    for (const x of [-cornerX, cornerX]) for (const z of [-cornerZ, cornerZ]) {
+      const mast = new THREE.Mesh(mastGeometry, mastMaterial);
+      mast.position.set(x, mastHeight * 0.5, z);
+      mast.castShadow = true;
+      holder.add(mast);
+      const head = new THREE.Group();
+      head.position.set(x, mastHeight, z);
+      head.rotation.y = Math.atan2(-x, -z);
+      const housing = new THREE.Mesh(housingGeometry, housingMaterial);
+      housing.position.set(0, 0, -0.08 / towerScale);
+      housing.castShadow = true;
+      head.add(housing);
+      const lens = new THREE.Mesh(lensGeometry, lensMaterial);
+      lens.position.set(0, 0, 0.105 / towerScale);
+      head.add(lens);
+      holder.add(head);
+      const spot = new THREE.SpotLight(PALETTE.flowerCream, 0, 10 / towerScale, 0.72, 0.72, 2);
+      spot.position.set(x, mastHeight - 0.08 / towerScale, z);
+      spot.target.position.set(0, 0.12 / towerScale, 0);
+      holder.add(spot, spot.target);
+      spots.push(spot);
+    }
     // Lay the pitch's long side east-west.
     const normal = new THREE.Vector3(...groundNormal(FIELD.latitude, FIELD.longitude));
     const along = new THREE.Vector3(Math.cos(FIELD.longitude), 0, -Math.sin(FIELD.longitude)).projectOnPlane(normal).normalize();
@@ -2085,8 +2204,21 @@ function FootballField() {
     const object = bendToGlobe(holder, long, scale);
     const position = terrainPoint(FIELD.latitude, FIELD.longitude, FIELD.lift);
     const goals = [-1, 1].map(end => toLatLon(new THREE.Vector3(...position).addScaledVector(along, end * FIELD.length * 0.47)));
-    return { object, position, orientation, goals };
+    return { object, position, orientation, goals, spots, mastGeometry, housingGeometry, lensGeometry, mastMaterial, housingMaterial, lensMaterial };
   }, [gltf.scene]);
+  useFrame(() => {
+    const blend = nightState.blend;
+    placement.lensMaterial.emissiveIntensity = blend * 3.2;
+    placement.spots.forEach(spot => { spot.intensity = blend * 28; });
+  });
+  useEffect(() => () => {
+    placement.mastGeometry.dispose();
+    placement.housingGeometry.dispose();
+    placement.lensGeometry.dispose();
+    placement.mastMaterial.dispose();
+    placement.housingMaterial.dispose();
+    placement.lensMaterial.dispose();
+  }, [placement]);
   useEffect(() => {
     setObstacleGroup('field', placement.goals.map(goal => ({ ...goal, radius: 1.1 })));
     return () => clearObstacleGroup('field');
@@ -2098,7 +2230,7 @@ function FootballField() {
 // a life ring, recoloured to the world palette. The model's smooth sand mound is replaced by coast-style ground
 // (see islandGround); its water disc, the fisherman with his rod and the circling fish are left out.
 // `topAboveWater` sets how far the island's top stands out of the sea (in metres), like a low stretch of coast.
-const ISLAND = { latitude: 1.05, longitude: 0.35, width: 10, topAboveWater: 0.45, heading: 2.2, rings: 4, segments: 20 };
+const ISLAND = { latitude: 0.923, longitude: 6.039, width: 8, topAboveWater: 0.45, heading: 2.2, rings: 4, segments: 20 };
 const ISLAND_COLORS: Record<string, PaletteKey> = {
   '02_-_Default': 'trunk', '03_-_Default': 'mainTree', '08_-_Default': 'roofWarmBrown', '05_-_Default': 'doorsTrim',
   '15_-_Default': 'roadShoulder', '11_-_Default': 'wallWarmWhite', '10_-_Default': 'roadShoulder', '06_-_Default': 'tires',
@@ -2179,7 +2311,7 @@ function islandGround(mound: THREE.Mesh, bounds: THREE.Box3) {
   return { mesh, top };
 }
 
-function PalmIsland() {
+function PalmIsland({ latitude, longitude }: { latitude: number; longitude: number }) {
   const gltf = useLoader(GLTFLoader, islandUrl);
   const object = useMemo(() => {
     const island = gltf.scene.clone(true);
@@ -2215,80 +2347,261 @@ function PalmIsland() {
     holder.rotation.y = ISLAND.heading;
     return holder;
   }, [gltf]);
-  const position = useMemo(() => spherePoint(ISLAND.latitude, ISLAND.longitude, OCEAN_WAVE.lift), []);
-  const orientation = useMemo(() => new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(...sphereNormal(ISLAND.latitude, ISLAND.longitude))), []);
+  const position = useMemo(() => spherePoint(latitude, longitude, OCEAN_WAVE.lift), [latitude, longitude]);
+  const orientation = useMemo(() => new THREE.Quaternion().setFromUnitVectors(up, new THREE.Vector3(...sphereNormal(latitude, longitude))), [latitude, longitude]);
   useEffect(() => () => object.traverse(child => {
     if (child instanceof THREE.Mesh) (child.material as THREE.Material).dispose();
   }), [object]);
   return <group position={position} quaternion={orientation}><primitive object={object} /></group>;
 }
 
-// A few compact utility poles along the inland edge of the village. Wires stay over land and stop before the shore.
-const POWER_LINE = {
-  land: [[0.36, 0.7], [0.45, 0.56], [0.5, 0.44]] as Array<[number, number]>,
-  height: 4.96, sag: 0.04, sagMin: 0.2, wire: 0.018, segments: 20,
-};
+// A fishing boat out in the open sea to the south-west (CC BY-NC, see the README): keeps its own textures, is sized
+// to about 6 m, and rides the same swell as the sea shader, rocking and swaying a little on top of it.
+const FISHING_BOAT = { length: 8, heading: 1.1, sink: 1.2, bob: 0.07, roll: 0.13, pitch: 0.07, drift: [0.6, 0.4] as const };
 
-function PowerLine() {
-  const gltf = useLoader(GLTFLoader, streetPropsUrl);
-  const template = useMemo(() => extractStreetProp(gltf.scene, THREE.PropertyBinding.sanitizeNodeName('Cube.001'), mesh => {
-    const map = (mesh.material as THREE.MeshStandardMaterial).map;
-    const baked = bakeRoles(mesh.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.trunk), streetPropRole);
-    mesh.geometry = baked.geometry;
-    mesh.material = roleMaterials(baked.roles, role => ({ key: role as PaletteKey }));
-  }), [gltf.scene]);
-  const [line, setLine] = useState<{ poles: Array<{ object: THREE.Object3D; position: [number, number, number]; orientation: THREE.Quaternion }>; wires: THREE.BufferGeometry[] } | null>(null);
-  useEffect(() => {
-    // Nudge the small group of land poles away from any houses.
-    const spots = POWER_LINE.land.map(([latitude, longitude], index) => {
-      let spot = { latitude, longitude };
-      const towardCoast = index < POWER_LINE.land.length - 1 ? POWER_LINE.land[index + 1] : POWER_LINE.land[index];
-      for (let step = 0; step < 12 && obstacleAt(spot.latitude, spot.longitude, 1.2); step++) {
-        spot = { latitude: spot.latitude + (towardCoast[0] - latitude) * 0.08, longitude: spot.longitude + (towardCoast[1] - longitude) * 0.08 };
-      }
-      return { ...spot, base: new THREE.Vector3(...terrainPoint(spot.latitude, spot.longitude, -0.05)) };
+// Boat colours from the island's own palette (warm coral, wood browns, cream, sage), by the texture colour under each face.
+function fishingBoatRole({ hue, saturation, lightness }: FaceSample): PaletteKey {
+  if (lightness < 0.18) return 'tires';
+  if (saturation < 0.18) return lightness > 0.6 ? 'wallWarmWhite' : 'roadShoulder';
+  if (hue < 18 || hue >= 340) return 'roofAccent';
+  if (hue < 50) return lightness > 0.5 ? 'wallCream' : (lightness < 0.3 ? 'doorsTrim' : 'roofWarmBrown');
+  if (hue < 260) return 'wallCream';
+  return 'roofAccent';
+}
+
+function FishingBoat({ latitude, longitude }: { latitude: number; longitude: number }) {
+  const gltf = useLoader(GLTFLoader, fishingBoatUrl);
+  const group = useRef<THREE.Group>(null!);
+  const model = useMemo(() => {
+    const boat = gltf.scene.clone(true);
+    boat.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const map = (child.material as THREE.MeshStandardMaterial).map;
+      const baked = bakeRoles(child.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.wallWarmWhite), fishingBoatRole);
+      child.geometry = baked.geometry;
+      child.material = roleMaterials(baked.roles, role => ({ key: role as PaletteKey }));
     });
-    const scale = POWER_LINE.height / Math.max(template.head.y, 0.001);
-    // Crossarm ends in the pole's own frame (the model's arm runs along x at the top).
-    const box = new THREE.Box3().setFromObject(template.object);
-    const armHalf = Math.max(Math.abs(box.min.x), Math.abs(box.max.x)) * 0.92;
-    const poles = spots.map((spot, index) => {
-      const normal = new THREE.Vector3(...sphereNormal(spot.latitude, spot.longitude));
-      const previous = spots[Math.max(index - 1, 0)].base, next = spots[Math.min(index + 1, spots.length - 1)].base;
-      const along = next.clone().sub(previous).projectOnPlane(normal).normalize();
-      const arm = new THREE.Vector3().crossVectors(normal, along).normalize();
-      const orientation = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(arm, normal, along));
-      const object = template.object.clone(true);
-      object.scale.setScalar(scale);
-      const top = spot.base.clone().addScaledVector(normal, template.head.y * scale * 0.97);
-      return { object, position: spot.base.toArray() as [number, number, number], orientation, ends: [-1, 1].map(side => top.clone().addScaledVector(arm, side * armHalf * scale)) };
+    boat.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(boat);
+    const size = bounds.getSize(new THREE.Vector3());
+    const centre = bounds.getCenter(new THREE.Vector3());
+    boat.position.set(-centre.x, -bounds.min.y, -centre.z);
+    const holder = new THREE.Group();
+    holder.add(boat);
+    // Lengthwise along local z (the same convention as the rowboat).
+    if (size.x > size.z) holder.rotation.y = Math.PI / 2;
+    holder.scale.setScalar(FISHING_BOAT.length / Math.max(size.x, size.z));
+    // Sit lower in the water: the hull is mostly under the surface.
+    holder.position.y = -FISHING_BOAT.sink;
+    holder.traverse(child => {
+      if (child instanceof THREE.Mesh) { child.castShadow = true; child.receiveShadow = true; }
     });
-    // Each wire: a sagging curve between matching crossarm ends, as a thin tube.
-    const wires: THREE.BufferGeometry[] = [];
-    for (let index = 0; index < poles.length - 1; index++) {
-      for (let end = 0; end < 2; end++) {
-        const from = poles[index].ends[end], to = poles[index + 1].ends[end];
-        const span = from.distanceTo(to);
-        const sag = Math.max(POWER_LINE.sagMin, span * POWER_LINE.sag);
-        const middleUp = from.clone().add(to).multiplyScalar(0.5).sub(new THREE.Vector3(0, -GLOBE_RADIUS, 0)).normalize();
-        const points = Array.from({ length: POWER_LINE.segments + 1 }, (_, k) => {
-          const t = k / POWER_LINE.segments;
-          return from.clone().lerp(to, t).addScaledVector(middleUp, -sag * 4 * t * (1 - t));
-        });
-        wires.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), POWER_LINE.segments, POWER_LINE.wire, 4, false));
-      }
+    return holder;
+  }, [gltf]);
+  const mooring = useMemo(() => new THREE.Vector3(...sphereNormal(latitude, longitude)), [latitude, longitude]);
+  const base = useMemo(() => frameAt(latitude, longitude).orientation, [latitude, longitude]);
+  const work = useMemo(() => ({
+    forward: new THREE.Vector3(Math.sin(FISHING_BOAT.heading), 0, Math.cos(FISHING_BOAT.heading)).applyQuaternion(base),
+    side: new THREE.Vector3(Math.cos(FISHING_BOAT.heading), 0, -Math.sin(FISHING_BOAT.heading)).applyQuaternion(base),
+    direction: new THREE.Vector3(), sample: new THREE.Vector3(), centre: new THREE.Vector3(0, -GLOBE_RADIUS, 0),
+    tilt: new THREE.Euler(), tiltQuaternion: new THREE.Quaternion(),
+  }), [base]);
+  useEffect(() => () => model.traverse(child => {
+    if (child instanceof THREE.Mesh) (Array.isArray(child.material) ? child.material : [child.material]).forEach(material => material.dispose());
+  }), [model]);
+  useFrame(state => {
+    const time = state.clock.elapsedTime;
+    const { forward, side, direction, sample, centre, tilt, tiltQuaternion } = work;
+    direction.copy(mooring)
+      .addScaledVector(forward, Math.sin(time * 0.07) * FISHING_BOAT.drift[0] / GLOBE_RADIUS)
+      .addScaledVector(side, Math.sin(time * 0.05 + 1) * FISHING_BOAT.drift[1] / GLOBE_RADIUS)
+      .normalize();
+    const swellAt = (along: number, across: number) => oceanSwell(sample.copy(direction)
+      .addScaledVector(forward, along / GLOBE_RADIUS).addScaledVector(side, across / GLOBE_RADIUS).normalize(), time);
+    const bow = swellAt(FISHING_BOAT.length / 2, 0), stern = swellAt(-FISHING_BOAT.length / 2, 0);
+    const right = swellAt(0, 0.9), left = swellAt(0, -0.9);
+    const height = (bow + stern + right + left + oceanSwell(direction, time)) / 5 + Math.sin(time * 1.3) * FISHING_BOAT.bob;
+    group.current.position.copy(direction).multiplyScalar(height).add(centre);
+    const pitch = -Math.atan((bow - stern) / FISHING_BOAT.length) * 1.6 + Math.sin(time * 0.9) * FISHING_BOAT.pitch;
+    const roll = Math.atan((right - left) / 1.8) * 1.6 + Math.sin(time * 0.8 + 0.4) * FISHING_BOAT.roll;
+    tilt.set(pitch, Math.sin(time * 0.06) * 0.08, roll, 'YXZ');
+    group.current.quaternion.copy(base).multiply(tiltQuaternion.setFromEuler(tilt));
+  });
+  return <group ref={group}><primitive object={model} /></group>;
+}
+
+// Scattered life for the empty meadows: small rocks, grass tufts and bushes, spread over bare land and kept clear of
+// roads, buildings, the coast, the forest and the mountains. Instanced, with palette colours.
+const FILLER = { seed: 2024, count: 320, tries: 12000, roadClear: 4.5, buildingClear: 4.5, treeClear: 1.6 };
+
+const cityRegion = REGIONS.find(region => region.id === 'city')!;
+const metresBetween = (latitude: number, longitude: number, lat0: number, lon0: number) =>
+  Math.hypot(latitude - lat0, Math.atan2(Math.sin(longitude - lon0), Math.cos(longitude - lon0)) * Math.cos(latitude)) * GLOBE_RADIUS;
+
+function fillerSpots() {
+  const random = seededRandom(FILLER.seed);
+  const buildings: Array<[number, number, number]> = [[WELL.latitude, WELL.longitude, FILLER.buildingClear], [MEADOW_HOUSE.latitude, MEADOW_HOUSE.longitude, FILLER.buildingClear + 1], [FIELD.latitude, FIELD.longitude, FIELD.keepClear]];
+  const spots: Array<{ kind: 'rock' | 'tuft' | 'bush'; latitude: number; longitude: number; scale: number; yaw: number; colour: PaletteKey }> = [];
+  for (let attempt = 0; attempt < FILLER.tries && spots.length < FILLER.count; attempt++) {
+    const latitude = Math.asin(random() * 1.9 - 0.95), longitude = random() * turn;
+    if (landInfluence(latitude, longitude) < 0.92) continue;
+    if (distanceToRoadNetwork(latitude, longitude) < FILLER.roadClear) continue;
+    if (regionInfluence(cityRegion, latitude, longitude) > 0.3) continue;
+    if (buildings.some(([lat, lon, clear]) => metresBetween(latitude, longitude, lat, lon) < clear)) continue;
+    if (distanceToMountainSites(latitude, longitude) < 5.5 || nearBeach(latitude, longitude) || nearField(latitude, longitude)) continue;
+    if (obstacleAt(latitude, longitude, FILLER.treeClear)) continue;
+    const roll = random();
+    const kind = roll < 0.3 ? 'rock' : roll < 0.7 ? 'tuft' : 'bush';
+    const colour: PaletteKey = kind === 'rock' ? (random() < 0.5 ? 'roadShoulder' : 'fieldStone')
+      : kind === 'tuft' ? (random() < 0.6 ? 'lightTree' : 'accentTree') : (random() < 0.6 ? 'mainTree' : 'darkTree');
+    spots.push({ kind, latitude, longitude, scale: kind === 'rock' ? 0.35 + random() * 0.55 : kind === 'bush' ? 0.5 + random() * 0.5 : 0.55 + random() * 0.45, yaw: random() * Math.PI * 2, colour });
+  }
+  return spots;
+}
+
+function Meadow() {
+  const spots = useMemo(fillerSpots, []);
+  const geometries = useMemo(() => ({
+    rock: new THREE.IcosahedronGeometry(0.5, 0),
+    tuft: new THREE.ConeGeometry(0.26, 0.9, 4, 1).translate(0, 0.45, 0),
+    bush: new THREE.IcosahedronGeometry(0.5, 1).translate(0, 0.35, 0),
+  }), []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({ roughness: 0.92, flatShading: true }), []);
+  const meshes = useMemo(() => {
+    const count = (kind: string) => spots.filter(spot => spot.kind === kind).length;
+    const dummy = new THREE.Object3D();
+    return (['rock', 'tuft', 'bush'] as const).map(kind => {
+      const list = spots.filter(spot => spot.kind === kind);
+      const mesh = new THREE.InstancedMesh(geometries[kind], material, Math.max(1, count(kind)));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      list.forEach((spot, index) => {
+        const surface = terrainPoint(spot.latitude, spot.longitude, kind === 'rock' ? 0.02 : 0);
+        const frame = frameAt(spot.latitude, spot.longitude).orientation;
+        dummy.position.set(surface[0], surface[1], surface[2]);
+        dummy.quaternion.copy(frame).multiply(new THREE.Quaternion().setFromAxisAngle(up, spot.yaw));
+        dummy.scale.set(spot.scale, spot.scale * (kind === 'rock' ? 0.7 : 1), spot.scale);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(index, dummy.matrix);
+        mesh.setColorAt(index, new THREE.Color(PALETTE[spot.colour]).offsetHSL(0, 0, (Math.sin(index * 7.1) * 0.03)));
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      return mesh;
+    });
+  }, [spots, geometries, material]);
+  useEffect(() => () => { Object.values(geometries).forEach(geometry => geometry.dispose()); material.dispose(); meshes.forEach(mesh => mesh.dispose()); }, [geometries, material, meshes]);
+  return <>{meshes.map((mesh, index) => <primitive key={`meadow-${index}`} object={mesh} />)}</>;
+}
+
+// Fireflies: small warm glows drifting over the grass beside the roads, only visible at night. Each one hovers near
+// its spot, floats a little, and pulses on its own rhythm (additive, so they glow against the dark).
+const FIREFLIES = { count: 150, seed: 77, size: 0.3, colour: '#e6ff9a', hover: [0.7, 1.5] as const, drift: 0.45 };
+
+function Fireflies() {
+  const { geometry, bases, normals, phases, colour } = useMemo(() => {
+    const random = seededRandom(FIREFLIES.seed);
+    const bases: THREE.Vector3[] = [], normals: THREE.Vector3[] = [], phases: number[] = [];
+    for (let attempt = 0; attempt < 30000 && bases.length < FIREFLIES.count; attempt++) {
+      const latitude = Math.asin(random() * 1.9 - 0.95), longitude = random() * turn;
+      if (landInfluence(latitude, longitude) < 0.92) continue;
+      const road = distanceToRoadNetwork(latitude, longitude);
+      if (road < 2.5 || road > 9) continue;
+      if (regionInfluence(cityRegion, latitude, longitude) > 0.3) continue;
+      if (nearBeach(latitude, longitude) || nearField(latitude, longitude)) continue;
+      bases.push(new THREE.Vector3(...terrainPoint(latitude, longitude, 0)));
+      normals.push(new THREE.Vector3(...sphereNormal(latitude, longitude)));
+      phases.push(random() * Math.PI * 2);
     }
-    setObstacleGroup('power-line', spots.map(spot => ({ latitude: spot.latitude, longitude: spot.longitude, radius: 0.28 })));
-    setLine({ poles, wires });
-    return () => { clearObstacleGroup('power-line'); wires.forEach(wire => wire.dispose()); };
-  }, [template]);
-  const wireMaterial = useMemo(() => paletteMaterial('tires', { roughness: 0.6 }), []);
-  useEffect(() => () => wireMaterial.dispose(), [wireMaterial]);
-  if (!line) return null;
-  return <>
-    {line.poles.map((pole, index) => <group key={`pole-${index}`} position={pole.position} quaternion={pole.orientation}><primitive object={pole.object} /></group>)}
-    {line.wires.map((wire, index) => <mesh key={`wire-${index}`} geometry={wire} material={wireMaterial} castShadow />)}
-  </>;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(bases.length * 3), 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(bases.length * 3), 3));
+    return { geometry, bases, normals, phases, colour: new THREE.Color(FIREFLIES.colour) };
+  }, []);
+  const material = useMemo(() => new THREE.PointsMaterial({
+    size: FIREFLIES.size, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, fog: false,
+  }), []);
+  useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
+  useFrame(state => {
+    const time = state.clock.elapsedTime;
+    const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const color = geometry.getAttribute('color') as THREE.BufferAttribute;
+    const night = nightState.blend;
+    bases.forEach((base, i) => {
+      const phase = phases[i];
+      const hover = FIREFLIES.hover[0] + (FIREFLIES.hover[1] - FIREFLIES.hover[0]) * (0.5 + 0.5 * Math.sin(time * 0.5 + phase));
+      const x = Math.sin(time * 0.7 + phase) * FIREFLIES.drift, z = Math.cos(time * 0.55 + phase * 1.3) * FIREFLIES.drift;
+      position.setXYZ(i, base.x + normals[i].x * hover + x, base.y + normals[i].y * hover, base.z + normals[i].z * hover + z);
+      const pulse = Math.pow(0.5 + 0.5 * Math.sin(time * 2.2 + phase * 2), 3) * night;
+      color.setXYZ(i, colour.r * pulse, colour.g * pulse, colour.b * pulse);
+    });
+    position.needsUpdate = true;
+    color.needsUpdate = true;
+  });
+  return <points geometry={geometry} material={material} frustumCulled={false} />;
+}
+
+// Footpaths: a paved walk from the nearest point of the road to a building, curving gently across the meadow.
+// Only built where every stretch is on land; the paving uses the same stone tones as the field's path.
+const FOOTPATH = { width: 1.2, lift: 0.07, samples: 40, wiggle: 2.2 };
+
+function nearestRoadDirection(target: THREE.Vector3) {
+  const path = ROAD_PATHS[0];
+  let best = { t: 0, angle: Infinity };
+  for (let i = 0; i < path.segments; i++) {
+    const t = i / path.segments;
+    const angle = new THREE.Vector3(...sphereNormal(path.latitudeAt(t), path.longitudeAt(t))).angleTo(target);
+    if (angle < best.angle) best = { t, angle };
+  }
+  return new THREE.Vector3(...sphereNormal(path.latitudeAt(best.t), path.longitudeAt(best.t)));
+}
+
+function footpathGeometry(target: { latitude: number; longitude: number }) {
+  const goal = new THREE.Vector3(...sphereNormal(target.latitude, target.longitude));
+  const start = nearestRoadDirection(goal);
+  const direction = goal.clone().sub(start);
+  const across = new THREE.Vector3().crossVectors(start, direction).normalize();
+  const towards = (t: number, lateral: number) => start.clone().lerp(goal, t).addScaledVector(across, lateral / GLOBE_RADIUS).normalize();
+  const curve = new THREE.CatmullRomCurve3([
+    start, towards(0.33, FOOTPATH.wiggle), towards(0.66, -FOOTPATH.wiggle), goal,
+  ].map(point => point.clone()), false, 'centripetal');
+  const centres = curve.getSpacedPoints(FOOTPATH.samples).map(point => point.normalize());
+  const toLatitude = (v: THREE.Vector3) => Math.asin(THREE.MathUtils.clamp(v.y, -1, 1));
+  const toLongitude = (v: THREE.Vector3) => Math.atan2(v.x, v.z);
+  // Every centre point must be on land (except where the path leaves the road, which is land too).
+  for (const c of centres) if (!isLandAt(toLatitude(c), toLongitude(c)) || landInfluence(toLatitude(c), toLongitude(c)) < 0.8) return null;
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const tones = [PALETTE.pavingLight, PALETTE.pavingDark, PALETTE.fieldStone].map(hex => new THREE.Color(hex));
+  const random = seededRandom(909);
+  const sides = centres.map((c, i) => {
+    const forward = centres[Math.min(i + 1, centres.length - 1)].clone().sub(centres[Math.max(i - 1, 0)]).projectOnPlane(c).normalize();
+    const lateral = new THREE.Vector3().crossVectors(c, forward).normalize();
+    const edge = (k: number) => {
+      const v = c.clone().addScaledVector(lateral, k * FOOTPATH.width * 0.5 / GLOBE_RADIUS).normalize();
+      const latitude = toLatitude(v), longitude = toLongitude(v);
+      return new THREE.Vector3(...terrainPoint(latitude, longitude, FOOTPATH.lift));
+    };
+    return [edge(-1), edge(0), edge(1)];
+  });
+  for (let i = 0; i < sides.length - 1; i++) for (let lane = 0; lane < 2; lane++) {
+    const a = sides[i][lane], b = sides[i][lane + 1], c = sides[i + 1][lane + 1], d = sides[i + 1][lane];
+    const tone = tones[Math.floor(random() * tones.length)].clone().offsetHSL(0, 0, (random() - 0.5) * 0.05);
+    positions.push(...a.toArray(), ...c.toArray(), ...b.toArray(), ...a.toArray(), ...d.toArray(), ...c.toArray());
+    for (let k = 0; k < 6; k++) colors.push(tone.r, tone.g, tone.b);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function Footpaths() {
+  const geometries = useMemo(() => [WELL, MEADOW_HOUSE].map(footpathGeometry).filter((g): g is THREE.BufferGeometry => g !== null), []);
+  const material = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), []);
+  useEffect(() => () => { geometries.forEach(geometry => geometry.dispose()); material.dispose(); }, [geometries, material]);
+  return <>{geometries.map((geometry, index) => <mesh key={`footpath-${index}`} geometry={geometry} material={material} receiveShadow />)}</>;
 }
 
 // A small plane that wanders the globe: gentle turns, banking, and slow altitude changes above the peaks.
@@ -2501,6 +2814,9 @@ const cloudPlacements = [
 ] as const;
 
 const CLOUD_DRIFT = { minSpeed: 0.003, speedRange: 0.006, foregroundSpeed: 0.02, foregroundOpacity: 0.85 };
+// Lag: the clouds follow the globe's turn a little late (the rate they catch up at, per second). A hand-drag turns the
+// globe fast, so the clouds visibly trail it; the slow automatic spin hardly shows any lag.
+const CLOUD_LAG = 2.5;
 const FOREGROUND_CLOUDS = [
   { position: [0, 40, 72] as const, scale: 0.09 },
 ];
@@ -2548,13 +2864,23 @@ function CloudLayer({ zoom }: { zoom: RefObject<number> }) {
     return { ...cloud, object };
   }), [source, foregroundMaterial]);
   useEffect(() => () => { material.dispose(); foregroundMaterial.dispose(); }, [material, foregroundMaterial]);
+  const layer = useRef<THREE.Group>(null!);
+  const globeTurn = useMemo(() => new THREE.Quaternion(), []);
+  const cloudTurn = useMemo(() => new THREE.Quaternion(), []);
+  const cloudsStarted = useRef(false);
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
+    // The globe's turn is applied to the layer's parent. The clouds' own turn catches up with it gradually, so they
+    // trail the globe when it's turned by hand, about the planet's centre.
+    layer.current.parent!.getWorldQuaternion(globeTurn);
+    if (!cloudsStarted.current) { cloudTurn.copy(globeTurn); cloudsStarted.current = true; }
+    cloudTurn.slerp(globeTurn, 1 - Math.exp(-CLOUD_LAG * dt));
+    layer.current.quaternion.copy(globeTurn.clone().invert().multiply(cloudTurn));
     orbits.current.forEach((orbit, index) => { if (orbit) orbit.rotation.y += dt * drift[index]; });
     foreground.current.rotation.y += dt * CLOUD_DRIFT.foregroundSpeed;
     foregroundMaterial.opacity = CLOUD_DRIFT.foregroundOpacity * (1 - zoom.current);
   });
-  return <>
+  return <group ref={layer} position={[0, -GLOBE_RADIUS, 0]}><group position={[0, GLOBE_RADIUS, 0]}>
     {clouds.map((cloud, index) => <group key={cloud.key} ref={el => { if (el) orbits.current[index] = el; }}>
       <group position={cloud.position} quaternion={cloud.orientation} scale={cloud.scale}>
         <primitive object={cloud.object} />
@@ -2565,7 +2891,7 @@ function CloudLayer({ zoom }: { zoom: RefObject<number> }) {
         <primitive object={cloud.object} />
       </group>)}
     </group>
-  </>;
+  </group></group>;
 }
 
 export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
@@ -2573,7 +2899,7 @@ export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
     <Terrain />
     <JapaneseBridgeGarden />
     <LoopRoad />
-    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><Beach /><StreetFurniture /><Boat /><BeachFloats /><Boulders /><FootballField /><FieldPath /><PalmIsland /><PowerLine /><Airplane />
+    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boat /><BeachFloats /><Boulders /><FootballField /><FieldPath /><Meadow /><Footpaths /><Fireflies /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
     <CloudLayer zoom={zoom} />
   </group>;
 }

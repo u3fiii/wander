@@ -127,6 +127,13 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
    contrasted = contrasted * contrasted * (3.0 - 2.0 * contrasted);
    gl_FragColor.rgb = mix(base, mix(tinted, contrasted, 0.85), uImpact);
  }
+ // Cinematic finish, always on and very light: highlights take a touch of warmth, and the frame settles with a
+ // soft vignette, so the whole scene reads as one warm, filmic picture.
+ float finishLuma = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+ vec2 vignetteOffset = vUv - 0.5;
+ float vignette = 1.0 - dot(vignetteOffset, vignetteOffset) * 0.5;
+ gl_FragColor.rgb *= mix(vec3(1.0), vec3(1.035, 1.0, 0.94), smoothstep(0.35, 1.0, finishLuma));
+ gl_FragColor.rgb *= mix(1.0, vignette, 0.55);
  gl_FragColor.rgb *= gl_FragColor.a;
  if (uImpact > 0.001) {
    // The sky is CSS behind the canvas, so the crash's dark red vignette is laid over it here too.

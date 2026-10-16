@@ -161,3 +161,63 @@ export function updateDust(dust: Dust, dt: number, vehicle: THREE.Object3D, car:
   }
   dust.mesh.instanceMatrix.needsUpdate = true;
 }
+
+// Soil clods: small low-poly chunks of earth thrown up from the rear wheels when driving off-road. They are
+// flung back and up, fall under gravity and shrink away. Solid-looking and brief, unlike a dust cloud.
+export function createSoilClods() {
+  const count = 90;
+  const geometry = new THREE.IcosahedronGeometry(1, 0);
+  const material = new THREE.MeshStandardMaterial({ color: PALETTE.soil, roughness: 1, flatShading: true });
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  mesh.frustumCulled = false;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  for (let i = 0; i < count; i++) mesh.setMatrixAt(i, zero);
+  return {
+    mesh,
+    age: new Float32Array(count).fill(1),
+    size: new Float32Array(count),
+    positions: Array.from({ length: count }, () => new THREE.Vector3()),
+    velocities: Array.from({ length: count }, () => new THREE.Vector3()),
+    next: 0,
+    budget: 0,
+    dispose: () => { geometry.dispose(); material.dispose(); mesh.dispose(); },
+  };
+}
+export type SoilClods = ReturnType<typeof createSoilClods>;
+
+const GRAVITY = 11;
+export function updateSoilClods(clods: SoilClods, dt: number, vehicle: THREE.Object3D, car: CarState, offroad: boolean) {
+  const speedRatio = Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1);
+  if (offroad && Math.abs(car.speed) > 3) {
+    clods.budget += JUICE_CONFIG.clodRate * speedRatio * dt;
+  } else {
+    clods.budget = 0;
+  }
+  const spawn = Math.floor(clods.budget);
+  clods.budget -= spawn;
+  if (spawn > 0) vehicle.updateMatrix();
+  // Clods leave the wheels backwards (+z in the car's space), with a little side scatter and a lift.
+  for (let n = 0; n < spawn; n++) {
+    const i = clods.next;
+    clods.next = (clods.next + 1) % clods.age.length;
+    clods.positions[i].copy(rearWheel(n % 2 ? 1 : -1, local)).applyMatrix4(vehicle.matrix);
+    clods.velocities[i].set((Math.random() - 0.5) * 1.6, 1.2 + Math.random() * 1.6, 1.8 + Math.random() * 1.4)
+      .multiplyScalar(0.6 + speedRatio * 0.9).applyQuaternion(vehicle.quaternion);
+    clods.age[i] = 0;
+    clods.size[i] = JUICE_CONFIG.clodSize * (0.6 + Math.random() * 0.8);
+  }
+  for (let i = 0; i < clods.age.length; i++) {
+    if (clods.age[i] >= JUICE_CONFIG.clodLife) continue;
+    clods.age[i] += dt;
+    const t = Math.min(clods.age[i] / JUICE_CONFIG.clodLife, 1);
+    clods.velocities[i].y -= GRAVITY * dt;
+    clods.positions[i].addScaledVector(clods.velocities[i], dt);
+    dummy.position.copy(clods.positions[i]);
+    dummy.quaternion.identity();
+    dummy.rotation.set(t * 5 + i, t * 3, i * 0.7);
+    dummy.scale.setScalar(t >= 0.85 ? 0 : clods.size[i] * (1 - t * 0.4));
+    dummy.updateMatrix();
+    clods.mesh.setMatrixAt(i, dummy.matrix);
+  }
+  clods.mesh.instanceMatrix.needsUpdate = true;
+}

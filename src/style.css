@@ -125,7 +125,7 @@
 .stars-1{animation-duration:6.5s;animation-delay:-2s}
 .stars-2{animation-duration:3.2s;animation-delay:-1s;filter:drop-shadow(0 0 3px #fff6dd)}
 @keyframes star-twinkle{0%,100%{opacity:1}50%{opacity:.45}}
-.aurora{position:absolute;left:-10%;right:-10%;top:-6%;height:58%;filter:blur(38px);opacity:.42;mix-blend-mode:screen}
+.aurora{position:absolute;left:-10%;right:-10%;top:-6%;height:58%;filter:blur(38px);opacity:.2;mix-blend-mode:screen}
 .aurora span{position:absolute;left:0;right:0;height:38%;border-radius:50%;animation:aurora-drift 18s ease-in-out infinite alternate}
 .aurora span:nth-child(1){top:12%;background:linear-gradient(90deg,transparent 5%,#43d6a4 30%,#6fe0c4 52%,transparent 80%)}
 .aurora span:nth-child(2){top:28%;background:linear-gradient(90deg,transparent 18%,#3fb7c8 42%,#7c8ff0 66%,transparent 92%);animation-duration:24s;animation-delay:-7s}

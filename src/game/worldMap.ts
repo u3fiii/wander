@@ -135,7 +135,7 @@ export const MOUNTAIN_SITES = [
   { latitude: 0.95, longitude: 4.68, scale: 4, rotation: 0.35, variant: 0 },
   { latitude: -0.87, longitude: 1.89, scale: 4.3, rotation: 1.72, variant: 1 },
   { latitude: 0.67, longitude: 3.96, scale: 3.4, rotation: 2.58, variant: 0 },
-  { latitude: 0.25, longitude: 5.58, scale: 3.8, rotation: 0.92, variant: 1 },
+  { latitude: 0.25, longitude: 5.71, scale: 3.8, rotation: 0.92, variant: 1 },
   { latitude: -0.31, longitude: 1.98, scale: 3.2, rotation: 2.16, variant: 0 },
   { latitude: -0.31, longitude: 5.4, scale: 3.5, rotation: 1.28, variant: 1 },
 ] as const;

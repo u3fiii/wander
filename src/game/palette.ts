@@ -4,8 +4,10 @@ export const PALETTE = {
   land: '#aebc70',
   coastWall: '#b8a46a',
   sand: '#ecd9a4',
-  // Football pitch: a fresher green than the land, warm stone for its walls and the path paving.
-  pitchGreen: '#6f9f47',
+  // Loose earth kicked up off-road: dry, a little warmer than the grass.
+  soil: '#9c8058',
+  // Football pitch: warm orange turf, in the same warm family as the bridge and the village roofs.
+  pitchOrange: '#e0894f',
   fieldStone: '#dccaa2',
   pavingLight: '#d8c7a0',
   pavingDark: '#b9a57e',
@@ -44,13 +46,13 @@ export const PALETTE = {
   flowerCream: '#f2e6c4',
   transparentClear: '#000000',
   // Lighting (unchanged values, kept here so no hex lives elsewhere)
-  lightDaySun: '#ffd9a0',
-  lightDaySkyFill: '#d6f1ee',
-  lightDayGroundFill: '#87966a',
-  lightDayAmbient: '#fff0d2',
-  lightDayRim: '#9edce3',
-  lightDayFog: '#b9dfe3',
-  lightDayBounce: '#b8e2d4',
+  lightDaySun: '#ffc985',
+  lightDaySkyFill: '#eef0e2',
+  lightDayGroundFill: '#9a9466',
+  lightDayAmbient: '#fff3df',
+  lightDayRim: '#ffd2a2',
+  lightDayFog: '#cfe1dc',
+  lightDayBounce: '#f0dcc0',
   haze: '#cfe8ee',
   atmosphere: '#e4fbff',
   sunWarm: '#fff4e0',

@@ -10,6 +10,8 @@ import { CAR_CONFIG, JUICE_CONFIG } from './game/config';
 import { setMuted, startAudio } from './game/audio';
 
 const TITLE = 'Just drive.';
+// How long each day or night phase lasts while driving (ms).
+const DAY_CYCLE_MS = 45000;
 const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
 class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
@@ -55,6 +57,13 @@ export default function App() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [night, setNight] = useState(false);
+  // Day and night cycle by themselves while you drive: each phase lasts a few minutes. The button still switches
+  // at any time, and a manual switch restarts the count for the new phase.
+  useEffect(() => {
+    if (!started || paused) return;
+    const timer = window.setTimeout(() => setNight(value => !value), DAY_CYCLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [started, paused, night]);
   const [cameraMode, setCameraMode] = useState(0);
   const [resetKey, setResetKey] = useState(0);
   const [help, setHelp] = useState(false);

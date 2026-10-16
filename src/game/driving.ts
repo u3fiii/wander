@@ -43,13 +43,14 @@ const isDrifting = (car: CarState, controls: Controls) => controls.brake
 
 // Shift fires a timed boost burst (holding it does not extend it), then it needs a cooldown.
 // `boost` is what the HUD shows: burst time left while boosting, recharge progress otherwise.
-export function updateBoost(car: CarState, controls: Controls, dt: number): void {
+export function updateBoost(car: CarState, controls: Controls, dt: number, onRoad = true): void {
   const forwardAmount = controls.throttle ?? Number(controls.forward);
   if (car.boostTime > 0) {
     car.boostTime = Math.max(0, car.boostTime - dt);
   } else {
     car.boostCharge = Math.min(1, car.boostCharge + dt / CAR_CONFIG.boostCooldown);
-    if (controls.boost && forwardAmount > 0 && car.boostCharge >= 1) {
+    // Boost only fires from the road.
+    if (controls.boost && forwardAmount > 0 && car.boostCharge >= 1 && onRoad) {
       car.boostTime = CAR_CONFIG.boostDuration;
       car.boostCharge = 0;
     }
@@ -122,9 +123,12 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   const currentLand = respectWater ? landInfluence(frame.latitude, car.x) : 1;
   const currentOnRoad = !respectWater
     || onRoadSurface(frame.latitude, car.x);
-  updateBoost(car, controls, dt);
-  updateSpeed(car, controls, dt, !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence);
-  if (respectWater && !currentOnRoad && currentLand < LOOP_DRIVE.waterShoreInfluence) {
+  // While boosting the car drives itself: full throttle, and it stays on the road with the usual road assist.
+  const drive = car.boosting > 0 ? { ...controls, forward: true, back: false, brake: false, throttle: 1, reverse: 0 } : controls;
+  updateBoost(car, drive, dt, currentOnRoad);
+  // Nothing slows a boosting car: the off-road drag and the water drag below are skipped while boosting.
+  updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence);
+  if (respectWater && car.boosting === 0 && !currentOnRoad && currentLand < LOOP_DRIVE.waterShoreInfluence) {
     const waterAmount = Math.min(1, Math.max(0,
       (LOOP_DRIVE.waterShoreInfluence - currentLand)
       / (LOOP_DRIVE.waterShoreInfluence - LOOP_DRIVE.waterStopInfluence),
@@ -184,7 +188,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     }
     if (turnTooSharp(car, dryTurn, dt)) return;
     movement = dry;
-    car.speed *= 1 - CAR_CONFIG.shoreScrape * dt;
+    car.speed *= car.boosting > 0 ? 1 : 1 - CAR_CONFIG.shoreScrape * dt;
     nextLand = landInfluence(movement.latitude, movement.longitude);
     nextOnRoad = onRoadSurface(movement.latitude, movement.longitude);
     movingDeeper = nextLand <= currentLand + 1e-7;
@@ -219,7 +223,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
         if (!obstacleAt(candidate.latitude, candidate.longitude, CAR_CONFIG.collisionRadius) && !isWater(candidate)) {
           if (turnTooSharp(car, side * step * CAR_CONFIG.shoreSlideStep, dt)) return;
           movement = candidate;
-          car.speed *= 1 - CAR_CONFIG.shoreScrape * dt;
+          car.speed *= car.boosting > 0 ? 1 : 1 - CAR_CONFIG.shoreScrape * dt;
           obstacle = undefined;
           break;
         }
@@ -306,15 +310,17 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   car.acceleration = (car.speed - previousSpeed) / dt;
   car.x = movement.longitude;
   car.z = (movement.latitude - loopLatitude(car.x)) * GLOBE_RADIUS;
+
   if (!respectWater || nextOnRoad || nextLand >= LOOP_DRIVE.waterSurfaceInfluence) car.waterTravel = 0;
   else if (movingDeeper) car.waterTravel = Math.min(LOOP_DRIVE.maxWaterTravel, car.waterTravel + Math.abs(effectiveTravel));
   else car.waterTravel = Math.max(0, car.waterTravel - Math.abs(effectiveTravel) * 1.8);
   const nextFrame = loopFrame(car.x, car.z);
   car.heading = Math.atan2(dot(movement.facing, cross(nextFrame.normal, nextFrame.tangent)), dot(movement.facing, nextFrame.tangent)) + ramNudge;
+
   car.hitAssist = Math.max(0, (car.hitAssist ?? 0) - dt);
   // Under boost the assist also reaches a little past the road's edge, to pull a wide car back on.
   const nearRoadUnderBoost = car.boosting > 0 && distanceToRoadNetwork(movement.latitude, movement.longitude) < CAR_CONFIG.boostAssistReach;
-  if (respectWater && (nextOnRoad || car.hitAssist > 0 || nearRoadUnderBoost)) assistRoad(car, controls, previousZ, dt);
+  if (respectWater && (nextOnRoad || car.hitAssist > 0 || nearRoadUnderBoost || car.boosting > 0)) assistRoad(car, controls, previousZ, dt);
   keepOnBridge(car, previousX, previousZ, dt);
   car.distance += Math.abs(effectiveTravel);
   car.wheelTravel += effectiveTravel;
@@ -345,6 +351,8 @@ function facingEastNorth(facing: number[], latitude: number, longitude: number):
 // Hidden road assist: on the road the heading eases back toward the road direction when the
 // player isn't steering hard, and more firmly when drifting toward the edge. Subtle by design.
 function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: number) {
+  // While boosting, steering brings the car back to the road itself (see updateSteering), so the assist stays out
+  // of the way; otherwise it would pull the heading straight back and stop the car getting across.
   const recovering = (car.hitAssist ?? 0) > 0;
   if (Math.abs(car.speed) < (recovering ? 1.5 : 4)) return;
   const along = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
@@ -355,7 +363,11 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   // while the player steers.
   const boosting = car.boosting > 0;
   const assistScale = boosting ? CAR_CONFIG.boostRoadAssistFactor : 1;
-  const rate = (CAR_CONFIG.roadAssist * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0)) * assistScale
+  // The bridge approach curves sharply, so for a short stretch before the deck the assist is firmer: it lines the car
+  // up with the road (and the deck) even when the player isn't steering.
+  const bridgeDistance = Math.abs(wrapAngle(car.x - WORLD_SETTINGS.roads.bridgeLongitude));
+  const funnel = bridgeDistance < CAR_CONFIG.bridgeFunnelReach ? CAR_CONFIG.bridgeFunnelAssist * (1 - bridgeDistance / CAR_CONFIG.bridgeFunnelReach) : 0;
+  const rate = (CAR_CONFIG.roadAssist * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
     + (recovering ? CAR_CONFIG.crashAssist * (1 - steering * 0.5) : 0);
   car.heading = along + error * Math.exp(-rate * dt);
 }
@@ -367,7 +379,7 @@ function turnTooSharp(car: CarState, turn: number, dt: number) {
   const allowed = CAR_CONFIG.deflectRate * dt;
   if (Math.abs(turn) <= allowed) return false;
   car.heading += Math.sign(turn) * allowed;
-  car.speed *= 1 - CAR_CONFIG.shoreScrape * dt;
+  car.speed *= car.boosting > 0 ? 1 : 1 - CAR_CONFIG.shoreScrape * dt;
   car.yawRate = 0;
   return true;
 }

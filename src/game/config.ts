@@ -18,9 +18,9 @@ export const CAR_CONFIG = {
   gentleThrottleCap: 0.5,
   // Boost (Shift): a timed burst of extra speed and pull, then a cooldown before it can fire again.
   // A long, heavy push rather than a speed spike: the point of boost is the power to bulldoze traffic.
-  boostSpeedFactor: 1.12,
-  boostAccelFactor: 1.25,
-  boostDuration: 3.2,
+  boostSpeedFactor: 1.1,
+  boostAccelFactor: 1.8,
+  boostDuration: 5,
   boostCooldown: 5,
   boostOverspeedDecel: 8,
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.
@@ -46,6 +46,9 @@ export const CAR_CONFIG = {
   roadAssist: 0.8,
   roadEdgeAssist: 3,
   roadEdgeStart: 1.8,
+  // The approach to the bridge: extra road assist (per second) that fades out over this many radians from the deck.
+  bridgeFunnelAssist: 14,
+  bridgeFunnelReach: 0.5,
   // Boost makes holding the road easy: the road assist is this many times stronger (and reaches this far past
   // the road's edge, in metres), and steering turns in quicker with more grip.
   boostRoadAssistFactor: 3.5,
@@ -90,10 +93,10 @@ export const CAR_CONFIG = {
   sideRamSpeedKeep: 0.95,
   // Ramming while boosting: the car bulldozes traffic aside, front or side alike, and only feels a little of
   // it: share of speed kept per hit, and how much of the usual heading nudge it takes.
-  boostRamSpeedKeep: 0.97,
+  boostRamSpeedKeep: 1,
   // Heading nudge away from a struck car at full speed (radians).
   ramNudge: 0.05,
-  boostRamNudgeFactor: 0.25,
+  boostRamNudgeFactor: 0,
   // Under boost the overlap with a struck car is eased out this much more gently (the other car moves, not you).
   boostSeparateFactor: 0.3,
   // Speed lost per second while pressed against a car that hasn't been shoved clear yet, and how fast an overlap is eased out.
@@ -187,6 +190,10 @@ export const JUICE_CONFIG = {
   dustBurst: 14,
   dustLife: 1,
   dustSize: 0.35,
+  // Soil clods kicked up when driving off-road: spawn rate at full speed (per second), how long they fly, and size.
+  clodRate: 26,
+  clodLife: 0.55,
+  clodSize: 0.11,
   speedLinesEnabled: true,
   speedLinesThreshold: 0.7,
   speedLineCount: 40,
