@@ -26,8 +26,8 @@ export const CAR_CONFIG = {
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.
   gamepadDeadzone: 0.1,
   gamepadCurve: 1.5,
-  handbrakeDecel: 7,
-  driftMinSpeed: 4,
+  handbrakeDecel: 4,
+  driftMinSpeed: 3,
   driftYawBoost: 1.25,
   driftGripBoost: 1.6,
   coastFriction: 0.45,
@@ -160,8 +160,8 @@ export const JUICE_CONFIG = {
   driftAngleMax: 0.25,
   driftStiffness: 40,
   driftDamping: 7,
-  driftSpeedRatio: 0.95,
-  driftSteer: 0.95,
+  driftSpeedRatio: 0.7,
+  driftSteer: 0.75,
   // Tire marks
   tireMarksEnabled: true,
   tireMarkLife: 4,

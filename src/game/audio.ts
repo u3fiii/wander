@@ -1,7 +1,10 @@
 import { JUICE_CONFIG } from './config.ts';
 import { createEngineState, stepEngine } from './engineModel.ts';
+import { nightAmount } from './dayCycle.ts';
 import slowMoWhooshUrl from '../assets/sound/alexis_gaming_cam-woosh-saber-laser-346099.mp3?url';
 import ambienceUrl from '../assets/sound/soundreality-wind-blowing-457954.mp3?url';
+import seaUrl from '../assets/sound/freesound_community-sea-and-seagull-wave-5932.mp3?url';
+import planeUrl from '../assets/sound/loswin23-small-airplane-520026.mp3?url';
 
 // Car audio on the Web Audio API. Layers, all feeding one master gain (and, for the world's sounds, a low-pass
 // that closes in slow motion):
@@ -30,15 +33,21 @@ export const AUDIO_CONFIG = {
   // The simple synthesised engine (used while there is no engine file): its volume, how much saw "body" it has
   // (harmonics that make it sound thick, even on small speakers) and how strongly it putters (a pulse at the
   // firing rate, the "brrr" of an engine).
-  synthVolume: 0.06, engineBody: 0.6, engineRumble: 0.8,
+  synthVolume: 0.055, engineBody: 0.7, engineRumble: 0.4,
   // How low the engine sits (× its pitch) and how much grit (soft saturation) it has.
-  enginePitch: 0.85, engineGrit: 0.35,
+  enginePitch: 1, engineGrit: 0.15,
   boostVolume: 0.2, boostPitchBump: 0.25, boostBumpTime: 0.6,
   thudVolume: 0,
   // Ramming a car under boost.
-  impactVolume: 0.5,
+  impactVolume: 0.08,
+  // The far-off birds by day. Kept very quiet: the site is meant to be calm.
+  natureVolume: 0.5,
   // Ambience: a soft wind over the whole map, always there and barely heard.
   ambienceVolume: 0.045,
+  // The sea (waves and gulls), heard only near the water, and very quietly.
+  seaVolume: 0.06,
+  // The little plane, heard when it flies near the camera.
+  planeVolume: 0.12,
   startVolume: 0.25, slowMoWhooshVolume: 0.2, slowMoMuffleHz: 650, slowMoPitchDrop: 0.45,
   // Seconds trimmed from both ends of a loop (MP3 files carry a little silence there).
   loopTrim: 0.03,
@@ -53,9 +62,9 @@ export const AUDIO_RANGES: Record<AudioKey, [number, number, number]> = {
   windVolume: [0, 1, 0.01], windMinHz: [50, 2000, 10], windMaxHz: [300, 8000, 10],
   tireVolume: [0, 1, 0.01], tireHz: [300, 5000, 10], tireQ: [0.3, 10, 0.1], hardBrakeAccel: [2, 30, 0.5],
   offroadVolume: [0, 1, 0.01], offroadHz: [80, 2000, 10],
-  synthVolume: [0, 0.2, 0.005], engineBody: [0, 1, 0.01], engineRumble: [0, 1, 0.01], enginePitch: [0.5, 1.5, 0.01], engineGrit: [0, 1, 0.01],
+  synthVolume: [0, 0.4, 0.005], engineBody: [0, 1, 0.01], engineRumble: [0, 1, 0.01], enginePitch: [0.5, 1.5, 0.01], engineGrit: [0, 1, 0.01],
   boostVolume: [0, 1, 0.01], boostPitchBump: [0, 1, 0.01], boostBumpTime: [0.1, 2, 0.05],
-  thudVolume: [0, 1, 0.01], impactVolume: [0, 1.5, 0.01], ambienceVolume: [0, 0.4, 0.005],
+  thudVolume: [0, 1, 0.01], impactVolume: [0, 1.5, 0.01], natureVolume: [0, 1.5, 0.01], ambienceVolume: [0, 0.4, 0.005], seaVolume: [0, 0.4, 0.005], planeVolume: [0, 0.6, 0.005],
   startVolume: [0, 1, 0.01], slowMoWhooshVolume: [0, 1, 0.01], slowMoMuffleHz: [200, 5000, 10], slowMoPitchDrop: [0, 0.9, 0.01],
   loopTrim: [0, 0.2, 0.005],
 };
@@ -64,7 +73,7 @@ export const AUDIO_RANGES: Record<AudioKey, [number, number, number]> = {
 const FILES = ['engine', 'engine-load', 'engine-start', 'offroad', 'boost', 'thud'] as const;
 type FileName = typeof FILES[number];
 const EXTENSIONS = ['mp3', 'ogg', 'wav', 'm4a'];
-const buffers: Partial<Record<FileName | 'slowmo' | 'ambience', AudioBuffer>> = {};
+const buffers: Partial<Record<FileName | 'slowmo' | 'ambience' | 'sea' | 'plane', AudioBuffer>> = {};
 
 // Decoded ahead of time (an offline context needs no user gesture), so they are ready when the drive starts.
 const decode = (url: string) => fetch(url)
@@ -79,6 +88,8 @@ if (typeof window !== 'undefined' && typeof OfflineAudioContext !== 'undefined')
   Promise.all(FILES.map(load)).then(() => { if (graph) buildLoops(); });
   decode(slowMoWhooshUrl).then(buffer => { buffers.slowmo = trimmed(buffer, 0.25, 2.2); if (graph) buildLoops(); }).catch(() => undefined);
   decode(ambienceUrl).then(buffer => { buffers.ambience = seamless(buffer, 2); if (graph) buildLoops(); }).catch(() => undefined);
+  decode(seaUrl).then(buffer => { buffers.sea = seamless(buffer, 3); if (graph) buildLoops(); }).catch(() => undefined);
+  decode(planeUrl).then(buffer => { buffers.plane = seamless(buffer, 3); if (graph) buildLoops(); }).catch(() => undefined);
 }
 // A piece of a recording, with a short fade at the end.
 function trimmed(source: AudioBuffer, from: number, to: number) {
@@ -112,11 +123,11 @@ type Graph = {
   // Fallback engine (when there is no engine file): the original simple one (a triangle and a sine an octave
   // below through a soft low-pass), thickened by a saw and given a putter by a pulse at the firing rate.
   oscA: OscillatorNode; oscB: OscillatorNode; oscFilter: BiquadFilterNode; oscGain: GainNode;
-  oscBody: OscillatorNode; bodyGain: GainNode; putter: OscillatorNode; putterDepth: GainNode; grit: WaveShaperNode;
+  oscBody: OscillatorNode; bodyGain: GainNode; putter: OscillatorNode; putterDepth: GainNode; grit: WaveShaperNode; weight: BiquadFilterNode;
   wind: { filter: BiquadFilterNode; gain: GainNode };
   tires: { filter: BiquadFilterNode; gain: GainNode };
   rumble: { filter: BiquadFilterNode; gain: GainNode };
-  engine?: Loop; load?: Loop; offroad?: Loop; ambience?: Loop;
+  engine?: Loop; load?: Loop; offroad?: Loop; ambience?: Loop; sea?: Loop; plane?: Loop;
 };
 let graph: Graph | null = null;
 let muted = false;
@@ -171,6 +182,16 @@ function buildLoops() {
   const loadBuffer = buffers['engine-load'] ?? buffers.engine;
   if (loadBuffer && !graph.load) graph.load = loop(loadBuffer, graph.world);
   if (buffers.offroad && !graph.offroad) graph.offroad = loop(buffers.offroad, graph.world);
+  if (buffers.plane && !graph.plane) {
+    graph.plane = loop(buffers.plane, graph.world);
+    graph.plane.source.loopStart = 0;
+    graph.plane.source.loopEnd = buffers.plane.duration;
+  }
+  if (buffers.sea && !graph.sea) {
+    graph.sea = loop(buffers.sea, graph.world);
+    graph.sea.source.loopStart = 0;
+    graph.sea.source.loopEnd = buffers.sea.duration;
+  }
   if (buffers.ambience && !graph.ambience) {
     graph.ambience = loop(buffers.ambience, graph.world);
     graph.ambience.source.loopStart = 0;
@@ -181,7 +202,7 @@ function buildLoops() {
 function silence() {
   if (!graph) return;
   const now = graph.context.currentTime;
-  for (const gain of [graph.oscGain, graph.wind.gain, graph.tires.gain, graph.rumble.gain, graph.engine?.gain, graph.load?.gain, graph.offroad?.gain, graph.ambience?.gain]) if (gain) glide(gain.gain, 0, now, 0.08);
+  for (const gain of [graph.oscGain, graph.wind.gain, graph.tires.gain, graph.rumble.gain, graph.engine?.gain, graph.load?.gain, graph.offroad?.gain, graph.ambience?.gain, graph.sea?.gain, graph.plane?.gain]) if (gain) glide(gain.gain, 0, now, 0.08);
 }
 
 // Starts the audio graph; call from a user gesture (browsers only allow sound after one).
@@ -200,34 +221,53 @@ export function startAudio() {
   world.connect(master);
   const noise = noiseBuffer(context);
 
+  // The synthesised engine: a low, warm, calm but weighty rumble (think of a big engine idling).
+  // - Body: two sawtooths a few cents apart (a wide, rich tone) plus a sine sub an octave down (felt on
+  //   headphones), through a gently resonant low-pass that opens under throttle and closes off it.
+  // - Weight: a peaking boost on the second harmonic, so the bass is heard even on laptop and phone speakers, and
+  //   a soft compressor that keeps the sound full and even.
+  // - Burble: a smooth, rounded pulse at the firing rate (a sine on the level), not a choppy stutter.
+  // - Grit: a touch of soft saturation for texture.
   const oscFilter = context.createBiquadFilter();
   oscFilter.type = 'lowpass';
-  oscFilter.frequency.value = 350;
-  oscFilter.Q.value = 1.4;
-  // The putter: the engine's level pulses at the firing rate (an LFO added to a gain of 1).
-  const pulse = context.createGain();
-  pulse.gain.value = 1;
-  const oscGain = context.createGain();
-  oscGain.gain.value = 0;
-  // Grit: a soft saturation after the filter, for a rougher, thicker growl.
+  oscFilter.frequency.value = 220;
+  oscFilter.Q.value = 2.2;
+  const weight = context.createBiquadFilter();
+  weight.type = 'peaking';
+  weight.Q.value = 1.1;
+  weight.gain.value = 13;
   const grit = context.createWaveShaper();
   grit.oversample = '2x';
-  oscFilter.connect(grit).connect(pulse).connect(oscGain).connect(world);
+  const pulse = context.createGain();
+  pulse.gain.value = 1;
+  const compressor = context.createDynamicsCompressor();
+  compressor.threshold.value = -26; compressor.knee.value = 18; compressor.ratio.value = 4;
+  compressor.attack.value = 0.01; compressor.release.value = 0.2;
+  const oscGain = context.createGain();
+  oscGain.gain.value = 0;
+  // More low end: a low shelf under everything.
+  const lows = context.createBiquadFilter();
+  lows.type = 'lowshelf';
+  lows.frequency.value = 160;
+  lows.gain.value = 9;
+  oscFilter.connect(lows).connect(weight).connect(grit).connect(pulse).connect(compressor).connect(oscGain).connect(world);
   const oscA = context.createOscillator(), oscB = context.createOscillator(), oscBody = context.createOscillator();
-  oscA.type = 'triangle'; oscB.type = 'sine'; oscBody.type = 'sawtooth';
+  oscA.type = 'sawtooth'; oscBody.type = 'sawtooth'; oscB.type = 'sine';
+  oscBody.detune.value = 12;
   const bodyGain = context.createGain();
   bodyGain.gain.value = 0;
-  oscA.connect(oscFilter); oscB.connect(oscFilter); oscBody.connect(bodyGain).connect(oscFilter);
-  // A sawtooth pulse turned upside down: each firing is a quick hit that decays, the "putt" of an engine.
+  const subGain = context.createGain();
+  subGain.gain.value = 1.8;
+  oscA.connect(oscFilter); oscBody.connect(bodyGain).connect(oscFilter); oscB.connect(subGain).connect(oscFilter);
   const putter = context.createOscillator();
-  putter.type = 'sawtooth';
+  putter.type = 'sine';
   const putterDepth = context.createGain();
   putterDepth.gain.value = 0;
   putter.connect(putterDepth).connect(pulse.gain);
   [oscA, oscB, oscBody, putter].forEach(oscillator => oscillator.start());
 
   graph = {
-    context, master, world, noise, oscA, oscB, oscFilter, oscGain, oscBody, bodyGain, putter, putterDepth, grit,
+    context, master, world, noise, oscA, oscB, oscFilter, oscGain, oscBody, bodyGain, putter, putterDepth, grit, weight,
     wind: noiseLayer(context, noise, 'lowpass', world),
     tires: noiseLayer(context, noise, 'bandpass', world),
     rumble: noiseLayer(context, noise, 'lowpass', world),
@@ -381,6 +421,10 @@ export type AudioInput = {
   speedRatio: number; throttle: number; drift: number; active: boolean;
   // Game time scale (below 1 in slow motion), the car's acceleration (m/s², for hard braking) and whether it is off the road.
   timeScale?: number; acceleration?: number; offroad?: boolean;
+  // How near the sea the car is (0..1): the share of water around it.
+  sea?: number;
+  // How near the plane is to the camera (0..1).
+  plane?: number;
 };
 const clamp01 = (value: number) => (Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -401,7 +445,10 @@ export function updateAudio(input: AudioInput) {
   // Slow motion: the world slows, drops in pitch and is muffled.
   const slow = clamp01((1 - (input.timeScale ?? 1)) / 0.82);
   const slowRate = 1 - c.slowMoPitchDrop * slow;
-  glide(graph.world.frequency, 18000 * Math.pow(c.slowMoMuffleHz / 18000, slow), now);
+  // Paused (or on the map, or reading the help), the world is heard from a step back: muffled the same way.
+  const muffle = Math.max(slow, worldHeld ? 0.75 : 0);
+  glide(graph.world.frequency, 18000 * Math.pow(c.slowMoMuffleHz / 18000, muffle), now, worldHeld ? 0.25 : c.smoothing);
+  natureTick(dt);
 
   // Engine.
   const { shifting } = stepEngine(engine, { throttle: on ? throttle : 0, speed, boostStarted: boostPending }, c, dt);
@@ -414,19 +461,22 @@ export function updateAudio(input: AudioInput) {
     glide(graph.engine.gain.gain, engineLevel, now);
     glide(graph.oscGain.gain, 0, now);
   } else {
-    // The simple engine, like an automatic: its pitch rises smoothly with speed (and a little with the throttle),
-    // with no gear shifts, so it always moves with the car.
-    const pitch = (55 + Math.min(speed, 1.2) * 140 + throttle * 25) * (1 + engine.bump) * c.enginePitch * slowRate;
+    // Like an automatic: the pitch rises smoothly with speed (and a little with the throttle), in a low, narrow
+    // range, so it stays calm instead of whining; the throttle opens the filter, which is where the power is.
+    const pitch = (34 + Math.min(speed, 1.2) * 62 + throttle * 6) * (1 + engine.bump) * c.enginePitch * slowRate;
     setGrit(graph.grit, c.engineGrit);
-    glide(graph.oscA.frequency, pitch, now);
-    glide(graph.oscB.frequency, pitch * 0.5, now);
-    glide(graph.oscBody.frequency, pitch, now);
+    glide(graph.oscA.frequency, pitch, now, 0.12);
+    glide(graph.oscBody.frequency, pitch, now, 0.12);
+    glide(graph.oscB.frequency, pitch * 0.5, now, 0.12);
     glide(graph.bodyGain.gain, c.engineBody, now);
-    // Firing rate: half the pitch, a slow "trrr" at idle that speeds into a growl.
-    glide(graph.putter.frequency, pitch * 0.5, now);
-    glide(graph.putterDepth.gain, -c.engineRumble * 0.5, now);
-    glide(graph.oscFilter.frequency, 300 + speed * 700 + throttle * 300, now, 0.08);
-    glide(graph.oscGain.gain, on ? c.synthVolume * (0.45 + throttle * 0.55) : 0, now, 0.1);
+    glide(graph.weight.frequency, pitch * 2, now, 0.12);
+    // The burble runs at the firing rate (half the pitch), smooth and rounded.
+    glide(graph.putter.frequency, pitch * 0.5, now, 0.12);
+    glide(graph.putterDepth.gain, c.engineRumble * 0.4, now);
+    // Open enough to let the upper harmonics through: they are what small speakers can play, so the deep tone
+    // is heard on a laptop or phone and not only felt on headphones.
+    glide(graph.oscFilter.frequency, pitch * (5 + throttle * 3) + 160, now, 0.15);
+    glide(graph.oscGain.gain, on ? c.synthVolume * (0.6 + throttle * 0.4) : 0, now, 0.15);
   }
   if (graph.load) {
     glide(graph.load.source.playbackRate, rate * c.loadRateRatio * (buffers['engine-load'] ? 1 : 1.12), now);
@@ -458,4 +508,45 @@ export function updateAudio(input: AudioInput) {
 
   // Ambience: the soft wind under everything, slowly faded in.
   if (graph.ambience) glide(graph.ambience.gain.gain, JUICE_CONFIG.soundEnabled ? c.ambienceVolume : 0, now, 1.5);
+  // The sea: rises and falls slowly with how near the water the car is.
+  if (graph.sea) glide(graph.sea.gain.gain, JUICE_CONFIG.soundEnabled ? c.seaVolume * clamp01(input.sea ?? 0) : 0, now, 1.5);
+  // The plane: swells as it passes near the camera and fades as it flies off.
+  if (graph.plane) glide(graph.plane.gain.gain, JUICE_CONFIG.soundEnabled ? c.planeVolume * clamp01(input.plane ?? 0) : 0, now, 0.6);
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Far-off birds: now and then, by day, a bird calls in the distance (two or three quick rising whistles), very
+// quiet and through the world's sounds (so it is muffled in slow motion and while the game is held).
+let worldHeld = false;
+// While paused, on the map or in the help, the world's sounds are muffled (see updateAudio).
+export function holdWorld(held: boolean) { worldHeld = held; }
+
+function whistle(frequency: number, at: number, length: number, volume: number, glideTo: number) {
+  if (!graph || muted) return;
+  const { context, world } = graph;
+  const start = context.currentTime + at;
+  const tone = context.createOscillator();
+  tone.type = 'sine';
+  tone.frequency.setValueAtTime(frequency, start);
+  tone.frequency.exponentialRampToValueAtTime(glideTo, start + length * 0.8);
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(volume * AUDIO_CONFIG.natureVolume, start + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+  tone.connect(gain).connect(world);
+  tone.start(start);
+  tone.stop(start + length + 0.05);
+}
+
+let natureWait = 4;
+function natureTick(dt: number) {
+  if (!graph || muted || !JUICE_CONFIG.soundEnabled) return;
+  natureWait -= dt;
+  if (natureWait > 0) return;
+  if (nightAmount() < 0.3) {
+    const base = 2200 + Math.random() * 900, calls = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < calls; i++) whistle(base, i * 0.13, 0.09, 0.016, base * 1.35);
+    natureWait = 7 + Math.random() * 12;
+  } else natureWait = 3;
 }

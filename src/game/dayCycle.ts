@@ -25,7 +25,10 @@ const DAWN_SKY: Keys = [
 
 // `jump` is the button's cross-fade: from one time of day to another, `progress` 0..1.
 // `day` counts whole turns of the clock.
-export const cycle = { time: 20, day: 0, jump: null as { from: number; to: number; progress: number } | null };
+// `speed` scales how fast the clock runs (phones run it a little faster).
+export const cycle = { time: 20, day: 0, speed: 1, jump: null as { from: number; to: number; progress: number } | null };
+// Back to the middle of the morning, for a run that should start in daylight.
+export function resetToDay() { cycle.time = 20; cycle.jump = null; }
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const step = (t: number, from: number, to: number) => smooth(Math.min(1, Math.max(0, (t - from) / (to - from))));
@@ -105,7 +108,7 @@ export function advanceCycle(dt: number, running: boolean) {
     jump.progress += dt / JUMP_SECONDS;
     if (jump.progress >= 1) { if (jump.to < jump.from) cycle.day++; cycle.time = jump.to; cycle.jump = null; }
   } else if (running) {
-    const next = cycle.time + dt;
+    const next = cycle.time + dt * cycle.speed;
     if (next >= TOTAL) cycle.day++;
     cycle.time = wrap(next);
   }

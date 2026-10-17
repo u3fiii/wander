@@ -10,12 +10,12 @@ import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateD
 import { playBoost, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
 import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
-import { ROAD_PATHS, distanceToRoadNetwork, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
+import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
 import { DRIVE_MODE, RAILS, initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
 import { clearObstacleGroup, drainNearMisses, drainTrafficHits, setObstacleGroup } from './obstacles';
 import type { NearMiss, Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
-import MiniatureWorld from './MiniatureWorld';
+import MiniatureWorld, { airplaneState } from './MiniatureWorld';
 import IntroDepthOfField from './IntroDepthOfField';
 import { cinematicState } from './cinematic';
 import { nightState } from './nightState';
@@ -24,6 +24,7 @@ import { difficulty, trafficActive, trafficSwerves } from './difficulty';
 import { dayLook } from './dayLook';
 import { nightLook } from './nightLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
+import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
 import { bakeRoles, jitterAmount, kenneyCarKey, logMaterials, playerCarRole, resolveKenneyCar, roleMaterials, textureSampler } from './recolor';
@@ -65,9 +66,11 @@ function readGamepad() {
   return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
-  started: boolean; paused: boolean; mapView?: boolean; cameraMode: number; resetKey: number;
+  started: boolean; paused: boolean; mapView?: boolean;
+  // The run's last heart is gone: the finale (see FINALE).
+  finale?: boolean; cameraMode: number; resetKey: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
-  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void;
+  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void; onDriftCinematic?: () => void;
 };
 
 const localUp = new THREE.Vector3(0, 1, 0);
@@ -238,9 +241,9 @@ function HeadlightBeam({ blend }: { blend: React.RefObject<number> }) {
   const spot = useRef<THREE.SpotLight>(null!);
   const target = useMemo(() => new THREE.Object3D(), []);
   useEffect(() => { spot.current.target = target; }, [target]);
-  useFrame(() => { spot.current.intensity = blend.current * 80; });
+  useFrame(() => { spot.current.intensity = blend.current * 110; });
   return <>
-    <spotLight ref={spot} color={WARM_LIGHT.beam} position={[0, 0.7, -1.3]} angle={0.58} penumbra={1} distance={26} decay={1.6} intensity={0} />
+    <spotLight ref={spot} color={WARM_LIGHT.beam} position={[0, 0.7, -1.3]} angle={0.7} penumbra={1} distance={34} decay={1.6} intensity={0} />
     <primitive object={target} position={[0, 0, -10]} />
   </>;
 }
@@ -344,13 +347,37 @@ const CRASH_CAM = {
 // breath, not an impact. A rest after each (difficulty.nearMissRest) keeps them special: until it passes, a near
 // miss only scores, with no slow motion.
 const NEAR_MISS_CAM = { strength: 0.55 };
+// Distances (m) around the car checked for water, for the sound of the sea.
+const SEA_RINGS = [5, 10, 16];
+// How close (to the camera) the plane must come to be heard, fully within `near`, not at all beyond `far`.
+const PLANE_HEARD = { near: 14, far: 45 };
 // A drift that lasts scores when it ends: on the road, at speed, long enough (difficulty.driftMinTime), and without
 // hitting anything. Brief gaps (the slide flickering as the wheel crosses centre) up to `grace` don't end it.
-export type DriftScore = { time: number; speed: number };
-const DRIFT_SCORE = { minSpeed: 6, grace: 0.25, settle: 0.3 };
+// A finished drift, for scoring its quality: how long and fast, how hard into the slide (`angle`, the average
+// steering 0..1), how much of it stayed on the road (`clean`, 0..1), how many times it switched sides
+// (`switches`: an S-drift) and how many near misses it threaded on the way (`threaded`).
+export type DriftScore = { time: number; speed: number; angle: number; clean: number; switches: number; threaded: number };
+const DRIFT_SCORE = { minSpeed: 4.5, grace: 0.25, settle: 0.3 };
 // Drift camera, once a slide has settled in: it swings out to the outside of the turn to show the car's
 // angle, drops a little lower, widens the lens a touch and leans into the corner. All gentle, on smooth easing.
 const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, release: 1.8 };
+// Drift cut-in: once a good drift has lasted `trigger` seconds (on the road, at speed, not under boost), the camera
+// shoots up to look straight down on the car from `height` m (with the car heading up the screen; `turn` can swing
+// it round the car on the way, off by default) while time slows to `slowScale` (gentler than a crash, so the slide
+// still moves), holds a moment, then comes back down more slowly to land behind the car again. All on real time. `rise` and `hold` are when it is fully up and when it starts back
+// down; `rest` keeps it rare.
+const DRIFT_CINE = { trigger: 0.75, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5 };
+// The finale, when the last heart goes: time all but stops (`slowScale`), the camera goes straight up over the car,
+// climbing from `startHeight` to `height` m while looking down on it and turning a full `turn` round it, over
+// `duration` s (eased at both ends), and the frame takes the steel-blue end grade. It does not come back: the
+// run-over card follows.
+const FINALE = { duration: 3.4, rise: 0.7, slowScale: 0.12, startHeight: 8, height: 34, turn: Math.PI * 2 };
+const driftCutEnvelope = (time: number) => {
+  if (time < 0 || time > DRIFT_CINE.duration) return 0;
+  if (time < DRIFT_CINE.rise) return 1 - Math.pow(1 - time / DRIFT_CINE.rise, 3);
+  if (time < DRIFT_CINE.hold) return 1;
+  return 1 - easeInOutCubic((time - DRIFT_CINE.hold) / (DRIFT_CINE.duration - DRIFT_CINE.hold));
+};
 const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const crashEnvelope = (time: number) => {
   if (time < 0 || time > CRASH_CAM.duration) return 0;
@@ -766,7 +793,22 @@ function DrivingScene(props: SceneProps) {
   // How hard the cut-in moves the camera: 1 for a crash, less for a near miss.
   const crashStrength = useRef(1);
   const nearMissRest = useRef(0);
-  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false });
+  const seaCheck = useRef(0);
+  const driftCutTime = useRef(-1);
+  const driftCutRest = useRef(0);
+  const driftCutLevel = useRef(0);
+  const driftOrbit = useRef(0);
+  const driftApplied = useMemo(() => new THREE.Vector3(), []);
+  const driftTop = useMemo(() => new THREE.Vector3(), []);
+  const finaleTime = useRef(-1);
+  const finaleLevel = useRef(0);
+  const finaleApplied = useMemo(() => new THREE.Vector3(), []);
+  const finaleSpot = useMemo(() => new THREE.Vector3(), []);
+  const finaleOffset = useMemo(() => new THREE.Vector3(), []);
+  useEffect(() => { finaleTime.current = props.finale ? 0 : -1; }, [props.finale]);
+  const driftOffset = useMemo(() => new THREE.Vector3(), []);
+  const seaNear = useRef(0);
+  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0 });
   const driftHold = useRef(0);
   const driftSide = useRef(0);
   const crashRest = useRef(0);
@@ -907,8 +949,22 @@ function DrivingScene(props: SceneProps) {
       if (crashTime.current > CRASH_CAM.duration) { crashTime.current = -1; crashRest.current = CRASH_CAM.rest; }
     }
     crashLevel.current = crashEnvelope(crashTime.current);
+    // The drift cut-in's clock: a crash during it hands over to the crash (the drift one lets go at once).
+    driftCutRest.current = Math.max(0, driftCutRest.current - realDt);
+    if (driftCutTime.current >= 0) {
+      if (crashTime.current >= 0) driftCutTime.current = Math.max(driftCutTime.current, DRIFT_CINE.hold);
+      driftCutTime.current += realDt;
+      if (driftCutTime.current > DRIFT_CINE.duration) { driftCutTime.current = -1; driftCutRest.current = DRIFT_CINE.rest; }
+    }
+    driftCutLevel.current = driftCutEnvelope(driftCutTime.current);
+    cinematicState.driftCut = driftCutLevel.current;
+    if (finaleTime.current >= 0) finaleTime.current += realDt;
+    finaleLevel.current = finaleTime.current < 0 ? 0 : easeInOutCubic(Math.min(1, finaleTime.current / FINALE.rise));
+    cinematicState.finale = finaleLevel.current;
     // No slow motion while boosting, even if a cut-in started just before: the boost never pauses.
-    gameTime.scale = props.car.current.boosting > 0 ? 1 : THREE.MathUtils.lerp(1, CRASH_CAM.slowScale, crashLevel.current);
+    gameTime.scale = props.car.current.boosting > 0 ? 1 : Math.min(THREE.MathUtils.lerp(1, CRASH_CAM.slowScale, crashLevel.current), THREE.MathUtils.lerp(1, DRIFT_CINE.slowScale, driftCutLevel.current));
+    // The finale slows time whatever else is going on (a boost included).
+    if (finaleLevel.current > 0) gameTime.scale = Math.min(gameTime.scale, THREE.MathUtils.lerp(1, FINALE.slowScale, finaleLevel.current));
     cinematicState.crash = crashLevel.current;
     // Which look the cut-in has (red or cool) changes smoothly, never in one frame: in a long tussle the hits
     // alternate between head-on and side, and an instant switch made the red grade and the contrast blink.
@@ -1005,7 +1061,7 @@ function DrivingScene(props: SceneProps) {
     padRecoverHeld.current = pad.recover;
     let throttle = Math.max(pedals.current.throttle, pad.throttle);
     // Rails mode (touch screens): the car drives itself; the player only steers.
-    if (DRIVE_MODE.rails && props.started) throttle = Math.max(throttle, RAILS.autoThrottle);
+    if (DRIVE_MODE.rails && props.started && !props.finale) throttle = Math.max(throttle, RAILS.autoThrottle);
     if (keys.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
     const keySteer = Number(keys.left) - Number(keys.right);
     const driveControls = {
@@ -1059,6 +1115,7 @@ function DrivingScene(props: SceneProps) {
       props.onTrafficHit?.({ ...hit, cinematic });
     }
     for (const miss of drainNearMisses()) {
+      if (driftRun.current.time > 0) driftRun.current.threaded++;
       if (cutInFree && crashTime.current < 0 && nearMissRest.current <= 0 && props.started) {
         crashTime.current = 0;
         crashSide.current = miss.side;
@@ -1084,10 +1141,24 @@ function DrivingScene(props: SceneProps) {
     const run = driftRun.current;
     if (drifting) {
       run.time += dt; run.speed += Math.abs(car.speed) * dt; run.gap = 0;
+      run.steer += Math.min(1, Math.abs(car.steering)) * dt;
+      // Swinging firmly from one side to the other mid-slide is a switchback.
+      if (Math.abs(car.steering) > 0.45) {
+        const side = Math.sign(car.steering);
+        if (run.side && side !== run.side) run.switches++;
+        run.side = side;
+      }
       if (!onRoad) run.offroad += dt;
     } else if (run.time > 0 && (run.gap += dt) > DRIFT_SCORE.grace) {
-      if (!run.spoiled && run.time >= difficulty.driftMinTime && run.offroad < run.time * 0.3) props.onDrift?.({ time: run.time, speed: run.speed / run.time });
-      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false });
+      if (!run.spoiled && run.time >= difficulty.driftMinTime && run.offroad < run.time * 0.3) props.onDrift?.({ time: run.time, speed: run.speed / run.time, angle: run.steer / run.time, clean: 1 - run.offroad / run.time, switches: run.switches, threaded: run.threaded });
+      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0 });
+    }
+    if (drifting && run.time > DRIFT_CINE.trigger && run.offroad < run.time * 0.7 && driftCutTime.current < 0 && driftCutRest.current <= 0
+      && crashTime.current < 0 && car.boosting === 0) {
+      driftCutTime.current = 0;
+      driftOrbit.current = 0;
+      playSlowMoWhoosh(0.7);
+      props.onDriftCinematic?.();
     }
     const driftShown = drifting && run.time > DRIFT_SCORE.settle;
     driftHold.current = THREE.MathUtils.damp(driftHold.current, driftShown ? 1 : 0, driftShown ? DRIFT_CAM.attack : DRIFT_CAM.release, realDt);
@@ -1214,6 +1285,8 @@ function DrivingScene(props: SceneProps) {
     // The crash cut-in is laid on top of the smoothed camera each frame (taken off again before smoothing),
     // so its extreme ease-out reads crisply instead of being softened by the follow lag.
     camera.position.sub(crashApplied);
+    camera.position.sub(driftApplied);
+    camera.position.sub(finaleApplied);
     camera.position.lerp(desiredCamera, ease);
     // Never let the smoothed camera cut through the planet.
     cameraOffset.copy(camera.position).sub(globeCenter);
@@ -1254,6 +1327,26 @@ function DrivingScene(props: SceneProps) {
     if (vehicle.current) vehicle.current.getWorldPosition(cinematicState.focus).addScaledVector(surfaceUp, 0.5);
     crashApplied.copy(cinematicState.focus).sub(camera.position).multiplyScalar(crash * crashStrength.current * CRASH_CAM.push * zoom);
     camera.position.add(crashApplied);
+    // Drift cut-in: laid over the camera the same way, toward a spot straight above the car, circling slowly.
+    const driftCut = driftCutLevel.current * zoom;
+    // The turn round the car: done quickly on the way up, held at the top, then unwound on the slower way down.
+    const cutTime = driftCutTime.current;
+    if (cutTime >= 0) {
+      driftOrbit.current = DRIFT_CINE.turn * (cutTime < DRIFT_CINE.rise ? 1 - Math.pow(1 - cutTime / DRIFT_CINE.rise, 3)
+        : cutTime < DRIFT_CINE.hold ? 1 : 1 - easeInOutCubic(Math.min(1, (cutTime - DRIFT_CINE.hold) / (DRIFT_CINE.duration - DRIFT_CINE.hold))));
+    }
+    driftOffset.copy(vehicleTangent).negate().applyAxisAngle(surfaceUp, driftOrbit.current).multiplyScalar(DRIFT_CINE.back);
+    driftTop.copy(groundVehiclePosition).addScaledVector(surfaceUp, DRIFT_CINE.height).add(driftOffset);
+    driftApplied.copy(driftTop).sub(camera.position).multiplyScalar(driftCut);
+    camera.position.add(driftApplied);
+    // The finale's orbit, laid over the camera the same way: lifted, at a distance, swinging slowly round the car.
+    const finale = finaleLevel.current * zoom;
+    const shot = finaleTime.current < 0 ? 0 : easeInOutCubic(Math.min(1, finaleTime.current / FINALE.duration));
+    // Straight above the car (a hair behind it, so "up" on screen stays defined), rising as the shot goes on.
+    finaleOffset.copy(vehicleTangent).applyAxisAngle(surfaceUp, shot * FINALE.turn);
+    finaleSpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, THREE.MathUtils.lerp(FINALE.startHeight, FINALE.height, shot)).addScaledVector(finaleOffset, -0.05);
+    finaleApplied.copy(finaleSpot).sub(camera.position).multiplyScalar(finale);
+    camera.position.add(finaleApplied);
     // Side-hit glance toward the thrown car.
     lookSwing.current = THREE.MathUtils.damp(lookSwing.current, 0, SIDE_HIT_CAMERA.swingDecay, realDt);
     desiredLook.addScaledVector(vehicleRight, lookSwing.current * zoom);
@@ -1261,7 +1354,11 @@ function DrivingScene(props: SceneProps) {
     targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).normalize();
     smoothedUp.lerp(targetCameraUp, 1 - Math.exp(-6 * dt)).normalize();
     camera.up.copy(smoothedUp);
-    crashLook.copy(smoothedLook).lerp(cinematicState.focus, crash * crashStrength.current * CRASH_CAM.lookPull * zoom);
+    // Looking straight down, "up" on screen is the way the car is heading (turning with the orbit).
+    if (driftCut > 0) camera.up.lerp(driftOffset.normalize().negate(), driftCut).normalize();
+    crashLook.copy(smoothedLook).lerp(cinematicState.focus, crash * crashStrength.current * CRASH_CAM.lookPull * zoom).lerp(groundVehiclePosition, Math.max(driftCut, finale));
+    // Looking straight down, "up" on screen turns with the shot: the world spins a full turn under the camera.
+    if (finale > 0) camera.up.lerp(finaleOffset, finale).normalize();
     camera.lookAt(crashLook);
     camera.rotateZ(-bodyRoll.current * JUICE_CONFIG.cameraRollFactor * zoom);
     camera.rotateZ(driftSide.current * driftLook * DRIFT_CAM.roll);
@@ -1291,7 +1388,21 @@ function DrivingScene(props: SceneProps) {
     updateSoilClods(soilClods, dt, vehicle.current, car, offRoadDriving);
     // The red crash cut-in gets the strong focus lines; the near-miss one doesn't.
     updateSpeedLines(speedLines, dt, camera, car.speed, driving && zoom > 0.9, crashLevel.current * (1 - coolBlend.current), realDt);
-    updateAudio({ speedRatio: Math.abs(car.speed) / CAR_CONFIG.maxSpeed, throttle, drift: car.drift, active: driving, timeScale: gameTime.scale, acceleration: car.acceleration, offroad: !onRoad });
+    // How near the sea the car is: the share of water in rings around it (checked a few times a second). On the
+    // globe screen the whole planet is in view, so the sea is faintly there.
+    seaCheck.current -= realDt;
+    if (seaCheck.current <= 0) {
+      seaCheck.current = 0.25;
+      let water = 0;
+      for (const radius of SEA_RINGS) for (let k = 0; k < 8; k++) {
+        const angle = (k / 8) * Math.PI * 2;
+        if (!isLandAt(latitude + Math.sin(angle) * radius / GLOBE_RADIUS, car.x + Math.cos(angle) * radius / (GLOBE_RADIUS * Math.max(0.2, Math.cos(latitude))))) water++;
+      }
+      seaNear.current = props.started ? Math.min(1, (water / (SEA_RINGS.length * 8)) * 1.6) : 0.3;
+    }
+    updateAudio({ speedRatio: Math.abs(car.speed) / CAR_CONFIG.maxSpeed, throttle, drift: car.drift, active: driving, timeScale: gameTime.scale, acceleration: car.acceleration, offroad: !onRoad, sea: seaNear.current,
+      // The plane is heard by the camera: full within PLANE_HEARD.near, gone beyond PLANE_HEARD.far.
+      plane: 1 - THREE.MathUtils.smoothstep(camera.position.distanceTo(airplaneState.position), PLANE_HEARD.near, PLANE_HEARD.far) });
     telemetryTime.current += dt;
     if (telemetryTime.current > 0.1) {
       props.onTelemetry({ ...car, speed: Math.abs(car.speed) * 3.6, offroad: props.started && !onRoad, throttle, boost: car.boost, boosting: car.boosting });
@@ -1377,23 +1488,24 @@ function FrameLimiter({ fps }: { fps: number }) {
 // Adaptive resolution: every couple of seconds of driving, if frames have been coming slowly the pixel density
 // steps down (to the quality profile's floor), and after a good while of smooth frames it steps back up. The
 // current value is kept outside React so a re-render of the canvas never resets it.
-const resolution = { dpr: typeof window === 'undefined' ? 1 : Math.max(ACTIVE_QUALITY.minDpr, Math.min(window.devicePixelRatio || 1, ACTIVE_QUALITY.maxDpr)) };
-const ADAPT = { window: 1.5, slow: 1 / 48, smooth: 1 / 57, down: 0.15, up: 0.1, goodWindows: 4, warmup: 3 };
+const deviceResolution = () => resolutionBounds(ACTIVE_QUALITY, typeof window === 'undefined' ? 1 : window.devicePixelRatio);
+const resolution = { dpr: deviceResolution().initial };
 function AdaptiveResolution({ active }: { active: boolean }) {
   const setDpr = useThree(state => state.setDpr);
-  const stats = useRef({ time: 0, frames: 0, good: 0, age: 0 });
+  const stats = useRef(createResolutionState());
+  const bounds = useRef(deviceResolution());
+  useEffect(() => {
+    const resize = () => {
+      bounds.current = deviceResolution();
+      resolution.dpr = THREE.MathUtils.clamp(resolution.dpr, bounds.current.min, bounds.current.max);
+      setDpr(resolution.dpr);
+      Object.assign(stats.current, createResolutionState());
+    };
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [setDpr]);
   useFrame((_, delta) => {
-    const s = stats.current;
-    s.age += delta;
-    if (!active || s.age < ADAPT.warmup || delta > 0.25) { s.time = 0; s.frames = 0; return; }
-    s.time += delta; s.frames++;
-    if (s.time < ADAPT.window) return;
-    const average = s.time / s.frames;
-    s.time = 0; s.frames = 0;
-    let next = resolution.dpr;
-    if (average > ADAPT.slow) { next = Math.max(ACTIVE_QUALITY.minDpr, resolution.dpr - ADAPT.down); s.good = 0; }
-    else if (average < ADAPT.smooth && ++s.good >= ADAPT.goodWindows) { next = Math.min(ACTIVE_QUALITY.maxDpr, resolution.dpr + ADAPT.up); s.good = 0; }
-    else if (average >= ADAPT.smooth) s.good = 0;
+    const next = adaptResolution(stats.current, delta, active && !document.hidden, resolution.dpr, bounds.current);
     if (Math.abs(next - resolution.dpr) > 0.01) { resolution.dpr = next; setDpr(next); }
   });
   return null;
@@ -1418,7 +1530,7 @@ function RenderStats() {
     const t = totals.current;
     t.frames++; t.time += delta; t.calls += gl.info.render.calls; t.triangles += gl.info.render.triangles;
     if (t.time < 1 || !panel.current) return;
-    panel.current.textContent = `${Math.round(t.frames / t.time)} fps · ${VISUAL_QUALITY} · dpr ${resolution.dpr.toFixed(2)}\n${Math.round(t.calls / t.frames)} draw calls · ${Math.round(t.triangles / t.frames / 1000)}k triangles`;
+    panel.current.textContent = `${Math.round(t.frames / t.time)} fps · ${VISUAL_QUALITY} · dpr ${resolution.dpr.toFixed(2)}\n${gl.domElement.width} × ${gl.domElement.height} pixels\n${Math.round(t.calls / t.frames)} draw calls · ${Math.round(t.triangles / t.frames / 1000)}k triangles`;
     Object.assign(t, { frames: 0, time: 0, calls: 0, triangles: 0 });
   }, 1000);
   return null;

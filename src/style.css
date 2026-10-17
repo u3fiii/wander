@@ -366,15 +366,18 @@
 .boost-gauge:has(.boost-gain) .boost-ring{filter:drop-shadow(0 0 6px #f4b544)}
 @media (prefers-reduced-motion:reduce){.boost-gain{animation:none;opacity:0}}
 
-/* Speedometer in the boost meter's style: the same glass disc and ring (a gold arc that opens at the bottom and
-   fills with speed), the number in the middle, and a label pill under it with the gear and the distance. */
-.speedometer{right:42px;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;text-align:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;filter:none;transform:none}
+/* Speed heats the gold arc and white number into the boost's yellow/orange gradient.
+   The spring supplies --speed-heat; fixed glow layers fade in without a flashing animation. */
+.speedometer{--speed-heat:0;--speed-arc:0 100;right:42px;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;text-align:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;filter:none;transform:none}
+.speedometer::before{content:'';position:absolute;inset:5px;border-radius:50%;background:radial-gradient(ellipse at 50% 85%,#ff7a2e33,transparent 72%);box-shadow:inset 0 0 16px #ffb34724,0 0 22px #ff7a2e40;opacity:var(--speed-heat);pointer-events:none}
 .speed-dial{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible;transform:rotate(135deg)}
 .speed-dial circle{fill:none;stroke-width:4;stroke-linecap:round}
 .speed-dial .arc-track{stroke:#ffffff1f;stroke-dasharray:75 100}
-.speed-dial .arc-fill{stroke:var(--gold);transition:stroke-dasharray .15s}
-.speed-readout{position:static;width:auto;display:flex;flex-direction:column;align-items:center}
-.speed-readout strong{font-size:30px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+.speed-dial .arc-fill,.speed-dial .arc-heat{stroke-dasharray:var(--speed-arc);transition:stroke-dasharray .15s}
+.speed-dial .arc-fill{stroke:var(--gold)}
+.speed-dial .arc-heat{stroke:url(#speed-fire);opacity:var(--speed-heat);filter:drop-shadow(0 0 2.5px #ff7a2e99)}
+.speed-readout{position:relative;width:auto;display:flex;flex-direction:column;align-items:center}
+.speed-readout strong{font-size:30px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-1px;background:linear-gradient(180deg,#fff6c8 0%,#ffc34a 45%,#ff7a2e 100%);-webkit-background-clip:text;background-clip:text;color:rgba(255,255,255,calc(1 - var(--speed-heat)));text-shadow:0 0 14px rgba(255,122,46,calc(var(--speed-heat) * .4));transform:scale(calc(1 + var(--speed-heat) * .08))}
 .speed-readout small{margin-top:3px;font-size:9px;font-weight:600;letter-spacing:1px;opacity:.7}
 .speed-label{position:absolute;top:calc(100% + 7px);left:50%;translate:-50% 0;display:flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;border-radius:20px;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.3px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffbf;font-variant-numeric:tabular-nums}
 .speed-label b{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#ffffff1f;color:#fff;font-size:9px}
@@ -396,7 +399,7 @@
 .q-low .aurora{display:none}
 .q-low .stars{animation:none}
 
-/* Phones and tablets: the header keeps only day/night, sound and pause (camera, help and the dev look panel are
+/* Phones and tablets: the header keeps only sound (day/night, camera, help, leaderboard, map, pause and the dev look panel are
    keyboard-and-mouse things). The cards fit the screen: the shade's single column can shrink, the card takes the
    width it is given, and the buttons stack at full height. */
 @media (pointer:coarse),(max-width:600px){.toolbar .desktop-only{display:none}}
@@ -413,13 +416,10 @@
 }
 
 /* Rails mode (phones and tablets): each half of the screen below the header steers that way. A round glass
-   button in each bottom corner shows it; held, it turns gold, presses in and gets a soft gold ring, and its half
-   of the screen glows faintly from that edge. The speedometer and boost meter sit together in the middle of the
+   button in each bottom corner shows it; held, it turns gold, presses in and gets a soft gold ring. The speedometer and boost meter sit together in the middle of the
    bottom edge, between the buttons, and the captions rise above them. */
 .steer-pads{position:absolute;inset:96px 0 0 0;z-index:2;display:flex;touch-action:none}
 .steer-zone{position:relative;flex:1;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:background .25s}
-.steer-zone.left.held{background:linear-gradient(90deg,#f4b54421,#f4b54400 45%)}
-.steer-zone.right.held{background:linear-gradient(270deg,#f4b54421,#f4b54400 45%)}
 .steer-button{position:absolute;bottom:calc(30px + env(safe-area-inset-bottom));display:grid;place-items:center;width:78px;height:78px;border-radius:50%;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;transition:transform .18s cubic-bezier(.3,1.6,.5,1),background .15s,color .15s,box-shadow .2s}
 .steer-zone.left .steer-button{left:20px}
 .steer-zone.right .steer-button{right:20px}
@@ -577,3 +577,289 @@
 @keyframes header-out{to{opacity:0;transform:scale(.6) translateY(-4px)}}
 /* The level badge arrives through the header morph, so it needs no pop of its own. */
 .topbar .level-badge{animation:none}
+
+
+/* Drift cut-in (overhead camera, purple grade): the word leans like the car and its letters slide in sideways,
+   one after another, overshooting and settling as if they drifted into place, in a violet-to-pink gradient, with
+   a pink streak trailing across behind them. It holds while the camera circles, then lets go. */
+.big-note.drift-cine{top:30%;animation:big-note-out .3s cubic-bezier(.5,0,.75,0) 1.2s forwards}
+.big-note.drift-cine strong{transform:skewX(-12deg);filter:drop-shadow(0 6px 0 #3b1660) drop-shadow(0 12px 32px #c04bd988)}
+.big-note.drift-cine strong span{background:linear-gradient(180deg,#ffe3fa 0%,#ff8fd8 45%,#9b5cff 100%);-webkit-background-clip:text;background-clip:text;color:transparent;animation:letter-drift .62s cubic-bezier(.2,1.4,.4,1) both;animation-delay:calc(var(--i) * 45ms)}
+.big-note.drift-cine::before{content:'';position:absolute;left:-35%;right:-35%;top:44%;height:5px;border-radius:5px;background:linear-gradient(90deg,transparent,#ff8fd8cc,#9b5cffcc,transparent);opacity:0;transform:skewX(-12deg);animation:light-sweep 1.1s cubic-bezier(.2,.8,.3,1) .05s both}
+@keyframes letter-drift{0%{opacity:0;transform:translateX(-90px) rotate(-14deg) skewX(-28deg);filter:blur(8px)}55%{opacity:1;filter:blur(0);transform:translateX(8px) rotate(3deg)}80%{transform:translateX(-3px) rotate(-1deg)}100%{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.big-note.drift-cine strong span{animation:none;opacity:1}}
+
+/* Best-score note: gold, like the level-up note. */
+.hit-note.newBest{--note:#d69b2d;--note-glow:#f4b54488;font-size:15px;padding:10px 16px 10px 20px;animation:note-slam .35s cubic-bezier(.2,.9,.3,1) both,note-throb .6s ease-in-out .35s 2,note-out .4s ease-in 2.6s forwards}
+.hit-note.newBest b{background:#fff;color:#8a5a12}
+
+
+/* Hearts in the score pill: full ones in coral red; a lost one cracks (a shake and a drop) and stays as an
+   outline. */
+.hearts{display:flex;gap:3px;margin-right:4px;padding-right:10px;border-right:1px solid #ffffff26}
+.hearts svg{width:15px;height:15px;transition:color .3s,fill .3s}
+.hearts .full{color:#ff6b5e;fill:#ff6b5e;filter:drop-shadow(0 0 4px #ff6b5e66)}
+.hearts .lost{color:#ffffff40;fill:none;animation:heart-break .6s cubic-bezier(.3,1.6,.5,1)}
+@keyframes heart-break{0%{transform:scale(1.5) rotate(-12deg);color:#ff6b5e}30%{transform:translateX(-3px) rotate(10deg)}55%{transform:translateX(3px) rotate(-6deg)}100%{transform:none}}
+@media (max-width:600px){.score-pill>span:not(.hearts):not(.score-float){display:none}.hearts svg{width:13px;height:13px}}
+/* Stage notes: a cool teal, apart from the gold of level-ups. */
+.hit-note.stage{--note:#2b8a8f;--note-glow:#2b8a8f66;animation:note-slam .35s cubic-bezier(.2,.9,.3,1) both,note-out .4s ease-in 2.6s forwards}
+.hit-note.stage b{background:#fff;color:#1f5f63}
+
+/* Run over: the score big and gold, a "new best" chip, the run's dashboard in six tiles, then the name for the
+   board or the board itself (the new run's row highlighted). */
+.run-over{width:460px;padding:34px 30px 26px;text-align:center}
+.run-over .eyebrow{justify-content:center}
+.run-score{margin:6px 0 4px!important;font-size:64px!important;font-weight:900;letter-spacing:-2px!important;color:var(--gold)!important;font-variant-numeric:tabular-nums;animation:points-pop .6s cubic-bezier(.3,1.7,.5,1) .1s both}
+.run-best{display:inline-block;margin-bottom:6px;padding:4px 12px;border-radius:20px;background:var(--gold);color:#2b1d05;font-size:12px;font-weight:800;animation:note-throb .6s ease-in-out .5s 2}
+.run-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0 18px;text-align:left}
+.run-stats>div{padding:10px 12px;border-radius:14px;background:#ffffff0f;border:1px solid #ffffff14}
+.run-stats small{display:block;font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#ffffff8c}
+.run-stats b{display:block;margin-top:3px;font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.run-name{text-align:left}
+.run-name label{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px;font-weight:700;color:var(--gold)}
+.run-name-row{display:flex;gap:8px}
+.run-name input{flex:1;min-width:0;height:52px;padding:0 18px;border-radius:999px;border:1px solid #ffffff33;background:#ffffff14;color:#fff;font:inherit;font-size:16px;font-weight:600;outline:none}
+.run-name input:focus{border-color:var(--gold);box-shadow:0 0 0 4px #f4b54433}
+.run-name .primary{width:auto!important;padding:0 26px}
+.board{list-style:none;margin:0 0 16px;padding:0;text-align:left;max-height:260px;overflow:auto}
+.board li{display:grid;grid-template-columns:26px 1fr auto;gap:10px;align-items:center;padding:8px 12px;border-radius:12px;font-size:13px;font-weight:600}
+.board li:nth-child(odd){background:#ffffff08}
+.board li.mine{background:var(--gold);color:#2b1d05;animation:points-pop .5s cubic-bezier(.3,1.7,.5,1) both}
+.board-rank{font-weight:800;opacity:.6}
+.board-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.board-score{font-weight:800;font-variant-numeric:tabular-nums}
+@media (max-width:600px){.run-over{padding:26px 16px 18px}.run-score{font-size:48px!important}.run-stats b{font-size:14px}}
+
+/* Hearts, in their own glass pill under the score: glossy red, softly glowing, each beating gently a beat apart;
+   the last one left beats fast and glows hard. A lost one stays as an outline. The moment one is lost, the one
+   going flashes, swells and falls away while the others flinch. */
+.hearts-bar{position:absolute;left:50%;top:calc(100% - 4px);translate:-50% 0;display:flex;gap:7px;padding:7px 14px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);pointer-events:none}
+.heart-icon{width:24px;height:24px;overflow:visible}
+.heart-icon .heart-body{fill:#ff4f45;stroke:#ff8a7a;stroke-width:.8;transition:fill .3s}
+.heart-icon .heart-shine{fill:none;stroke:#ffffffb3;stroke-width:1.6;stroke-linecap:round}
+.hearts-bar .full{filter:drop-shadow(0 0 5px #ff4f4588);animation:heart-beat 1.6s ease-in-out infinite}
+.hearts-bar .full:nth-child(2){animation-delay:.12s}.hearts-bar .full:nth-child(3){animation-delay:.24s}.hearts-bar .full:nth-child(4){animation-delay:.36s}.hearts-bar .full:nth-child(5){animation-delay:.48s}
+.hearts-bar.last .full{animation-duration:.7s;filter:drop-shadow(0 0 10px #ff4f45)}
+.hearts-bar .lost .heart-body{fill:none;stroke:#ffffff47;stroke-width:1.5}
+.hearts-bar .lost .heart-shine{display:none}
+.hearts-bar .breaking{animation:heart-shatter .9s cubic-bezier(.3,1.4,.5,1) forwards}
+.hearts-bar.hit{animation:hearts-flinch .45s ease-out}
+@keyframes heart-beat{0%,60%,100%{transform:scale(1)}15%{transform:scale(1.16)}30%{transform:scale(.98)}45%{transform:scale(1.08)}}
+@keyframes heart-shatter{0%{transform:scale(1)}20%{transform:scale(1.7);filter:brightness(2.2) drop-shadow(0 0 12px #fff)}100%{transform:translateY(26px) rotate(28deg) scale(.6);opacity:0}}
+@keyframes hearts-flinch{0%,100%{transform:none}20%{transform:translateX(-6px)}45%{transform:translateX(5px)}70%{transform:translateX(-3px)}}
+@media (max-width:600px){.hearts-bar{top:calc(100% + 34px);gap:5px;padding:5px 10px}.heart-icon{width:18px;height:18px}}
+
+/* Losing a heart: a red pulse round the frame, and a big heart below the middle of the screen that pops in, then
+   cracks down a jagged line, its two halves tipping apart and falling away, with what is left in big letters. */
+.heart-break{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;padding-top:50vh;pointer-events:none}
+.heart-break-pulse{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,transparent 45%,#ff2a2a66 100%);animation:heart-pulse 1s ease-out forwards}
+.heart-break-heart{position:relative;width:130px;height:130px;animation:heart-pop .32s cubic-bezier(.3,1.7,.5,1) both}
+.heart-break-heart .heart-icon{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 10px 30px #ff2a2a88)}
+.heart-break-heart .half.left{clip-path:polygon(0 0,53% 0,46% 28%,56% 48%,44% 68%,51% 100%,0 100%);animation:half-left .8s cubic-bezier(.55,0,.8,.4) .5s forwards}
+.heart-break-heart .half.right{clip-path:polygon(53% 0,100% 0,100% 100%,51% 100%,44% 68%,56% 48%,46% 28%);animation:half-right .8s cubic-bezier(.55,0,.8,.4) .5s forwards}
+.heart-break strong{margin-top:6px;font-size:clamp(24px,3.2vw,38px);font-weight:900;letter-spacing:.08em;color:#fff;text-shadow:0 0 18px #ff2a2a,0 6px 22px #0008;animation:heart-words 1.6s cubic-bezier(.2,.9,.3,1) .15s both}
+@keyframes heart-pulse{0%{opacity:0}20%{opacity:1}100%{opacity:0}}
+@keyframes heart-pop{0%{transform:scale(.2);opacity:0}100%{transform:none;opacity:1}}
+@keyframes half-left{0%{transform:none}15%{transform:translate(-6px,0) rotate(-4deg)}100%{transform:translate(-46px,70px) rotate(-32deg);opacity:0}}
+@keyframes half-right{0%{transform:none}15%{transform:translate(6px,0) rotate(4deg)}100%{transform:translate(46px,70px) rotate(32deg);opacity:0}}
+@keyframes heart-words{0%{opacity:0;transform:translateY(14px) scale(.8)}18%{opacity:1;transform:none}75%{opacity:1}100%{opacity:0;transform:translateY(-8px)}}
+@media (prefers-reduced-motion:reduce){.hearts-bar .full,.hearts-bar.hit,.heart-break *,.heart-break-heart .half{animation:none!important}}
+
+/* Score and hearts in one row in the middle of the header (on phones, just under it). */
+.hud-center{position:absolute;left:50%;translate:-50% 0;display:flex;align-items:center;gap:10px;pointer-events:none}
+.hud-center .score-pill{position:relative;left:auto;translate:none}
+.hud-center .hearts-bar{position:static;translate:none;height:44px;align-items:center;padding:0 14px}
+@media (max-width:600px){.hud-center{top:calc(100% - 6px);gap:6px}.hud-center .score-pill{top:auto}.hud-center .hearts-bar{height:36px;padding:0 10px}}
+
+/* The score's reaction to a change, in proportion to it: a small bonus nudges the number, a mid one pops it, a big
+   one pops it hard in gold with a glow, a huge one swells and glows longest; a loss shakes it red. The amount
+   floats up from the pill, bigger for bigger amounts. */
+.score-value{display:inline-block}
+.score-value.small{animation:score-nudge .3s ease-out}
+.score-value.mid{animation:score-pop .45s cubic-bezier(.3,1.8,.5,1)}
+.score-value.big{animation:score-pop-big .7s cubic-bezier(.3,1.8,.5,1)}
+.score-value.huge{animation:score-pop-huge 1s cubic-bezier(.3,1.8,.5,1)}
+.score-value.loss{animation:score-loss .5s ease-out}
+@keyframes score-nudge{40%{transform:translateY(-2px)}}
+@keyframes score-pop{30%{transform:scale(1.25)}}
+@keyframes score-pop-big{25%{transform:scale(1.5);text-shadow:0 0 14px #f4b544,0 0 28px #f4b54488}60%{transform:scale(.95)}}
+@keyframes score-pop-huge{20%{transform:scale(1.9) rotate(-4deg);text-shadow:0 0 18px #fff,0 0 36px #f4b544}45%{transform:scale(.9) rotate(2deg)}70%{transform:scale(1.08);text-shadow:0 0 14px #f4b544}}
+@keyframes score-loss{0%,100%{transform:none}15%{transform:translateX(-5px);color:#ff6b5e}35%{transform:translateX(4px);color:#ff6b5e}55%{transform:translateX(-3px)}}
+.score-float{position:absolute;left:50%;top:100%;translate:-50% 0;padding:2px 10px;border-radius:20px;font-weight:900;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none;animation:score-float 1s cubic-bezier(.2,.9,.3,1) forwards}
+.score-float.small{font-size:12px;color:var(--gold);animation-duration:.7s}
+.score-float.mid{font-size:15px;background:var(--gold);color:#2b1d05}
+.score-float.big{font-size:20px;background:var(--gold);color:#2b1d05;box-shadow:0 6px 20px #f4b54466;animation-duration:1.2s}
+.score-float.huge{font-size:26px;background:linear-gradient(180deg,#fff2b8,#f4b544);color:#2b1d05;box-shadow:0 8px 28px #f4b54488;animation-duration:1.5s}
+.score-float.loss{font-size:14px;background:#c94a33;color:#fff}
+@keyframes score-float{0%{opacity:0;transform:translateY(-6px) scale(.6)}20%{opacity:1;transform:translateY(6px) scale(1.1)}70%{opacity:1}100%{opacity:0;transform:translateY(22px) scale(.95)}}
+@media (prefers-reduced-motion:reduce){.score-value,.score-float{animation:none!important}}
+
+/* The leaderboard card: the run-over board's rows, each with its distance and time under the name, and the top
+   three in gold, silver and bronze. */
+.leaderboard{width:440px}
+.leaderboard .eyebrow{display:flex;align-items:center;gap:6px}
+.leaderboard h2{margin:8px 0 16px}
+.leaderboard .board{max-height:min(420px,60vh);margin:0}
+.board-name small{display:block;margin-top:1px;font-size:10px;font-weight:600;color:#ffffff73}
+.board li.medal-1 .board-rank,.board li.medal-2 .board-rank,.board li.medal-3 .board-rank{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;opacity:1;color:#2b1d05;font-size:12px}
+.board li.medal-1 .board-rank{background:var(--gold)}
+.board li.medal-2 .board-rank{background:#d9dde2}
+.board li.medal-3 .board-rank{background:#d9925a}
+.board li.medal-1 .board-score{color:var(--gold)}
+.board-empty{margin:4px 0 6px!important;font-size:14px!important;line-height:1.6!important;color:#ffffffb3!important}
+.steer-zone{-webkit-tap-highlight-color:transparent}
+
+/* Phones: no room for the level badge and its progress bar, so the header keeps just the home button on the left and
+   the level number moves into the score pill, beside the score. */
+.score-level{display:none!important}
+@media (max-width:600px){
+  .topbar-left .level-badge{display:none}
+  .score-pill .score-level{display:grid!important;width:24px;height:24px;font-size:11px;margin-left:-6px}
+}
+
+/* Phones: the whole header in one row: home on the left, the level, score and hearts in the middle, sound on the
+   right (day/night and the rest live on bigger screens; the day still turns to night on its own). */
+@media (max-width:600px){
+  .hud-center{top:50%;translate:-50% -50%;gap:5px}
+  .hud-center .score-pill{height:34px;padding:0 10px 0 6px;gap:6px}
+  .hud-center .score-pill b{font-size:15px}
+  .hud-center .hearts-bar{height:34px;padding:0 8px;gap:3px}
+  .hud-center .heart-icon{width:14px;height:14px}
+  .score-pill .score-level{width:22px;height:22px;margin-left:0}
+}
+
+/* Phones: the one-row header about 15% bigger, using the room there is. */
+@media (max-width:600px){
+  .home-button,.topbar .toolbar button{width:39px;height:39px}
+  .home-button svg,.topbar .toolbar button svg{width:18px;height:18px}
+  .hud-center{gap:6px}
+  .hud-center .score-pill{height:39px;padding:0 12px 0 7px;gap:7px}
+  .hud-center .score-pill b{font-size:17px}
+  .score-pill .score-level{width:25px;height:25px;font-size:12px}
+  .hud-center .hearts-bar{height:39px;padding:0 9px;gap:4px}
+  .hud-center .heart-icon{width:16px;height:16px}
+}
+
+/* Phones: the header row takes the full width: 16 px at the sides, 10 px between the pieces, and the score and
+   the hearts stretching to fill what is left, everything 44 px tall. */
+@media (max-width:600px){
+  .playing .topbar{padding:14px 16px;gap:10px}
+  .playing .topbar .toolbar{gap:10px}
+  .playing .hud-center{position:static;translate:none;flex:1;min-width:0;gap:10px}
+  .home-button,.topbar .toolbar button{width:44px;height:44px}
+  .home-button svg,.topbar .toolbar button svg{width:20px;height:20px}
+  .hud-center .score-pill{flex:1;min-width:0;justify-content:center;height:44px;padding:0 12px 0 8px;gap:8px}
+  .hud-center .score-pill b{font-size:20px}
+  .score-pill .score-level{width:28px;height:28px;font-size:13px}
+  .hud-center .hearts-bar{flex:1;justify-content:space-evenly;height:44px;padding:0 10px;gap:2px}
+  .hud-center .heart-icon{width:19px;height:19px}
+}
+@media (max-width:600px){.hud-center .score-pill{padding:0 20px 0 8px}}
+/* Phones: the level number stays a circle (a capsule for long numbers) instead of being squeezed, and the hearts
+   keep some room from their pill's edges. */
+@media (max-width:600px){
+  .score-pill .score-level{flex:none;width:auto;min-width:28px;height:28px;padding:0 5px;border-radius:999px}
+  .hud-center .hearts-bar{padding:0 14px}
+  .hud-center .heart-icon{width:17px;height:17px}
+}
+@media (max-width:600px){.hud-center .score-pill{padding:0 26px 0 8px}}
+
+/* Rails mode, pressing a steering button: it springs up in size, turns gold with a wide ring and a glow, its arrow
+   leans the way it steers, and a gold ripple spreads out from it and fades; let go, it springs back. */
+.steer-button{transition:transform .28s cubic-bezier(.3,1.8,.5,1),background .15s,color .15s,box-shadow .25s}
+.steer-button svg{transition:transform .22s cubic-bezier(.3,1.8,.5,1)}
+.steer-zone.held .steer-button{transform:scale(1.14);box-shadow:0 0 0 9px #f4b54433,0 10px 30px #f4b54466,var(--glass-shadow)}
+.steer-zone.left.held .steer-button svg{transform:translateX(-4px)}
+.steer-zone.right.held .steer-button svg{transform:translateX(4px)}
+/* One ripple per tap, living its full life even after a quick release; several overlap when tapping fast. */
+.steer-ripple{position:absolute;inset:-3px;border-radius:50%;border:3px solid var(--gold);pointer-events:none;animation:steer-ripple .85s cubic-bezier(.2,.7,.4,1) forwards}
+/* And a punch of the button's face (with its arrow) on every tap: a quick squeeze and a springy pop back. */
+.steer-face{display:grid;place-items:center;animation:steer-tap .34s cubic-bezier(.3,1.8,.5,1)}
+@keyframes steer-tap{0%{transform:scale(.8)}45%{transform:scale(1.14)}100%{transform:none}}
+/* It grows by its size (not a scale), so its line thins as it spreads and fades. */
+@keyframes steer-ripple{from{inset:-3px;border-width:3px;opacity:.9}to{inset:calc(var(--reach,94px) * -1);border-width:.5px;opacity:0}}
+@media (prefers-reduced-motion:reduce){.steer-button,.steer-button svg{transition:none}.steer-ripple{display:none}.steer-face{animation:none}}
+.steer-button svg{width:25px;height:25px}
+
+/* Phones: the hearts stand on their own, without a pill behind them, so the score has the room; a soft shadow
+   keeps them clear on a bright sky, and the lost ones a darker outline. */
+@media (max-width:600px){
+  .hud-center .hearts-bar{flex:none;height:auto;padding:0;gap:3px;background:none;border:0;box-shadow:none}
+  .hud-center .hearts-bar .heart-icon{width:19px;height:19px;filter:drop-shadow(0 2px 4px #0b161a66)}
+  .hud-center .hearts-bar .full{filter:drop-shadow(0 0 5px #ff4f4588) drop-shadow(0 2px 4px #0b161a66)}
+  .hud-center .hearts-bar .lost .heart-body{stroke:#ffffff99}
+}
+
+/* Rails mode: the boost meter and the speedometer swap sides, boost on the right of the middle (nearer the right
+   thumb), the speedometer on the left. */
+.rails .boost-gauge{right:auto;left:calc(50% + 7px)}
+.rails.playing .speedometer{left:auto;right:calc(50% + 7px)}
+
+/* Holding a turn strains (--strain 0..1, set by the steering pads): the button trembles harder and its gold ring
+   and glow swell, while ever faster, ever wider pulses ripple out of it. */
+.steer-zone{--strain:0}
+.steer-zone.held .steer-button{box-shadow:0 0 0 calc(9px + var(--strain) * 12px) #f4b54433,0 10px calc(30px + var(--strain) * 34px) #f4b544aa,var(--glass-shadow);animation:steer-strain .08s linear infinite}
+@keyframes steer-strain{0%,100%{translate:0 0}25%{translate:calc(var(--strain) * -2.6px) calc(var(--strain) * 1px)}50%{translate:calc(var(--strain) * 2px) calc(var(--strain) * -1.4px)}75%{translate:calc(var(--strain) * -1.4px) calc(var(--strain) * -.6px)}}
+@media (prefers-reduced-motion:reduce){.steer-zone.held .steer-button{animation:none}}
+
+/* Top-five podium. Three glass blocks rising to the middle: gold for first (with a crown), silver for second, bronze
+   for third, each with its big rank number and, above it, the name and score; fourth and fifth are rows below.
+   Empty places are faint. A new run's place glows gold and breathes. */
+.podium-board{margin:4px 0 16px}
+.podium{display:grid;grid-template-columns:1fr 1.15fr 1fr;align-items:end;gap:8px;margin-bottom:10px}
+.podium-place{position:relative;display:flex;flex-direction:column;align-items:center;min-width:0;animation:podium-rise .55s cubic-bezier(.3,1.5,.5,1) both}
+.podium-place.p1{animation-delay:.12s}.podium-place.p2{animation-delay:.04s}.podium-place.p3{animation-delay:.2s}
+.podium-crown{width:22px;height:22px;color:var(--gold);fill:var(--gold);filter:drop-shadow(0 0 8px #f4b54488);margin-bottom:2px;animation:crown-bob 2.4s ease-in-out infinite}
+.podium-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:700}
+.podium-score{margin:1px 0 6px;font-size:15px;font-weight:800;font-variant-numeric:tabular-nums;color:#ffffffd9}
+.podium-block{display:grid;place-items:start center;width:100%;padding-top:8px;border-radius:12px 12px 6px 6px;background:linear-gradient(180deg,#ffffff1f,#ffffff08);border:1px solid #ffffff1f;border-top-width:5px;box-shadow:inset 0 1px 0 #ffffff26}
+.podium-block span{font-size:30px;font-weight:900;line-height:1;opacity:.85}
+.p1 .podium-block{height:112px;border-top-color:var(--gold)}
+.p1 .podium-block span{color:var(--gold);font-size:38px;opacity:1}
+.p1 .podium-score{color:var(--gold);font-size:18px}
+.p2 .podium-block{height:84px;border-top-color:#d9dde2}
+.p2 .podium-block span{color:#e6e9ed}
+.p3 .podium-block{height:66px;border-top-color:#d9925a}
+.p3 .podium-block span{color:#e6a273}
+.podium-place.empty .podium-name,.podium-place.empty .podium-block span{opacity:.3}
+.podium-place.empty .podium-block{border-top-color:#ffffff26;background:#ffffff08}
+.podium-place.mine .podium-block{background:linear-gradient(180deg,#f4b54466,#f4b5441a);box-shadow:0 0 0 2px var(--gold),0 0 26px #f4b54466;animation:mine-glow 1.6s ease-in-out infinite}
+.podium-place.mine .podium-name{color:var(--gold)}
+.podium-rest{list-style:none;margin:0;padding:0;text-align:left}
+.podium-rest li{display:grid;grid-template-columns:26px 1fr auto;gap:10px;align-items:center;padding:8px 12px;border-radius:12px;font-size:13px;font-weight:600}
+.podium-rest li:nth-child(odd){background:#ffffff08}
+.podium-rest li.empty{opacity:.35}
+.podium-rest li.mine{background:var(--gold);color:#2b1d05}
+.podium-rest li.mine small{color:#2b1d05a6}
+@keyframes podium-rise{from{opacity:0;transform:translateY(24px)}}
+@keyframes crown-bob{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-3px) rotate(6deg)}}
+@keyframes mine-glow{50%{box-shadow:0 0 0 2px var(--gold),0 0 40px #f4b544aa}}
+@media (prefers-reduced-motion:reduce){.podium-place,.podium-crown,.podium-place.mine .podium-block{animation:none}}
+
+/* Calmer arrows: a small, soft lean while held (no overshoot), a gentle tap punch, and a lighter tremble. */
+.steer-button svg{transition:transform .38s cubic-bezier(.22,1,.36,1)}
+.steer-zone.left.held .steer-button svg{transform:translateX(-2px)}
+.steer-zone.right.held .steer-button svg{transform:translateX(2px)}
+.steer-face{animation:steer-tap-soft .42s cubic-bezier(.22,1,.36,1)}
+@keyframes steer-tap-soft{0%{transform:scale(.92)}50%{transform:scale(1.05)}100%{transform:none}}
+@keyframes steer-strain{0%,100%{translate:0 0}25%{translate:calc(var(--strain) * -1.5px) calc(var(--strain) * .6px)}50%{translate:calc(var(--strain) * 1.2px) calc(var(--strain) * -.8px)}75%{translate:calc(var(--strain) * -.8px) calc(var(--strain) * -.4px)}}
+@media (prefers-reduced-motion:reduce){.steer-face{animation:none}}
+
+/* The finale: cinema bars slide in from the top and bottom, and the driving HUD fades away, leaving the shot. */
+.letterbox{position:absolute;inset:0;z-index:7;pointer-events:none}
+.letterbox i{position:absolute;left:0;right:0;height:11vh;background:#05080b;animation:letterbox-in .9s cubic-bezier(.22,1,.36,1) both}
+.letterbox i:first-child{top:0;transform-origin:top}
+.letterbox i:last-child{bottom:0;transform-origin:bottom}
+@keyframes letterbox-in{from{transform:scaleY(0)}}
+.finale .topbar,.finale .speedometer,.finale .boost-gauge,.finale .steer-pads,.finale .driving-actions,.finale .coach,.finale .hit-note,.finale .touch-controls{opacity:0;transition:opacity .6s ease;pointer-events:none}
+
+/* Run-over stats, compact: one slim glass strip of three, divided by fine lines, each a small gold icon, the number
+   and a small label. */
+.run-over .run-stats{display:flex;gap:0;margin:12px 0 16px;padding:10px 4px;border-radius:16px;background:#ffffff0d;border:1px solid #ffffff14;text-align:center}
+.run-over .run-stats>div{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0 6px;border:0;border-radius:0;background:none}
+.run-over .run-stats>div+div{border-left:1px solid #ffffff1a}
+.run-over .run-stats svg{width:16px;height:16px;color:var(--gold);margin-bottom:2px}
+.run-over .run-stats b{margin:0;font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
+.run-over .run-stats small{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#ffffff80}
+@media (max-width:600px){.run-over .run-stats b{font-size:15px}}

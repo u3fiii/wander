@@ -6,6 +6,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { GLOBE_RADIUS } from './globe';
 import type { CarState } from './driving';
@@ -48,7 +50,7 @@ class SurfaceBokehPass extends BokehPass {
   }
 }
 
-type Pipeline = { composer: EffectComposer; bokeh: SurfaceBokehPass; output: OutputPass; dispose: () => void };
+type Pipeline = { composer: EffectComposer; bokeh: SurfaceBokehPass | null; output: OutputPass; fxaa: ShaderPass | null; dispose: () => void };
 
 export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }: {
   zoom: RefObject<number>; globe: RefObject<THREE.Group>; vehicle: RefObject<THREE.Group>;
@@ -73,20 +75,22 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     target.samples = Math.min(ACTIVE_QUALITY.msaa, gl.capabilities.maxSamples);
     const composer = new EffectComposer(gl, target);
     const color = new RenderPass(scene, camera);
-    const bokeh = new SurfaceBokehPass(scene, camera as THREE.PerspectiveCamera, {
+    const bokeh = ACTIVE_QUALITY.depthOfField ? new SurfaceBokehPass(scene, camera as THREE.PerspectiveCamera, {
       focus: 85, aperture: settings.aperture, maxblur: settings.maxBlur,
-    });
-    // A wide sharp band keeps a whole neighbourhood readable, rather than a
-    // single thin focal plane. Preserve canvas alpha over the CSS sky gradient.
-    bokeh.uniforms.focusRange = { value: GLOBE_RADIUS * settings.focusRangeFactor };
-    bokeh.uniforms.nearBlur = { value: 1 };
-    // Beyond the globe there is only the empty sky (and the meteors): keep that sharp, since anything that far
-    // would otherwise get the maximum blur and turn into a smudge.
-    bokeh.uniforms.sharpBeyond = { value: 1e6 };
-    bokeh.materialBokeh.fragmentShader = bokeh.materialBokeh.fragmentShader
-      .replace('uniform float focus;', 'uniform float focus;\nuniform float focusRange;\nuniform float nearBlur;\nuniform float sharpBeyond;')
-      .replace('vec2 dofblur =', 'factor = sign(factor) * max(abs(factor) - focusRange, 0.0);\nif (factor > 0.0) factor *= nearBlur;\nif (-viewZ > sharpBeyond) factor = 0.0;\nvec2 dofblur =')
-      .replace('gl_FragColor.a = 1.0;', 'gl_FragColor.a = col.a / 41.0;');
+    }) : null;
+    if (bokeh) {
+      // A wide sharp band keeps a whole neighbourhood readable, rather than a
+      // single thin focal plane. Preserve canvas alpha over the CSS sky gradient.
+      bokeh.uniforms.focusRange = { value: GLOBE_RADIUS * settings.focusRangeFactor };
+      bokeh.uniforms.nearBlur = { value: 1 };
+      // Beyond the globe there is only the empty sky (and the meteors): keep that sharp, since anything that far
+      // would otherwise get the maximum blur and turn into a smudge.
+      bokeh.uniforms.sharpBeyond = { value: 1e6 };
+      bokeh.materialBokeh.fragmentShader = bokeh.materialBokeh.fragmentShader
+        .replace('uniform float focus;', 'uniform float focus;\nuniform float focusRange;\nuniform float nearBlur;\nuniform float sharpBeyond;')
+        .replace('vec2 dofblur =', 'factor = sign(factor) * max(abs(factor) - focusRange, 0.0);\nif (factor > 0.0) factor *= nearBlur;\nif (-viewZ > sharpBeyond) factor = 0.0;\nvec2 dofblur =')
+        .replace('gl_FragColor.a = 1.0;', 'gl_FragColor.a = col.a / 41.0;');
+    }
     const output = new OutputPass();
     // The canvas sits over a CSS sky. Convert unpremultiplied color, then restore
     // premultiplication so transparent atmosphere edges do not become bright halos.
@@ -95,6 +99,13 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     output.material.uniforms.uGrade = { value: 0 };
     // A held drift (0..1): a little more contrast and a deeper vignette, nothing else.
     output.material.uniforms.uDrift = { value: 0 };
+    // The drift cut-in (0..1): a purple and pink split tone with a violet veil at the edges.
+    output.material.uniforms.uDriftCut = { value: 0 };
+    // The finale (0..1): a cold steel-blue, nearly black and white, with harder contrast and a heavy vignette.
+    output.material.uniforms.uFinale = { value: 0 };
+    // The last heart (0..1) and its heartbeat (0..1): colour drains a little and the edges split red and blue on each beat.
+    output.material.uniforms.uDanger = { value: 0 };
+    output.material.uniforms.uPulse = { value: 0 };
     // The night version of that look (see nearMissLook.ts): uNight blends to it, the rest are its panel settings.
     output.material.uniforms.uNight = { value: 0 };
     output.material.uniforms.uNmTint = { value: new THREE.Vector3(0.44, 0.84, 0.88) };
@@ -121,8 +132,20 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     // Head-on crashes (the red ones) push the contrast up instead (uImpact 0..1).
     output.material.uniforms.uImpact = { value: 0 };
     output.material.fragmentShader = output.material.fragmentShader
-      .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform float uGrade;\nuniform float uDrift;\nuniform float uNight;\nuniform vec3 uNmTint;\nuniform float uNmTintMix;\nuniform float uNmExposure;\nuniform float uNmContrast;\nuniform float uNmLift;\nuniform float uNmGlow;\nuniform float uNmDay;\nuniform vec2 uTexel;\nuniform float uImpact;\nuniform float uWarm;\nuniform float uBoost;\nuniform vec3 uBoostTint;\nuniform float uBoostMix;\nuniform float uBoostSat;\nuniform float uSat;\nuniform float uFringe;')
+      .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform float uGrade;\nuniform float uDrift;\nuniform float uDriftCut;\nuniform float uFinale;\nuniform float uDanger;\nuniform float uPulse;\nuniform float uNight;\nuniform vec3 uNmTint;\nuniform float uNmTintMix;\nuniform float uNmExposure;\nuniform float uNmContrast;\nuniform float uNmLift;\nuniform float uNmGlow;\nuniform float uNmDay;\nuniform vec2 uTexel;\nuniform float uImpact;\nuniform float uWarm;\nuniform float uBoost;\nuniform vec3 uBoostTint;\nuniform float uBoostMix;\nuniform float uBoostSat;\nuniform float uSat;\nuniform float uFringe;')
       .replace('gl_FragColor = texture2D( tDiffuse, vUv );', `gl_FragColor = texture2D( tDiffuse, vUv );
+ // Additive glows (lamp pools, halos) add to alpha too, and the float target lets it pass 1; unclamped, the
+ // division below then darkened everything under them into a dark disc.
+ if (uDanger > 0.001) {
+   // Last heart: on each heartbeat the picture splits red and blue toward its edges, as if vision blurs.
+   vec2 away = vUv - 0.5;
+   float split = uDanger * (0.25 + uPulse) * smoothstep(0.15, 0.7, length(away)) * 0.012;
+   vec4 redSide = texture2D(tDiffuse, vUv + away * split);
+   vec4 blueSide = texture2D(tDiffuse, vUv - away * split);
+   gl_FragColor.r = redSide.r;
+   gl_FragColor.b = blueSide.b;
+ }
+ gl_FragColor.a = clamp(gl_FragColor.a, 0.0, 1.0);
  gl_FragColor.rgb /= max(gl_FragColor.a, 0.00001);
  gl_FragColor.a = mix(smoothstep(0.4, 0.95, gl_FragColor.a), gl_FragColor.a, clamp(uFringe, 0.0, 1.0));
  vec3 softLight = gl_FragColor.rgb;
@@ -174,6 +197,30 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
    contrasted = contrasted * contrasted * (3.0 - 2.0 * contrasted);
    gl_FragColor.rgb = mix(base, mix(tinted, contrasted, 0.85), uImpact);
  }
+ if (uDriftCut > 0.001) {
+   // Drift: shadows pulled toward a deep violet, light toward a warm pink, a little more contrast, deeper toward
+   // the edges. A colour of its own, apart from the crash's red and the near miss's grey.
+   vec3 base = gl_FragColor.rgb;
+   float driftLuma = dot(base, vec3(0.299, 0.587, 0.114));
+   vec3 split = mix(vec3(0.20, 0.07, 0.38), vec3(1.0, 0.66, 0.92), smoothstep(0.05, 0.95, driftLuma));
+   vec3 toned = mix(base, base * 0.45 + split * 0.65, 0.55 + 0.2 * edge);
+   toned = clamp((toned - 0.5) * 1.15 + 0.5, 0.0, 1.0);
+   gl_FragColor.rgb = mix(base, toned, uDriftCut);
+ }
+ if (uDanger > 0.001) {
+   // And the colour drains a little, a touch more on each beat.
+   float dangerLuma = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+   gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(dangerLuma), uDanger * (0.18 + 0.12 * uPulse));
+ }
+ if (uFinale > 0.001) {
+   // The end of a run: the colour drains to a cold steel-blue, contrast hardens, the edges sink into shadow.
+   vec3 base = gl_FragColor.rgb;
+   float endLuma = dot(base, vec3(0.299, 0.587, 0.114));
+   vec3 steel = vec3(endLuma) * vec3(0.86, 0.95, 1.08) + vec3(0.0, 0.01, 0.03);
+   steel = clamp((steel - 0.45) * 1.3 + 0.45, 0.0, 1.0);
+   steel *= 1.0 - edge * 0.55;
+   gl_FragColor.rgb = mix(base, mix(steel, base, 0.12), uFinale);
+ }
  if (uBoost > 0.001) {
    vec3 boosted = gl_FragColor.rgb * uBoostTint + (uBoostTint - 0.6) * vec3(0.077, 0.033, 0.0);
    float boostLuma = dot(boosted, vec3(0.299, 0.587, 0.114));
@@ -192,18 +239,27 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
  gl_FragColor.rgb = mix(gl_FragColor.rgb, clamp((gl_FragColor.rgb - 0.45) * 1.12 + 0.45, 0.0, 1.0), uDrift);
  gl_FragColor.rgb *= mix(1.0, vignette, 0.55 + 0.5 * uDrift);
  gl_FragColor.rgb *= gl_FragColor.a;
+ if (uDriftCut > 0.001) {
+   // The violet veil reaches over the CSS sky too.
+   float driftVeil = edge * 0.38 * uDriftCut;
+   gl_FragColor = vec4(vec3(0.24, 0.08, 0.40) * driftVeil + gl_FragColor.rgb * (1.0 - driftVeil), driftVeil + gl_FragColor.a * (1.0 - driftVeil));
+ }
  if (uImpact > 0.001) {
    // The sky is CSS behind the canvas, so the crash's dark red vignette is laid over it here too.
    float veil = edge * 0.5 * uImpact;
    gl_FragColor = vec4(vec3(0.5, 0.05, 0.04) * veil + gl_FragColor.rgb * (1.0 - veil), veil + gl_FragColor.a * (1.0 - veil));
  }
 \t\t}`);
-    // On low quality the blur pass is skipped (it draws the whole scene a second time, for depth); the colour
-    // grades in the output pass still run.
-    bokeh.enabled = ACTIVE_QUALITY.depthOfField;
-    composer.addPass(color); composer.addPass(bokeh); composer.addPass(output);
-    pipeline.current = { composer, bokeh, output, dispose: () => {
-      color.dispose(); bokeh.dispose(); output.dispose(); composer.dispose();
+    composer.addPass(color);
+    if (bokeh) composer.addPass(bokeh);
+    composer.addPass(output);
+    // Mobile spends its pixel budget on resolution, using a single FXAA pass
+    // instead of multisampled HDR buffers. Run after tone mapping, in sRGB;
+    // Three's FXAA filters RGBA together, preserving the transparent CSS sky.
+    const fxaa = target.samples === 0 ? new ShaderPass(FXAAShader) : null;
+    if (fxaa) composer.addPass(fxaa);
+    pipeline.current = { composer, bokeh, output, fxaa, dispose: () => {
+      color.dispose(); bokeh?.dispose(); output.dispose(); fxaa?.dispose(); composer.dispose();
     } };
     return () => { pipeline.current?.dispose(); pipeline.current = null; };
   }, [gl, scene, camera]);
@@ -211,11 +267,13 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
   useEffect(() => {
     const current = pipeline.current;
     if (!current) return;
-    current.composer.setPixelRatio(Math.min(viewport.dpr, 1.5));
+    current.composer.setPixelRatio(viewport.dpr);
     current.composer.setSize(size.width, size.height);
-    const ratio = Math.min(viewport.dpr, 1.5);
-    current.output.material.uniforms.uTexel.value.set(1 / (size.width * ratio), 1 / (size.height * ratio));
-    current.bokeh.uniforms.aspect.value = size.width / Math.max(1, size.height);
+    const width = Math.max(1, Math.floor(size.width * viewport.dpr));
+    const height = Math.max(1, Math.floor(size.height * viewport.dpr));
+    current.output.material.uniforms.uTexel.value.set(1 / width, 1 / height);
+    current.fxaa?.uniforms.resolution.value.set(1 / width, 1 / height);
+    if (current.bokeh) current.bokeh.uniforms.aspect.value = size.width / Math.max(1, size.height);
   }, [size.width, size.height, viewport.dpr]);
 
   // Run after the camera and vehicle update. Driving keeps a wider sharp band
@@ -235,47 +293,53 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     if (desired === 0 && amount.current < 0.002) {
       amount.current = 0; gl.render(scene, camera); return;
     }
-    camera.updateMatrixWorld();
-    if (globe.current) {
-      globe.current.getWorldPosition(center.current);
-      surface.current.copy(camera.position).sub(center.current).normalize()
-        .multiplyScalar(GLOBE_RADIUS + settings.surfaceOffset).add(center.current);
-      const overviewDepth = -surface.current.applyMatrix4(camera.matrixWorldInverse).z;
-      let drivingDepth = overviewDepth;
-      if (vehicle.current && drivingAmount > 0) {
-        vehicle.current.getWorldPosition(carFocus.current);
-        vehicle.current.getWorldQuaternion(orientation.current);
-        forward.current.set(0, 0, -1).applyQuaternion(orientation.current);
-        carFocus.current.addScaledVector(forward.current, driving.lookAhead);
-        drivingDepth = -carFocus.current.applyMatrix4(camera.matrixWorldInverse).z;
+    if (current.bokeh) {
+      camera.updateMatrixWorld();
+      if (globe.current) {
+        globe.current.getWorldPosition(center.current);
+        surface.current.copy(camera.position).sub(center.current).normalize()
+          .multiplyScalar(GLOBE_RADIUS + settings.surfaceOffset).add(center.current);
+        const overviewDepth = -surface.current.applyMatrix4(camera.matrixWorldInverse).z;
+        let drivingDepth = overviewDepth;
+        if (vehicle.current && drivingAmount > 0) {
+          vehicle.current.getWorldPosition(carFocus.current);
+          vehicle.current.getWorldQuaternion(orientation.current);
+          forward.current.set(0, 0, -1).applyQuaternion(orientation.current);
+          carFocus.current.addScaledVector(forward.current, driving.lookAhead);
+          drivingDepth = -carFocus.current.applyMatrix4(camera.matrixWorldInverse).z;
+        }
+        const depth = THREE.MathUtils.lerp(overviewDepth, drivingDepth, blend);
+        focus.current = focus.current === null ? depth : THREE.MathUtils.damp(focus.current, depth, settings.damping, dt);
+        current.bokeh.uniforms.focus.value = Math.max(camera.near, focus.current);
+        current.bokeh.uniforms.sharpBeyond.value = camera.position.distanceTo(center.current) + GLOBE_RADIUS * 1.8;
       }
-      const depth = THREE.MathUtils.lerp(overviewDepth, drivingDepth, blend);
-      focus.current = focus.current === null ? depth : THREE.MathUtils.damp(focus.current, depth, settings.damping, dt);
-      current.bokeh.uniforms.focus.value = Math.max(camera.near, focus.current);
-      current.bokeh.uniforms.sharpBeyond.value = camera.position.distanceTo(center.current) + GLOBE_RADIUS * 1.8;
-    }
-    const drivingFocusRange = THREE.MathUtils.lerp(cameraTuning.focusRange, boostSettings.focusRange, boost);
-    const drivingAperture = THREE.MathUtils.lerp(driving.aperture * cameraTuning.blurDriving, boostSettings.aperture * boostTuning.blur, boost);
-    const drivingMaxBlur = THREE.MathUtils.lerp(driving.maxBlur * cameraTuning.blurDriving, boostSettings.maxBlur * boostTuning.blur, boost);
-    current.bokeh.uniforms.focusRange.value = THREE.MathUtils.lerp(GLOBE_RADIUS * settings.focusRangeFactor, drivingFocusRange, blend);
-    current.bokeh.uniforms.nearBlur.value = 1 - blend;
-    current.bokeh.uniforms.aperture.value = (settings.aperture * cameraTuning.blurOverview * overviewAmount + drivingAperture * drivingAmount) * amount.current;
-    current.bokeh.uniforms.maxblur.value = (settings.maxBlur * cameraTuning.blurOverview * overviewAmount + drivingMaxBlur * drivingAmount) * amount.current;
-    // Crash cut-in: lock focus on the crash and exaggerate the blur in front of and behind it.
-    const crash = cinematicState.crash;
-    if (crash > 0) {
-      const uniforms = current.bokeh.uniforms;
-      const crashDepth = -crashPoint.copy(cinematicState.focus).applyMatrix4(camera.matrixWorldInverse).z;
-      uniforms.focus.value = THREE.MathUtils.lerp(uniforms.focus.value, Math.max(camera.near, crashDepth), crash);
-      uniforms.focusRange.value = THREE.MathUtils.lerp(uniforms.focusRange.value, crashSettings.focusRange, crash);
-      uniforms.nearBlur.value = THREE.MathUtils.lerp(uniforms.nearBlur.value, 1, crash);
-      uniforms.aperture.value = THREE.MathUtils.lerp(uniforms.aperture.value, crashSettings.aperture, crash);
-      uniforms.maxblur.value = THREE.MathUtils.lerp(uniforms.maxblur.value, crashSettings.maxBlur, crash);
+      const drivingFocusRange = THREE.MathUtils.lerp(cameraTuning.focusRange, boostSettings.focusRange, boost);
+      const drivingAperture = THREE.MathUtils.lerp(driving.aperture * cameraTuning.blurDriving, boostSettings.aperture * boostTuning.blur, boost);
+      const drivingMaxBlur = THREE.MathUtils.lerp(driving.maxBlur * cameraTuning.blurDriving, boostSettings.maxBlur * boostTuning.blur, boost);
+      current.bokeh.uniforms.focusRange.value = THREE.MathUtils.lerp(GLOBE_RADIUS * settings.focusRangeFactor, drivingFocusRange, blend);
+      current.bokeh.uniforms.nearBlur.value = 1 - blend;
+      current.bokeh.uniforms.aperture.value = (settings.aperture * cameraTuning.blurOverview * overviewAmount + drivingAperture * drivingAmount) * amount.current;
+      current.bokeh.uniforms.maxblur.value = (settings.maxBlur * cameraTuning.blurOverview * overviewAmount + drivingMaxBlur * drivingAmount) * amount.current;
+      // Crash cut-in: lock focus on the crash and exaggerate the blur in front of and behind it.
+      const crash = cinematicState.crash;
+      if (crash > 0) {
+        const uniforms = current.bokeh.uniforms;
+        const crashDepth = -crashPoint.copy(cinematicState.focus).applyMatrix4(camera.matrixWorldInverse).z;
+        uniforms.focus.value = THREE.MathUtils.lerp(uniforms.focus.value, Math.max(camera.near, crashDepth), crash);
+        uniforms.focusRange.value = THREE.MathUtils.lerp(uniforms.focusRange.value, crashSettings.focusRange, crash);
+        uniforms.nearBlur.value = THREE.MathUtils.lerp(uniforms.nearBlur.value, 1, crash);
+        uniforms.aperture.value = THREE.MathUtils.lerp(uniforms.aperture.value, crashSettings.aperture, crash);
+        uniforms.maxblur.value = THREE.MathUtils.lerp(uniforms.maxblur.value, crashSettings.maxBlur, crash);
+      }
     }
     const uniforms = current.output.material.uniforms;
     uniforms.uGrade.value = cinematicState.preview ? 1 : cinematicState.cool;
     uniforms.uNight.value = nightState.blend;
     uniforms.uDrift.value = cinematicState.drift;
+    uniforms.uDriftCut.value = cinematicState.driftCut;
+    uniforms.uFinale.value = cinematicState.finale;
+    uniforms.uDanger.value = cinematicState.danger;
+    uniforms.uPulse.value = cinematicState.pulse;
     // Raw picker values, like the boost colour.
     nearMissTint.setStyle(nearMissLook.nightTint, THREE.LinearSRGBColorSpace);
     uniforms.uNmTint.value.set(nearMissTint.r, nearMissTint.g, nearMissTint.b);
@@ -296,7 +360,8 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     current.output.material.uniforms.uBoostTint.value.set(boostColour.r, boostColour.g, boostColour.b).multiplyScalar(1.18 / Math.max(boostColour.r, boostColour.g, boostColour.b, 0.001));
     current.output.material.uniforms.uBoostMix.value = boostTuning.gradeStrength;
     current.output.material.uniforms.uBoostSat.value = boostTuning.gradeSaturation;
-    current.output.material.uniforms.uImpact.value = Math.max(0, cinematicState.crash - cinematicState.cool);
+    // The finale's grade takes over from the last crash's red.
+    current.output.material.uniforms.uImpact.value = Math.max(0, cinematicState.crash - cinematicState.cool) * (1 - cinematicState.finale);
     current.composer.render(dt);
   }, 1);
 

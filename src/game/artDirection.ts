@@ -1,25 +1,25 @@
 import { PALETTE } from './palette.ts';
+import { QUALITY_PROFILES, selectVisualQuality } from './renderQuality.ts';
+import type { VisualQuality } from './renderQuality.ts';
 
-export type VisualQuality = 'low' | 'high';
+export type { VisualQuality } from './renderQuality.ts';
 
-// Picked per device at load: phones and tablets, and computers with few cores or little memory, get `low`
-// (smaller shadows, fewer pixels, no depth-of-field pass, no multisampling); the rest get `high`. `?quality=low`
-// or `?quality=high` in the address forces one. On top of this the scene trims its own resolution while frames run
-// slow (see AdaptiveResolution in Scene.tsx).
+// Phones/tablets use a sharp but lighter scene; only constrained devices get low.
+// ?quality=low|mobile|high allows comparison on the same device.
 function detectQuality(): VisualQuality {
   if (typeof window === 'undefined') return 'high';
-  const forced = new URLSearchParams(window.location.search).get('quality');
-  if (forced === 'low' || forced === 'high') return forced;
-  const touch = window.matchMedia?.('(pointer: coarse)').matches;
-  const cores = navigator.hardwareConcurrency ?? 8;
-  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
-  return touch || cores <= 4 || memory <= 4 ? 'low' : 'high';
+  return selectVisualQuality({
+    forced: new URLSearchParams(window.location.search).get('quality'),
+    touch: window.matchMedia?.('(pointer: coarse)').matches,
+    cores: navigator.hardwareConcurrency,
+    memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+  });
 }
 export const VISUAL_QUALITY: VisualQuality = detectQuality();
 
 export const ART_DIRECTION = {
   quality: VISUAL_QUALITY,
-  // Miniature focus. Low quality bypasses both overview and driving effects.
+  // Miniature focus. Mobile/low skip depth of field, retaining colour effects.
   introDepthOfField: {
     enabled: true,
     focusRangeFactor: 0.4,
@@ -100,11 +100,7 @@ export const ART_DIRECTION = {
     assetRoughness: 0.88,
     vehicleRoughness: 0.9,
   },
-  qualityProfiles: {
-    // `minDpr` is as far as the adaptive resolution may drop; `msaa` is the samples of the post-processing target.
-    low: { shadowMapSize: 1024, minDpr: 0.7, maxDpr: 1.25, depthOfField: false, msaa: 0 },
-    high: { shadowMapSize: 2048, minDpr: 0.9, maxDpr: 1.5, depthOfField: true, msaa: 4 },
-  },
+  qualityProfiles: QUALITY_PROFILES,
 } as const;
 
 export const ACTIVE_QUALITY = ART_DIRECTION.qualityProfiles[ART_DIRECTION.quality];

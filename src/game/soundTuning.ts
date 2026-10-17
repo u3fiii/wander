@@ -13,7 +13,7 @@ export function applySoundTuning(values: SoundTuning) {
 applySoundTuning(saved);
 
 export const SOUND_TUNING_SLIDERS: Array<{ key: keyof SoundTuning; label: string; min: number; max: number; step: number; group?: string }> = [
-  { key: 'synthVolume', label: 'Volume', min: 0, max: 0.2, step: 0.005, group: 'Engine' },
+  { key: 'synthVolume', label: 'Volume', min: 0, max: 0.4, step: 0.005, group: 'Engine' },
   { key: 'engineBody', label: 'Thickness', min: 0, max: 1, step: 0.01 },
   { key: 'engineRumble', label: 'Putter', min: 0, max: 1, step: 0.01 },
   { key: 'enginePitch', label: 'Pitch', min: 0.5, max: 1.5, step: 0.01 },
@@ -22,4 +22,7 @@ export const SOUND_TUNING_SLIDERS: Array<{ key: keyof SoundTuning; label: string
   { key: 'slowMoWhooshVolume', label: 'Near-miss whoosh', min: 0, max: 1, step: 0.01 },
   { key: 'impactVolume', label: 'Boost hit boom', min: 0, max: 1.5, step: 0.01 },
   { key: 'ambienceVolume', label: 'Wind in the background', min: 0, max: 0.4, step: 0.005 },
+  { key: 'seaVolume', label: 'Sea (near the water)', min: 0, max: 0.4, step: 0.005 },
+  { key: 'planeVolume', label: 'Plane (when it passes)', min: 0, max: 0.6, step: 0.005 },
+  { key: 'natureVolume', label: 'Birds', min: 0, max: 1.5, step: 0.01 },
 ];

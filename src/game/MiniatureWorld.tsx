@@ -13,7 +13,8 @@ import { clearObstacleGroup, obstacleAt, setObstacleGroup } from './obstacles';
 import { nightState } from './nightState';
 import { nightLook } from './nightLook';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
-import { ART_DIRECTION } from './artDirection';
+import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
+import { createSimpleSwimRing } from './mobileScenery';
 import { batchStatic } from './staticBatch';
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
 import type { PaletteKey } from './palette';
@@ -425,6 +426,8 @@ function buildRoadSupport(path: RoadPath, width: number) {
   return geometry;
 }
 
+// How brightly the road markings glow at full night.
+const ROAD_MARKING_GLOW = 0.32;
 function LoopRoad() {
   const roads = useMemo(() => ROAD_PATHS.map(path => {
     const asphalt = buildRoadSlab(path, path.width);
@@ -435,6 +438,13 @@ function LoopRoad() {
       support: buildRoadSupport(path, path.width), curbs: buildCurbs(path), edgeLines, crossings: buildCrossings(path),
     };
   }), []);
+  // The road markings glow faintly at night, like reflective paint, so the road's shape reads between the lamps.
+  const markingMaterial = useMemo(() => new THREE.MeshStandardMaterial({
+    color: roadStyle.marking, emissive: roadStyle.marking, emissiveIntensity: 0, roughness: 0.9, metalness: 0,
+    side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  }), []);
+  useEffect(() => () => markingMaterial.dispose(), [markingMaterial]);
+  useFrame(() => { markingMaterial.emissiveIntensity = nightState.blend * ROAD_MARKING_GLOW; });
   useEffect(() => () => {
     roads.forEach(road => {
       [road.shoulderGeometry, road.shoulderWalls, road.asphaltGeometry, road.asphaltWalls, road.centerline, road.support, road.curbs, road.crossings, ...road.edgeLines]
@@ -456,12 +466,8 @@ function LoopRoad() {
       <mesh geometry={road.asphaltGeometry} receiveShadow renderOrder={2}>
         <meshStandardMaterial color={roadStyle.asphalt} roughness={ART_DIRECTION.materials.asphaltRoughness} side={THREE.DoubleSide} vertexColors flatShading polygonOffset polygonOffsetFactor={-2 - roadIndex} polygonOffsetUnits={-2 - roadIndex} />
       </mesh>
-      <mesh geometry={road.centerline} renderOrder={4}>
-        <meshStandardMaterial color={roadStyle.marking} roughness={0.9} metalness={0} side={THREE.DoubleSide} depthWrite={false} polygonOffset polygonOffsetFactor={-4} polygonOffsetUnits={-4} />
-      </mesh>
-      {[...road.edgeLines, road.crossings].map((geometry, index) => <mesh key={`marking-${index}`} geometry={geometry} renderOrder={4}>
-        <meshStandardMaterial color={roadStyle.marking} roughness={0.9} metalness={0} side={THREE.DoubleSide} depthWrite={false} polygonOffset polygonOffsetFactor={-4} polygonOffsetUnits={-4} />
-      </mesh>)}
+      <mesh geometry={road.centerline} renderOrder={4} material={markingMaterial} />
+      {[...road.edgeLines, road.crossings].map((geometry, index) => <mesh key={`marking-${index}`} geometry={geometry} renderOrder={4} material={markingMaterial} />)}
       <mesh geometry={road.curbs} castShadow receiveShadow>
         <meshStandardMaterial vertexColors roughness={0.9} metalness={0} flatShading />
       </mesh>
@@ -474,7 +480,7 @@ function JapaneseBridgeGarden() {
   const { bridge, rocks, groundCover, flowers, lanterns } = useMemo(() => {
     gltf.scene.updateMatrixWorld(true);
     logMaterials('japanese garden', gltf.scene);
-    const extractPart = (name: string, roles: Record<string, PaletteKey>) => {
+    const extractPart = (name: string, roles: Record<string, PaletteKey>, castShadow = ACTIVE_QUALITY.decorativeShadows) => {
       const original = gltf.scene.getObjectByName(name);
       if (!original) throw new Error(`Missing Japanese garden part: ${name}`);
       const part = original.clone(true);
@@ -484,7 +490,7 @@ function JapaneseBridgeGarden() {
         if (!(child instanceof THREE.Mesh)) return;
         const paint = (material: THREE.Material) => paletteMaterial(roles[material.name] ?? 'roadShoulder', { side: material.side });
         child.material = Array.isArray(child.material) ? child.material.map(paint) : paint(child.material);
-        child.castShadow = true;
+        child.castShadow = castShadow;
         child.receiveShadow = true;
       });
       part.updateMatrixWorld(true);
@@ -496,7 +502,7 @@ function JapaneseBridgeGarden() {
       return part;
     };
     return {
-      bridge: extractPart('Cube005', GARDEN_ROLES.bridge),
+      bridge: extractPart('Cube005', GARDEN_ROLES.bridge, true),
       rocks: ['Cube009', 'Cube002', 'Cube003', 'Cube006', 'Cube007', 'Cube008', 'Cube010', 'Cube011', 'Cube012', 'Cube013', 'Icosphere002'].map(name => extractPart(name, GARDEN_ROLES.rocks)),
       groundCover: ['Circle001', 'Circle002', 'Circle003', 'Circle004', 'Circle005', 'Circle006', 'Circle007', 'Circle008', 'Circle009', 'Circle010', 'Circle011', 'Circle012', 'Circle013', 'Circle014', 'Plane001', 'Plane002', 'Plane004', 'Plane005'].map(name => extractPart(name, GARDEN_ROLES.groundCover)),
       flowers: ['Succulent', 'Succulent001', 'Succulent002', 'Succulent003', 'Succulent004', 'Succulent005'].map(name => extractPart(name, GARDEN_ROLES.flowers)),
@@ -566,9 +572,9 @@ function JapaneseBridgeGarden() {
       return placements;
     };
     return [
-      ...scatter(rocks, 120, 1, 0.48, 0.82, 4.7),
-      ...scatter(groundCover, 260, 4, 0.8, 1.35, 4.15),
-      ...scatter(flowers, 45, 7, 0.7, 1.1, 4.4).map(flower => {
+      ...scatter(rocks, Math.round(120 * ACTIVE_QUALITY.decorationDensity), 1, 0.48, 0.82, 4.7),
+      ...scatter(groundCover, Math.round(260 * ACTIVE_QUALITY.decorationDensity), 4, 0.8, 1.35, 4.15),
+      ...scatter(flowers, Math.round(45 * ACTIVE_QUALITY.decorationDensity), 7, 0.7, 1.1, 4.4).map(flower => {
         const key = FLOWER_COLORS[Math.floor(flowerRandom() * FLOWER_COLORS.length)];
         flower.object.traverse(child => { if (child instanceof THREE.Mesh) child.material = paletteMaterial(key); });
         return flower;
@@ -1460,8 +1466,14 @@ function MeadowHouse() {
 const STREET = {
   lampScale: 1.3, lampSetback: 4.5, propScale: 1.1, benchSetback: 5.3, mailboxSetback: 4.7,
   lampColor: '#ffc27a', headGlow: 1.9,
-  // Six faint, closely spaced steps fading to nothing: velvety and soft, yet still faceted like the world.
-  pool: { radii: [1.0, 1.7, 2.4, 3.1, 3.9, 4.8], strength: [0.14, 0.12, 0.095, 0.068, 0.04, 0.016], segments: 12, lift: 0.06 },
+  // The pool of light under a lamp: how far it reaches (m), how bright its centre is, and how finely it is built.
+  pool: { radius: 6.5, peak: 0.34, rings: 18, segments: 28, lift: 0.06 },
+  poolCentre: '#ffd29a', poolRim: '#ff9a3c',
+  // Lamps along the rest of the loop (beyond the village and the bridge), about this far apart (m), on alternating
+  // sides, so the whole road is lit at night.
+  roadLampSpacing: 11,
+  // Those lamps are smaller than the village's (× its size).
+  roadLampSize: 0.7,
 };
 
 type PropTemplate = { object: THREE.Object3D; head: THREE.Vector3 };
@@ -1514,27 +1526,39 @@ function streetPropRole({ hue, saturation, lightness }: FaceSample): PaletteKey 
   return 'roadShoulder';
 }
 
+// A lamp's pool of light on the ground: a soft, warm glow with no visible edge. Fine rings whose colours blend
+// smoothly from vertex to vertex, falling off like a bell from a warm, slightly paler centre to a deep amber and
+// then to exactly nothing at the rim.
 function buildLightPool() {
-  const { radii, strength, segments, lift } = STREET.pool;
-  const warm = new THREE.Color(STREET.lampColor);
-  const positions: number[] = [];
-  const colors: number[] = [];
-  const at = (radius: number, k: number) => [Math.cos(k / segments * Math.PI * 2) * radius, lift, Math.sin(k / segments * Math.PI * 2) * radius];
-  const face = (a: number[], b: number[], c: number[], level: number) => {
-    positions.push(...a, ...b, ...c);
-    const color = warm.clone().multiplyScalar(strength[level]);
-    for (let i = 0; i < 3; i++) colors.push(color.r, color.g, color.b);
-  };
+  const { radius, peak, rings, segments, lift } = STREET.pool;
+  const centre = new THREE.Color(STREET.poolCentre), rim = new THREE.Color(STREET.poolRim);
+  const positions: number[] = [0, lift, 0];
+  const colors: number[] = [...centre.clone().multiplyScalar(peak).toArray()];
+  for (let ring = 1; ring <= rings; ring++) {
+    const t = ring / rings, r = t * radius;
+    // A bell curve that is cut smoothly to zero at the rim.
+    const level = Math.exp(-Math.pow(t / 0.45, 2)) * (1 - THREE.MathUtils.smoothstep(t, 0.7, 1)) * peak;
+    const color = centre.clone().lerp(rim, Math.min(1, t * 1.4)).multiplyScalar(level);
+    for (let k = 0; k < segments; k++) {
+      const a = (k / segments) * Math.PI * 2;
+      // Bent down with the planet's curve, so the pool lies on the ground instead of floating off it at the rim.
+      positions.push(Math.cos(a) * r, lift - (r * r) / (2 * GLOBE_RADIUS), Math.sin(a) * r);
+      colors.push(color.r, color.g, color.b);
+    }
+  }
+  const index: number[] = [];
+  const at = (ring: number, k: number) => (ring === 0 ? 0 : 1 + (ring - 1) * segments + (k % segments));
   for (let k = 0; k < segments; k++) {
-    face([0, lift, 0], at(radii[0], k + 1), at(radii[0], k), 0);
-    for (let ring = 1; ring < radii.length; ring++) {
-      face(at(radii[ring - 1], k), at(radii[ring - 1], k + 1), at(radii[ring], k), ring);
-      face(at(radii[ring - 1], k + 1), at(radii[ring], k + 1), at(radii[ring], k), ring);
+    index.push(0, at(1, k + 1), at(1, k));
+    for (let ring = 1; ring < rings; ring++) {
+      index.push(at(ring, k), at(ring, k + 1), at(ring + 1, k));
+      index.push(at(ring, k + 1), at(ring + 1, k + 1), at(ring + 1, k));
     }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(index);
   return geometry;
 }
 
@@ -1593,16 +1617,16 @@ function StreetFurniture() {
       items.push({ object: holder, position: terrainPoint(spot.latitude, spot.longitude, 0.02), orientation: spot.orientation, latitude: spot.latitude, longitude: spot.longitude, radius });
       return items[items.length - 1];
     };
-    const lampAt = (template: PropTemplate, spot: { latitude: number; longitude: number; orientation: THREE.Quaternion }) => {
+    const lampAt = (template: PropTemplate, spot: { latitude: number; longitude: number; orientation: THREE.Quaternion }, scale: number = STREET.lampScale) => {
       // Turn the lamp so its arm (head offset) reaches toward local +z, over the road.
       const arm = Math.atan2(template.head.x, template.head.z);
-      const item = put(template, spot, STREET.lampScale, -arm, 0.35);
+      const item = put(template, spot, scale, -arm, 0.35);
       if (!item) return;
-      const reach = Math.hypot(template.head.x, template.head.z) * STREET.lampScale;
+      const reach = Math.hypot(template.head.x, template.head.z) * scale;
       const base = new THREE.Vector3(...item.position);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(spot.orientation);
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(spot.orientation);
-      const head = base.clone().addScaledVector(up, template.head.y * STREET.lampScale - 0.15).addScaledVector(forward, reach);
+      const head = base.clone().addScaledVector(up, template.head.y * scale - 0.15).addScaledVector(forward, reach);
       glows.push(head.toArray() as [number, number, number]);
       const below = toLatLon(head);
       const onRoad = distanceToRoadNetwork(below.latitude, below.longitude) < 1.2;
@@ -1620,6 +1644,16 @@ function StreetFurniture() {
     const bridgeEnd = WORLD_SETTINGS.roads.bridgeDeckHalfSpan + 0.035;
     lampAt(templates.townLamp, streetSpot(WORLD_SETTINGS.roads.bridgeLongitude - bridgeEnd, 1, STREET.lampSetback, 0));
     lampAt(templates.townLamp, streetSpot(WORLD_SETTINGS.roads.bridgeLongitude + bridgeEnd, -1, STREET.lampSetback, 0));
+    // The rest of the road: a lamp every few metres on alternating sides, leaving out the village (it has its own)
+    // and the bridge, and any spot over water.
+    const spacing = STREET.roadLampSpacing / GLOBE_RADIUS;
+    const angleTo = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    for (let i = 0; i * spacing < Math.PI * 2; i++) {
+      const roadLongitude = i * spacing;
+      const inVillage = roadLongitude > TOWN.fromLongitude - spacing && roadLongitude < TOWN.fromLongitude + step * 4.5;
+      if (inVillage || angleTo(roadLongitude, WORLD_SETTINGS.roads.bridgeLongitude) < bridgeEnd + spacing) continue;
+      lampAt(templates.townLamp, streetSpot(roadLongitude, i % 2 ? 1 : -1, STREET.lampSetback, 0), STREET.lampScale * STREET.roadLampSize);
+    }
     // Benches with a bin beside them, and a mailbox by two front paths.
     [[1, 1], [-1, 3.5]].forEach(([side, at]) => {
       const roadLongitude = TOWN.fromLongitude + step * at;
@@ -1795,8 +1829,19 @@ function Boat() {
 const SWIM_RING = { diameter: 1.05, offshore: 2.6, bob: 0.025, spin: 0.15 };
 
 function BeachFloats() {
+  return ACTIVE_QUALITY.simpleSwimRings ? <SimpleBeachFloats /> : <DetailedBeachFloats />;
+}
+
+function SimpleBeachFloats() {
+  const template = useMemo(() => createSimpleSwimRing(SWIM_RING.diameter), []);
+  useEffect(() => () => template.traverse(child => {
+    if (child instanceof THREE.Mesh) child.geometry.dispose();
+  }), [template]);
+  return <BeachFloatPlacement template={template} />;
+}
+
+function DetailedBeachFloats() {
   const gltf = useLoader(GLTFLoader, swimRingUrl, withDraco);
-  const floating = useRef<THREE.Group>(null!);
   const template = useMemo(() => {
     const ring = gltf.scene.clone(true);
     ring.traverse(child => {
@@ -1816,6 +1861,11 @@ function BeachFloats() {
     holder.scale.setScalar(SWIM_RING.diameter / Math.max(size.x, size.z));
     return holder;
   }, [gltf.scene]);
+  return <BeachFloatPlacement template={template} />;
+}
+
+function BeachFloatPlacement({ template }: { template: THREE.Group }) {
+  const floating = useRef<THREE.Group>(null!);
   const spots = useMemo(() => {
     const shore = beachFacets().filter(facet => facet.ring === 0);
     if (shore.length < 3) return null;
@@ -2191,7 +2241,7 @@ function fillerSpots() {
   const random = seededRandom(FILLER.seed);
   const buildings: Array<[number, number, number]> = [[WELL.latitude, WELL.longitude, FILLER.buildingClear], [MEADOW_HOUSE.latitude, MEADOW_HOUSE.longitude, FILLER.buildingClear + 1]];
   const spots: Array<{ kind: 'rock' | 'tuft' | 'bush'; latitude: number; longitude: number; scale: number; yaw: number; colour: PaletteKey }> = [];
-  for (let attempt = 0; attempt < FILLER.tries && spots.length < FILLER.count; attempt++) {
+  for (let attempt = 0; attempt < FILLER.tries && spots.length < Math.round(FILLER.count * ACTIVE_QUALITY.decorationDensity); attempt++) {
     const latitude = Math.asin(random() * 1.9 - 0.95), longitude = random() * turn;
     if (landInfluence(latitude, longitude) < 0.92) continue;
     if (distanceToRoadNetwork(latitude, longitude) < FILLER.roadClear) continue;
@@ -2222,7 +2272,7 @@ function Meadow() {
     return (['rock', 'tuft', 'bush'] as const).map(kind => {
       const list = spots.filter(spot => spot.kind === kind);
       const mesh = new THREE.InstancedMesh(geometries[kind], material, Math.max(1, count(kind)));
-      mesh.castShadow = true;
+      mesh.castShadow = ACTIVE_QUALITY.decorativeShadows;
       mesh.receiveShadow = true;
       list.forEach((spot, index) => {
         const surface = terrainPoint(spot.latitude, spot.longitude, kind === 'rock' ? 0.02 : 0);
@@ -2248,10 +2298,11 @@ function Meadow() {
 const FIREFLIES = { count: 150, seed: 77, size: 0.3, colour: '#e6ff9a', hover: [0.7, 1.5] as const, drift: 0.45 };
 
 function Fireflies() {
+  const points = useRef<THREE.Points>(null!);
   const { geometry, bases, normals, phases, colour } = useMemo(() => {
     const random = seededRandom(FIREFLIES.seed);
     const bases: THREE.Vector3[] = [], normals: THREE.Vector3[] = [], phases: number[] = [];
-    for (let attempt = 0; attempt < 30000 && bases.length < FIREFLIES.count; attempt++) {
+    for (let attempt = 0; attempt < 30000 && bases.length < Math.round(FIREFLIES.count * ACTIVE_QUALITY.decorationDensity); attempt++) {
       const latitude = Math.asin(random() * 1.9 - 0.95), longitude = random() * turn;
       if (landInfluence(latitude, longitude) < 0.92) continue;
       const road = distanceToRoadNetwork(latitude, longitude);
@@ -2272,10 +2323,12 @@ function Fireflies() {
   }), []);
   useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
   useFrame(state => {
+    const night = nightState.blend;
+    points.current.visible = night > 0.001;
+    if (!points.current.visible) return;
     const time = state.clock.elapsedTime;
     const position = geometry.getAttribute('position') as THREE.BufferAttribute;
     const color = geometry.getAttribute('color') as THREE.BufferAttribute;
-    const night = nightState.blend;
     bases.forEach((base, i) => {
       const phase = phases[i];
       const hover = FIREFLIES.hover[0] + (FIREFLIES.hover[1] - FIREFLIES.hover[0]) * (0.5 + 0.5 * Math.sin(time * 0.5 + phase));
@@ -2287,7 +2340,7 @@ function Fireflies() {
     position.needsUpdate = true;
     color.needsUpdate = true;
   });
-  return <points geometry={geometry} material={material} frustumCulled={false} />;
+  return <points ref={points} geometry={geometry} material={material} frustumCulled={false} />;
 }
 
 // Footpaths: a paved walk from the nearest point of the road to a building, curving gently across the meadow.
@@ -2433,6 +2486,8 @@ function Airplane() {
     // Left turns bank the left wing down; climbing lifts the nose.
     temp.euler.set(-THREE.MathUtils.clamp(climb * PLANE.climbPitch, -0.2, 0.2), 0, -(f.turn / PLANE.maxTurnRate) * PLANE.maxBank);
     group.current.quaternion.setFromRotationMatrix(temp.basis).multiply(temp.attitude.setFromEuler(temp.euler));
+    // Where the plane is in the world, for its sound (the scene measures how near it is to the camera).
+    group.current.getWorldPosition(airplaneState.position);
     plane.pivot.rotation.z += PLANE.propellerSpeed * dt;
   });
   return <group ref={group}><primitive object={plane.model} scale={plane.scale} /></group>;
@@ -2572,6 +2627,9 @@ function StaticBatch({ children }: { children: React.ReactNode }) {
   }, []);
   return <group ref={group}>{children}</group>;
 }
+
+// The plane's position in world space, updated every frame (read by the scene for the plane's sound).
+export const airplaneState = { position: new THREE.Vector3(0, 1e4, 0) };
 
 export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
   return <group>

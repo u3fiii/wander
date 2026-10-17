@@ -1,0 +1,29 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { STAGE_SECONDS, addEntry, cleanName, qualifies, stageFor } from './leaderboard.ts';
+import type { Entry } from './leaderboard.ts';
+
+const entry = (score: number, date = score): Entry => ({ name: `d${score}`, score, distance: 0, seconds: 0, date });
+
+test('the board keeps the best five, best first, and says where a new run landed', () => {
+  let board: Entry[] = [];
+  for (let s = 1; s <= 5; s++) board = addEntry(board, entry(s * 100)).board;
+  assert.equal(board.length, 5);
+  assert.equal(board[0].score, 500);
+  assert.equal(qualifies(board, 50), false);
+  assert.equal(qualifies(board, 150), true);
+  const result = addEntry(board, entry(350, 99999));
+  assert.equal(result.rank, 2);
+  assert.equal(result.board.length, 5);
+  assert.equal(result.board.at(-1)!.score, 200, 'the lowest dropped off');
+  assert.equal(qualifies([], 0), false, 'an empty run does not go on the board');
+});
+
+test('names are tidied, and stages come every so many seconds', () => {
+  assert.equal(cleanName('   Road   Runner  '), 'Road Runner');
+  assert.equal(cleanName(''), 'Driver');
+  assert.equal(cleanName('x'.repeat(40)).length, 16);
+  assert.equal(stageFor(0), 1);
+  assert.equal(stageFor(STAGE_SECONDS - 1), 1);
+  assert.equal(stageFor(STAGE_SECONDS * 3), 4);
+});

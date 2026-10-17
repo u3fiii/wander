@@ -50,6 +50,8 @@ The previous player vehicle (kept for reference, no longer loaded) uses [Low pol
 
 The town uses varied buildings and planters from the supplied Kenney city assets in `src/assets/kenny city`. Lighting, atmosphere, material palette and visual quality live in `ART_DIRECTION` at the top of `src/game/artDirection.ts`. Planet detail, land threshold and shell height live in `PLANET_TERRAIN` at the top of `src/game/planetTerrain.ts`; road, bridge and region settings live in `WORLD_SETTINGS` at the top of `src/game/worldMap.ts`.
 
+Rendering budgets live in `src/game/renderQuality.ts`. Touch devices use the `mobile` profile: DPR starts at 1.75 and adapts between 1.25 and 2 (capped by the screen's native density), with FXAA for smooth edges, smaller shadows and no depth-of-field pass. Small garden/meadow decorations and fireflies are halved, tiny decorative shadows are skipped, and swim rings use a lightweight mesh. Roads, bridges, buildings, collidable trees/rocks, traffic and driving rules stay the same. Constrained devices use `low`; desktop retains `high`. Use `?quality=mobile&stats`, `?quality=low&stats` or `?quality=high&stats` to compare FPS, rendered pixel dimensions and scene workload on the same device. Check portrait/landscape, day/night and a sustained drive on an actual phone; desktop emulation does not measure mobile GPU performance.
+
 ## Future model workflow
 
 The open-source [img2threejs](https://github.com/img2threejs/img2threejs) project is an Apache-2.0 agent skill for rebuilding reference images as editable Three.js code. It can be evaluated for a more recognizable car in a later iteration. It is not installed or used by this version; AI model usage may have a separate cost. Similarly named hosted converters are separate services.
