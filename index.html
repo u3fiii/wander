@@ -7,6 +7,29 @@
     <meta name="description" content="Wander is a tiny low-poly world made for unhurried drives. Play in your browser, no download needed." />
     <title>Wander — Just drive</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Loading screen styles live here so the loader paints before any script runs. React's LoadingScreen reuses them. -->
+    <style>
+      body{margin:0;background:#f5f0db}
+      .loader{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:0 16px;color:#111;font-family:'Outfit',system-ui,sans-serif;background:radial-gradient(ellipse 70% 60% at 50% 42%,#fbf8ec 0%,#f5f0db 60%,#e9e4c8 100%);transition:opacity .65s ease,visibility .65s}
+      .loader.leaving{opacity:0;visibility:hidden;pointer-events:none}
+      .loader-planet{position:relative;width:92px;height:92px;margin-bottom:6px;border-radius:50%;background:radial-gradient(circle at 34% 30%,#9fd6a0 0%,#5aa57a 45%,#2b6a5d 100%);box-shadow:inset -10px -12px 0 #1f544a55,0 14px 30px #2b6a5d33;animation:loader-bob 2.6s ease-in-out infinite}
+      .loader-planet::before{content:'';position:absolute;inset:-9px;border-radius:50%;border:2px dashed #2b6a5d44}
+      .loader-orbit{position:absolute;inset:-9px;border-radius:50%;animation:loader-spin 2.2s linear infinite}
+      .loader-orbit b{position:absolute;left:50%;top:-6px;width:20px;height:11px;margin-left:-10px;border-radius:4px 6px 3px 3px;background:#d9604c;box-shadow:0 2px 4px #0003}
+      .loader-orbit b::before,.loader-orbit b::after{content:'';position:absolute;bottom:-3px;width:6px;height:6px;border-radius:50%;background:#222}
+      .loader-orbit b::before{left:2px}.loader-orbit b::after{right:2px}
+      .loader-brand{font-size:34px;font-weight:900;letter-spacing:-1.5px;line-height:1}
+      .loader-brand span{color:#ba7f40}
+      .loader-track{width:min(260px,100%);height:6px;border-radius:6px;background:#11111814;overflow:hidden}
+      .loader-track span{display:block;height:100%;border-radius:6px;background:#111;transform:scaleX(0);transform-origin:left}
+      .loader-text{display:flex;justify-content:space-between;gap:16px;width:min(260px,100%);margin:-8px 0 0;font-size:12px;color:#5b6358}
+      .loader-text span{animation:loader-tip .4s ease both}
+      .loader-text em{font-style:normal;font-variant-numeric:tabular-nums;color:#111;font-weight:500}
+      @keyframes loader-spin{to{transform:rotate(360deg)}}
+      @keyframes loader-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+      @keyframes loader-tip{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+      @media (prefers-reduced-motion:reduce){.loader-planet,.loader-orbit,.loader-text span{animation:none}}
+    </style>
   </head>
-  <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+  <body><div id="root"><div class="loader" role="progressbar" aria-label="Loading the world" aria-busy="true"><div class="loader-planet" aria-hidden="true"><i class="loader-orbit"><b></b></i></div><strong class="loader-brand">Wander<span>.</span></strong><div class="loader-track"><span></span></div><p class="loader-text"><span>Rolling out the little world…</span><em>0%</em></p></div></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

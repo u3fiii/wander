@@ -98,7 +98,6 @@ export const CAR_CONFIG = {
   ramNudge: 0.05,
   boostRamNudgeFactor: 0,
   // Under boost the overlap with a struck car is eased out this much more gently (the other car moves, not you).
-  boostSeparateFactor: 0.3,
   // Speed lost per second while pressed against a car that hasn't been shoved clear yet, and how fast an overlap is eased out.
   trafficHoldDecel: 3,
   trafficSeparateRate: 10,
@@ -165,10 +164,11 @@ export const JUICE_CONFIG = {
   driftSteer: 0.95,
   // Tire marks
   tireMarksEnabled: true,
-  tireMarkLife: 3,
-  tireMarkPool: 240,
-  tireMarkWidth: 0.22,
-  tireMarkSpacing: 0.25,
+  tireMarkLife: 4,
+  tireMarkPool: 400,
+  tireMarkWidth: 0.16,
+  tireMarkSpacing: 0.3,
+  tireMarkOpacity: 0.4,
   // Camera
   boostFovKick: 7.5,
   boostCameraPullback: 1.1,
@@ -200,13 +200,14 @@ export const JUICE_CONFIG = {
   flameEnabled: true,
   flameLength: 1.2,
   // HUD: smooth-driving streak levels up every `streakStep` seconds on the road above `streakSpeedRatio` of top speed.
-  streakStep: 5,
+  streakStep: 6,
   streakSpeedRatio: 0.55,
   streakShowTime: 2,
   hudSpringStiffness: 120,
   hudSpringDamping: 12,
-  // A side clip at least this fast (m/s) is a cool hit: it gets the cinematic cut-in and a faded, bleached grade.
-  coolSideSpeed: 9,
+  // A hit where the cars come together at least this fast (m/s) is a smash: it gets the red slow-motion cut-in.
+  // (Top speed is about 18 m/s and traffic drives at 5-7, so full speed into an oncoming car is about 24.)
+  crashCinematicClosing: 12,
   // Sound
   soundEnabled: true,
   engineVolume: 0.03,

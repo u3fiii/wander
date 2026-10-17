@@ -2,7 +2,8 @@ import { BLOCKS, CAR_CONFIG, DRIVE, JUICE_CONFIG, LOOP_DRIVE } from './config.ts
 import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
-import { classifyTrafficHit, obstacleAt, reportTrafficHit, trafficContact } from './obstacles.ts';
+import { difficulty } from './difficulty.ts';
+import { classifyTrafficHit, obstacleAt, reportTrafficHit, resetNearMiss, trackNearMiss, trackStaticNearMiss, trafficContact } from './obstacles.ts';
 
 export type CarState = {
   // On the globe: longitude, latitude offset in metres, heading from the road tangent.
@@ -48,7 +49,7 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
   if (car.boostTime > 0) {
     car.boostTime = Math.max(0, car.boostTime - dt);
   } else {
-    car.boostCharge = Math.min(1, car.boostCharge + dt / CAR_CONFIG.boostCooldown);
+    car.boostCharge = Math.min(1, car.boostCharge + dt / (CAR_CONFIG.boostCooldown * difficulty.boostCooldown));
     // Boost only fires from the road.
     if (controls.boost && forwardAmount > 0 && car.boostCharge >= 1 && onRoad) {
       car.boostTime = CAR_CONFIG.boostDuration;
@@ -57,6 +58,15 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
   }
   car.boosting = car.boostTime > 0 ? 1 : 0;
   car.boost = car.boosting ? car.boostTime / CAR_CONFIG.boostDuration : car.boostCharge;
+}
+
+// Boost is earned as well as waited for: skilled moves top the meter up (shares of a full charge), a level-up
+// fills it. Nothing is added while a burst is burning.
+export const BOOST_EARN = { nearMiss: 0.22, drift: 0.08, driftPerSecond: 0.05, flick: 0.06, streak: 0.06, levelUp: 1 };
+export function earnBoost(car: CarState, amount: number) {
+  if (car.boostTime > 0 || amount <= 0) return;
+  car.boostCharge = Math.min(1, car.boostCharge + amount);
+  if (!car.boosting) car.boost = car.boostCharge;
 }
 
 export function updateSpeed(car: CarState, controls: Controls, dt: number, offroad = false): void {
@@ -215,6 +225,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     movingDeeper = nextLand <= currentLand + 1e-7;
   }
   let obstacle = obstacleAt(movement.latitude, movement.longitude, CAR_CONFIG.collisionRadius);
+  const touchedStatic = !!obstacle && !obstacle.movable;
   // Glancing hits on trunks, houses and rocks steer the car around them instead of stopping it.
   if (obstacle && !obstacle.movable) {
     for (let step = 1; step <= 8 && obstacle; step++) {
@@ -230,6 +241,9 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
       }
     }
   }
+  // Before a head-on stop below, so a tree that was hit is never later counted as a near miss.
+  trackStaticNearMiss(movement.latitude, movement.longitude, CAR_CONFIG.collisionRadius,
+    facingEastNorth(movement.facing, movement.latitude, movement.longitude), Math.abs(car.speed), car.boosting > 0, touchedStatic);
   if (obstacle) {
     obstacle.impact = Math.max(obstacle.impact ?? 0, Math.abs(car.speed));
     car.speed *= -0.16;
@@ -240,9 +254,19 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   // A move that would push deeper into a car slides along it if it can, otherwise waits this step for the
   // shoved car to clear. Moves that separate are always allowed, and any overlap is eased out.
   let ramNudge = 0;
+  let closingSpeed = 0;
   const capsuleAt = (point: typeof movement) => trafficContact(point.latitude, point.longitude,
     facingEastNorth(point.facing, point.latitude, point.longitude), CAR_CONFIG.collisionHalfLength, CAR_CONFIG.trafficRadius);
   let contact = capsuleAt(movement);
+  {
+    // Both cars' velocities as [east, north], for the closing speed of a hit and the pace of a near miss.
+    const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
+    const other = contact?.obstacle.forward ?? [0, 0], otherSpeed = contact?.obstacle.velocity ?? 0;
+    const relative = [facing[0] * car.speed - other[0] * otherSpeed, facing[1] * car.speed - other[1] * otherSpeed];
+    const turnAway = contact ? facing[0] * contact.away[1] - facing[1] * contact.away[0] : 0;
+    trackNearMiss(contact, Math.hypot(relative[0], relative[1]), Math.abs(car.speed), turnAway > 0 ? 1 : -1, car.boosting > 0);
+    if (contact) closingSpeed = Math.max(0, -(relative[0] * contact.away[0] + relative[1] * contact.away[1]));
+  }
   if (contact && contact.gap < 0) {
     const hit = contact.obstacle;
     hit.impact = Math.max(hit.impact ?? 0, Math.abs(car.speed));
@@ -254,7 +278,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     if (!hit.ramCooldown) {
       if (kind && Math.abs(car.speed) > 3) {
         hit.hitKind = kind;
-        reportTrafficHit({ kind, speed: Math.abs(car.speed), side: turnAway > 0 ? 1 : -1, boosted: car.boosting > 0 });
+        reportTrafficHit({ kind, speed: Math.abs(car.speed), side: turnAway > 0 ? 1 : -1, boosted: car.boosting > 0, closing: closingSpeed });
       }
       // Under boost the car bulldozes through, front or side alike: it keeps nearly all its speed and the
       // struck car is thrown clear (see boostHit).
@@ -272,7 +296,10 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     hit.ramCooldown = 0.5;
     const before = capsuleAt({ latitude: frame.latitude, longitude: car.x, facing: blend(frame.tangent, left, Math.cos(car.heading), Math.sin(car.heading)) });
     const floor = Math.min(0, before?.gap ?? 0) - 1e-4;
-    if (contact.gap < floor) {
+    // Under boost the player is a bulldozer: traffic never turns it, holds it or pushes it aside. It keeps its
+    // line and speed, and the struck car is thrown clear (see BOOST_HIT in the scene).
+    const bulldozing = car.boosting > 0;
+    if (contact.gap < floor && !bulldozing) {
       let slid = false;
       // Head-on contacts only slide round with a small turn, so they don't swing the car off the road.
       const slideSteps = kind === 'front' ? 2 : 6;
@@ -290,7 +317,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
         }
       }
       // A side clip, or anything while boosting, carries straight through (the overlap is eased out below).
-      if (!slid && kind !== 'side' && car.boosting === 0) {
+      if (!slid && kind !== 'side') {
         // A frontal ram keeps the player rolling while the other car is pushed out of the way.
         // Repeatedly braking to zero here made nose-to-nose contacts feel like a hard lock.
         if (kind !== 'front') car.speed = toward(car.speed, 0, CAR_CONFIG.trafficHoldDecel * dt);
@@ -298,8 +325,8 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
         return;
       }
     }
-    if (contact && contact.gap < 0) {
-      const push = -contact.gap * Math.min(1, CAR_CONFIG.trafficSeparateRate * dt) * (car.boosting > 0 ? CAR_CONFIG.boostSeparateFactor : 1);
+    if (contact && contact.gap < 0 && !bulldozing) {
+      const push = -contact.gap * Math.min(1, CAR_CONFIG.trafficSeparateRate * dt);
       movement = {
         ...movement,
         latitude: movement.latitude + contact.away[1] * push / GLOBE_RADIUS,
@@ -329,6 +356,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
 // Back to road: puts the car on its own side of the road at the same spot, stopped and facing along the
 // road (whichever direction it was closer to facing). The globe and camera ease to the new pose.
 export function recoverToRoad(car: CarState) {
+  resetNearMiss();
   const side = car.z === 0 ? 1 : Math.sign(car.z);
   car.z = side * Math.min(Math.abs(car.z), CAR_CONFIG.recoverLaneOffset);
   car.heading = Math.cos(car.heading) >= 0 ? 0 : Math.PI;

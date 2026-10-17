@@ -7,7 +7,7 @@
   "flameColour": "#efa76b",
   "flameLength": 2,
   "duration": 5,
-  "cooldown": 5,
+  "cooldown": 28,
   "speedFactor": 1.25,
   "accelFactor": 1.8,
   "pullBack": 9.5,

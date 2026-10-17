@@ -1,0 +1,9 @@
+{
+  "nightTint": "#6fd6e0",
+  "nightTintMix": 0.6,
+  "nightExposure": 1.5,
+  "nightContrast": 1.15,
+  "nightLift": 0.1,
+  "nightGlow": 0.55,
+  "dayStrength": 1
+}

@@ -11,13 +11,15 @@ import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateC
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
 import { initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
-import { clearObstacleGroup, drainTrafficHits, setObstacleGroup } from './obstacles';
-import type { Obstacle, TrafficHit } from './obstacles';
+import { clearObstacleGroup, drainNearMisses, drainTrafficHits, setObstacleGroup } from './obstacles';
+import type { NearMiss, Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
 import MiniatureWorld from './MiniatureWorld';
 import IntroDepthOfField from './IntroDepthOfField';
 import { cinematicState } from './cinematic';
 import { nightState } from './nightState';
+import { advanceCycle, nightAmount, twilight } from './dayCycle';
+import { difficulty, trafficActive } from './difficulty';
 import { dayLook } from './dayLook';
 import { nightLook } from './nightLook';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
@@ -62,9 +64,9 @@ function readGamepad() {
   return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
-  started: boolean; paused: boolean; night: boolean; nightFade?: number; cameraMode: number; resetKey: number;
+  started: boolean; paused: boolean; cameraMode: number; resetKey: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
-  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void;
+  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void;
 };
 
 const localUp = new THREE.Vector3(0, 1, 0);
@@ -197,7 +199,6 @@ function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
 }
 
 // Slow enough that the change passes through dusk, rather than snapping.
-const NIGHT_FADE_RATE = 0.45;
 
 // Head and tail lamps that glow at night (additive cores + soft halos), faded by the night blend.
 // Night lights are warm and soft everywhere: amber headlamps and beams, like the street lamps and windows.
@@ -317,8 +318,9 @@ const SIDE_HIT = {
   fling: 1.15, hop: 0.65, roll: 0.65,
   maxLateralVelocity: 3.4, maxSpinVelocity: 1.5,
 };
-// A car hit by a boosting player is shoved clear of the lane, whatever the angle.
-const BOOST_HIT = { fling: 1.6, minLateralVelocity: 5, maxLateralVelocity: 8, hop: 1.2 };
+// A car hit by a boosting player is thrown clear of the lane, whatever the angle: hard to the side, up in the
+// air with a big spin, and (hit from behind) punted forward, so it is out of the player's way at once.
+const BOOST_HIT = { fling: 2.4, minLateralVelocity: 10, maxLateralVelocity: 15, hop: 2.2, spin: 2.5, punt: 0.8 };
 // Negative hits (nose or tail into traffic) get a clean cinematic cut-in, all on real time: the camera snaps
 // in toward the crash on an extreme ease-out, holds while time crawls, then glides back. The aim swings onto
 // the crash, the lens tightens, the frame tilts a touch, and the depth of field locks on (see cinematic.ts).
@@ -328,6 +330,17 @@ const CRASH_CAM = {
   // Seconds after a cut-in ends before another can start.
   rest: 1.5,
 };
+// A near miss reuses the cut-in with the faded, bleached grade, but the camera moves less: it is a held
+// breath, not an impact. A rest after each (difficulty.nearMissRest) keeps them special: until it passes, a near
+// miss only scores, with no slow motion.
+const NEAR_MISS_CAM = { strength: 0.55 };
+// A drift that lasts scores when it ends: on the road, at speed, long enough (difficulty.driftMinTime), and without
+// hitting anything. Brief gaps (the slide flickering as the wheel crosses centre) up to `grace` don't end it.
+export type DriftScore = { time: number; speed: number };
+const DRIFT_SCORE = { minSpeed: 6, grace: 0.25, settle: 0.3 };
+// Drift camera, once a slide has settled in: it swings out to the outside of the turn to show the car's
+// angle, drops a little lower, widens the lens a touch and leans into the corner. All gentle, on smooth easing.
+const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, release: 1.8 };
 const easeOutExpo = (t: number) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const crashEnvelope = (time: number) => {
   if (time < 0 || time > CRASH_CAM.duration) return 0;
@@ -365,6 +378,7 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
 }) {
   const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0 });
   const hit = useRef({ hop: 0, hopVelocity: 0, roll: 0, rollVelocity: 0, squash: 0, squashVelocity: 0 });
+  const presence = useRef(trafficActive(progressIndex) ? 1 : 0);
   const body = useRef<THREE.Group>(null!);
   const heading = useMemo(() => new THREE.Vector3(), []);
   const playerPoint = useMemo(() => new THREE.Vector3(), []);
@@ -401,10 +415,16 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     const lateral = toPlayer.dot(right);
     // Already overlapping the player? Keep moving so the cars separate instead of locking together.
     const blocked = reactive && ahead > 1.5 && ahead < NPC.stopDistance && Math.abs(lateral) < NPC.laneHalfWidth;
-    const cruise = Math.abs(speed);
+    // Fewer and calmer cars at low levels (see difficulty.ts). A car joining or leaving the road grows in or
+    // shrinks away, and only collides while it is properly there.
+    const active = trafficActive(progressIndex);
+    presence.current = THREE.MathUtils.damp(presence.current, active ? 1 : 0, 3, Math.min(delta, 0.05));
+    obstacle.inactive = presence.current < 0.6;
+    group.current.visible = presence.current > 0.01;
+    const cruise = Math.abs(speed) * difficulty.trafficSpeed;
     let followGap = Infinity;
     traffic.forEach((other, index) => {
-      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed)) return;
+      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed) || !trafficActive(index)) return;
       const fraction = ((progresses.current[index] - progress.current) * Math.sign(speed) + 1) % 1;
       followGap = Math.min(followGap, fraction * roadPathMetric(path, progress.current));
     });
@@ -439,9 +459,10 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
       if (boosted) {
         const direction = m.pushVelocity === 0 ? away : Math.sign(m.pushVelocity);
         m.pushVelocity = direction * THREE.MathUtils.clamp(Math.abs(m.pushVelocity), BOOST_HIT.minLateralVelocity, BOOST_HIT.maxLateralVelocity);
+        m.spinVelocity += direction * BOOST_HIT.spin;
       }
-      // A rear hit shoves the car forward; a frontal hit slows it while steering it clear.
-      m.speed = ahead < 0 ? m.speed + obstacle.impact * NPC.shoveForward * (1 - sideways) : m.speed * (front ? 0.72 : 0.3);
+      // A rear hit shoves the car forward (punted hard under boost); a frontal hit slows it while steering it clear.
+      m.speed = ahead < 0 ? m.speed + obstacle.impact * (boosted ? BOOST_HIT.punt : NPC.shoveForward * (1 - sideways)) : m.speed * (front ? 0.72 : 0.3);
       m.cooldown = NPC.hitCooldown;
       const strength = THREE.MathUtils.clamp(obstacle.impact / NPC_HIT.strengthSpeed, 0, 1);
       const h = hit.current;
@@ -475,7 +496,8 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     // Roll pivots on the low-side wheels, so lift the body by the roll so it never digs into the road.
     body.current.position.y = h.hop + Math.abs(Math.sin(h.roll)) * NPC_HIT.halfWidth;
     body.current.rotation.z = h.roll;
-    body.current.scale.set(1 - h.squash * 0.5, 1 + h.squash, 1 - h.squash * 0.5);
+    const grow = THREE.MathUtils.smoothstep(presence.current, 0, 1);
+    body.current.scale.set((1 - h.squash * 0.5) * grow, (1 + h.squash) * grow, (1 - h.squash * 0.5) * grow);
     // Keep this car's collision circle on its current position (planet centre is localGlobeCenter).
     const p = group.current.position;
     const r = Math.hypot(p.x - localGlobeCenter.x, p.y - localGlobeCenter.y, p.z - localGlobeCenter.z);
@@ -488,6 +510,7 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     const north = -Math.sin(lat) * Math.sin(lon) * heading.x + Math.cos(lat) * heading.y - Math.sin(lat) * Math.cos(lon) * heading.z;
     const length = Math.hypot(east, north) || 1;
     obstacle.forward = [east / length, north / length];
+    obstacle.velocity = paused ? 0 : m.speed;
   });
   return <group ref={group}><group ref={body}>
     <KenneyCar modelUrl={modelUrl} scale={scale} color={TRAFFIC_COLORS[progressIndex]} jitter={TRAFFIC_JITTER[progressIndex]} />
@@ -688,8 +711,9 @@ function DrivingScene(props: SceneProps) {
   const globeQuat = useMemo(() => new THREE.Quaternion(), []);
   const globeReady = useRef(false);
   const cameraOffset = useMemo(() => new THREE.Vector3(), []);
-  const nightBlend = useRef(props.night ? 1 : 0);
-  const nightProgress = useRef(props.night ? 1 : 0);
+  const nightBlend = useRef(nightAmount());
+  // Low-sun colours around sunset and sunrise: the sunlight and the haze it lights up.
+  const [sunsetLight, sunsetFog] = useMemo(() => [new THREE.Color('#ff9a5a'), new THREE.Color('#e9a48a')], []);
   const ambientLight = useRef<THREE.AmbientLight>(null!);
   const hemisphereLight = useRef<THREE.HemisphereLight>(null!);
   const rimLight = useRef<THREE.DirectionalLight>(null!);
@@ -723,6 +747,12 @@ function DrivingScene(props: SceneProps) {
   // Whether the current cut-in is a cool (hard side) hit, which gets the faded, bleached grade instead of the red.
   const crashCool = useRef(false);
   const coolBlend = useRef(0);
+  // How hard the cut-in moves the camera: 1 for a crash, less for a near miss.
+  const crashStrength = useRef(1);
+  const nearMissRest = useRef(0);
+  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false });
+  const driftHold = useRef(0);
+  const driftSide = useRef(0);
   const crashRest = useRef(0);
   const crashLevel = useRef(0);
   const crashApplied = useMemo(() => new THREE.Vector3(), []);
@@ -763,7 +793,7 @@ function DrivingScene(props: SceneProps) {
     gl.toneMapping = THREE.ACESFilmicToneMapping;
     gl.outputColorSpace = THREE.SRGBColorSpace;
     gl.shadowMap.type = THREE.PCFShadowMap;
-  }, [gl, props.night]);
+  }, [gl]);
   useEffect(() => {
     scene.fog = fog;
     sun.current.target = sunTarget;
@@ -854,6 +884,8 @@ function DrivingScene(props: SceneProps) {
     const realDt = Math.min(delta, 0.05);
     // Crash cut-in clock (real time) and its slow motion (the only thing that bends game time).
     crashRest.current = Math.max(0, crashRest.current - realDt);
+    nearMissRest.current = Math.max(0, nearMissRest.current - realDt);
+    crashStrength.current = THREE.MathUtils.damp(crashStrength.current, crashCool.current ? NEAR_MISS_CAM.strength : 1, 6, realDt);
     if (crashTime.current >= 0) {
       crashTime.current += realDt;
       if (crashTime.current > CRASH_CAM.duration) { crashTime.current = -1; crashRest.current = CRASH_CAM.rest; }
@@ -965,22 +997,26 @@ function DrivingScene(props: SceneProps) {
     };
     const intro = !props.started && zoomProgress.current < 0.02;
     if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true);
+    // Two cinematic beats share the slow-motion cut-in:
+    // - the red one for a real smash: the cars come together fast (closing speed, so ramming an oncoming car
+    //   counts far more than nudging one ahead, and a glancing scrape barely counts at all);
+    // - the faded grey one for a near miss: flashing past a car at speed with only a hair between them.
+    // Never under boost: then the car just bulldozes through without a pause. Every other hit gets the light
+    // side beat. A cut-in always plays through and fades out cleanly, and the next one can only start after a
+    // short rest (re-triggering during a tussle made the grade pulse on and off).
+    const cutInFree = crashTime.current < 0 && crashRest.current <= 0;
     for (const hit of drainTrafficHits()) {
-      // The cinematic cut-in plays for head-on hits (with the red grade, in the HUD) and for hard side clips (no
-      // red). Never under boost: then the car just bulldozes through without a pause, so those hits get the light
-      // side beat. A new cut-in waits until the current one has started letting go, so a string of hits doesn't
-      // stutter the camera.
-      const cinematic = !hit.boosted && (hit.kind === 'front' || hit.speed >= JUICE_CONFIG.coolSideSpeed);
-      if (cinematic) {
-        // A cut-in always plays through and fades out cleanly; the next one can only start after a short rest.
-        // (Re-triggering it during a tussle made the red grade and the contrast pulse on and off.)
+      if (driftRun.current.time > 0) driftRun.current.spoiled = true;
+      const smash = !hit.boosted && hit.closing >= JUICE_CONFIG.crashCinematicClosing;
+      if (smash) {
         if (crashTime.current < 0 && crashRest.current <= 0) {
           crashTime.current = 0;
           crashSide.current = hit.side;
-          crashCool.current = hit.kind === 'side';
-          coolBlend.current = crashCool.current ? 1 : 0;
-        } else if (crashTime.current >= 0 && hit.kind === 'front') {
-          // A head-on hit during a cool cut-in turns it red (the blend below makes that a smooth change).
+          crashCool.current = false;
+          coolBlend.current = 0;
+          crashStrength.current = 1;
+        } else if (crashTime.current >= 0) {
+          // A smash during a near-miss cut-in (the car clipped the next one) turns it red, smoothly.
           crashCool.current = false;
         }
         trauma.current = Math.min(1, trauma.current + CRASH_CAM.shake);
@@ -993,6 +1029,18 @@ function DrivingScene(props: SceneProps) {
       }
       props.onTrafficHit?.(hit);
     }
+    for (const miss of drainNearMisses()) {
+      if (cutInFree && crashTime.current < 0 && nearMissRest.current <= 0 && props.started) {
+        crashTime.current = 0;
+        crashSide.current = miss.side;
+        crashCool.current = true;
+        coolBlend.current = 1;
+        crashStrength.current = NEAR_MISS_CAM.strength;
+        nearMissRest.current = difficulty.nearMissRest;
+        playWhoosh();
+      }
+      if (props.started) props.onNearMiss?.(miss);
+    }
 
     const carFrame = loopFrame(car.x, car.z);
     const latitude = carFrame.latitude;
@@ -1001,6 +1049,18 @@ function DrivingScene(props: SceneProps) {
       landingCompression.current = Math.max(landingCompression.current, onRoad ? 0.11 : 0.2);
     }
     wasOnRoad.current = onRoad;
+    const drifting = props.started && !props.paused && car.drift > 0 && Math.abs(car.speed) > DRIFT_SCORE.minSpeed;
+    const run = driftRun.current;
+    if (drifting) {
+      run.time += dt; run.speed += Math.abs(car.speed) * dt; run.gap = 0;
+      if (!onRoad) run.offroad += dt;
+    } else if (run.time > 0 && (run.gap += dt) > DRIFT_SCORE.grace) {
+      if (!run.spoiled && run.time >= difficulty.driftMinTime && run.offroad < run.time * 0.3) props.onDrift?.({ time: run.time, speed: run.speed / run.time });
+      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false });
+    }
+    const driftShown = drifting && run.time > DRIFT_SCORE.settle;
+    driftHold.current = THREE.MathUtils.damp(driftHold.current, driftShown ? 1 : 0, driftShown ? DRIFT_CAM.attack : DRIFT_CAM.release, realDt);
+    if (drifting) driftSide.current = THREE.MathUtils.damp(driftSide.current, Math.sign(car.steering), 4, realDt);
     const elevation = onRoad ? roadSurfaceElevation(latitude, car.x) : terrainElevation(latitude, car.x);
     const targetElevation = elevation + (onRoad ? 0.075 : 0.025);
     smoothedElevation.current = smoothedElevation.current === null
@@ -1039,15 +1099,11 @@ function DrivingScene(props: SceneProps) {
     groundVehiclePosition.sub(globeCenter).applyQuaternion(globeQuat).add(globeCenter);
     vehicleTangent.applyQuaternion(globeQuat);
     surfaceUp.copy(vehicleUp).applyQuaternion(globeQuat);
-    // Day/night cross-fade: every light, the fog and exposure blend over ~1.5s instead of switching. The automatic
-    // change instead runs at a steady pace over `nightFade` seconds, eased at both ends.
-    if (props.nightFade) {
-      nightProgress.current = THREE.MathUtils.clamp(nightProgress.current + (props.night ? 1 : -1) * dt / props.nightFade, 0, 1);
-      nightBlend.current = THREE.MathUtils.smoothstep(nightProgress.current, 0, 1);
-    } else {
-      nightBlend.current = THREE.MathUtils.damp(nightBlend.current, props.night ? 1 : 0, NIGHT_FADE_RATE, dt);
-      nightProgress.current = nightBlend.current;
-    }
+    // Time of day: one slow clock (dayCycle.ts) that runs while driving. Every light, the fog and the exposure
+    // follow its night blend, and the sun turns warm and low-feeling around sunset and sunrise.
+    advanceCycle(realDt, props.started && !props.paused);
+    nightBlend.current = nightAmount();
+    const golden = twilight();
     const n = nightBlend.current;
     nightState.blend = n;
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
@@ -1063,12 +1119,12 @@ function DrivingScene(props: SceneProps) {
     hemisphereLight.current.color.lerpColors(lightColors.daySky, lightColors.nightSky, n);
     hemisphereLight.current.groundColor.lerpColors(lightColors.dayGround, lightColors.nightGround, n);
     sun.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.sunIntensity * dayLook.sunStrength, night.sunIntensity * nightLook.moonStrength, n);
-    sun.current.color.lerpColors(daySunColour, nightMoonColour, n);
+    sun.current.color.lerpColors(daySunColour, nightMoonColour, n).lerp(sunsetLight, golden * 0.55);
     rimLight.current.intensity = THREE.MathUtils.lerp(ATMOSPHERE.light.rimIntensity, night.rimIntensity, n) + boostAtmosphere.current * 0.12;
     rimLight.current.color.lerpColors(lightColors.dayRim, lightColors.nightRim, n).lerp(lightColors.boostRim, boostAtmosphere.current * 0.32);
     bounceLight.current.intensity = THREE.MathUtils.lerp(0.24, 0.12, n);
     bounceLight.current.color.lerpColors(lightColors.dayBounce, lightColors.nightBounce, n);
-    fog.color.lerpColors(dayFogColour, nightFogColour, n);
+    fog.color.lerpColors(dayFogColour, nightFogColour, n).lerp(sunsetFog, golden * 0.35);
     gl.toneMappingExposure = THREE.MathUtils.lerp(dayLook.exposure, nightLook.exposure, n);
     const cameraDistance = camera.position.distanceTo(globeCenter);
     const fogEase = 1 - Math.exp(-ATMOSPHERE.fog.damping * dt);
@@ -1119,6 +1175,10 @@ function DrivingScene(props: SceneProps) {
     const boostLift = easeInOutCubic(boostHold.current) * zoom;
     desiredCamera.addScaledVector(boostBack.copy(desiredCamera).sub(desiredLook).normalize(), boostLift * BOOST_FEEL.pullBack);
     desiredCamera.addScaledVector(surfaceUp, boostLift * BOOST_FEEL.rise);
+    const driftLook = easeInOutCubic(driftHold.current) * zoom;
+    cinematicState.drift = driftLook;
+    desiredCamera.addScaledVector(vehicleRight, driftSide.current * driftLook * DRIFT_CAM.swing);
+    desiredCamera.addScaledVector(surfaceUp, -driftLook * DRIFT_CAM.drop);
     const ease = 1 - Math.exp(-CAR_CONFIG.cameraSmoothing * dt);
     // The crash cut-in is laid on top of the smoothed camera each frame (taken off again before smoothing),
     // so its extreme ease-out reads crisply instead of being softened by the follow lag.
@@ -1161,7 +1221,7 @@ function DrivingScene(props: SceneProps) {
     camera.position.addScaledVector(vehicleRight, Math.sin(t * 89 + 2.1) * hum * 0.7);
     const crash = crashLevel.current;
     if (vehicle.current) vehicle.current.getWorldPosition(cinematicState.focus).addScaledVector(surfaceUp, 0.5);
-    crashApplied.copy(cinematicState.focus).sub(camera.position).multiplyScalar(crash * CRASH_CAM.push * zoom);
+    crashApplied.copy(cinematicState.focus).sub(camera.position).multiplyScalar(crash * crashStrength.current * CRASH_CAM.push * zoom);
     camera.position.add(crashApplied);
     // Side-hit glance toward the thrown car.
     lookSwing.current = THREE.MathUtils.damp(lookSwing.current, 0, SIDE_HIT_CAMERA.swingDecay, realDt);
@@ -1170,20 +1230,21 @@ function DrivingScene(props: SceneProps) {
     targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).normalize();
     smoothedUp.lerp(targetCameraUp, 1 - Math.exp(-6 * dt)).normalize();
     camera.up.copy(smoothedUp);
-    crashLook.copy(smoothedLook).lerp(cinematicState.focus, crash * CRASH_CAM.lookPull * zoom);
+    crashLook.copy(smoothedLook).lerp(cinematicState.focus, crash * crashStrength.current * CRASH_CAM.lookPull * zoom);
     camera.lookAt(crashLook);
     camera.rotateZ(-bodyRoll.current * JUICE_CONFIG.cameraRollFactor * zoom);
-    camera.rotateZ(-crashSide.current * crash * CRASH_CAM.dutch * zoom);
+    camera.rotateZ(driftSide.current * driftLook * DRIFT_CAM.roll);
+    camera.rotateZ(-crashSide.current * crash * crashStrength.current * CRASH_CAM.dutch * zoom);
     // Boost tremor: a quick nodding tilt, layered with a finer, faster one.
     camera.rotateX((Math.sin(t * BOOST_FEEL.tiltRate) * BOOST_FEEL.tilt + Math.sin(t * BOOST_FEEL.tiltFineRate + 1.1) * BOOST_FEEL.tiltFine) * boostHold.current * zoom);
     dutchVelocity.current += (-dutch.current * SIDE_HIT_CAMERA.dutchStiffness - dutchVelocity.current * SIDE_HIT_CAMERA.dutchDamping) * realDt;
     dutch.current = THREE.MathUtils.clamp(dutch.current + dutchVelocity.current * realDt, -SIDE_HIT_CAMERA.maxDutch, SIDE_HIT_CAMERA.maxDutch);
     camera.rotateZ(dutch.current * zoom);
     if (camera instanceof THREE.PerspectiveCamera) {
-      const targetFov = THREE.MathUtils.lerp(48, drivingFov + fovKick.current, zoom) - Math.sin(Math.PI * zoom) * 5;
+      const targetFov = THREE.MathUtils.lerp(48, drivingFov + fovKick.current + driftLook * DRIFT_CAM.fov, zoom) - Math.sin(Math.PI * zoom) * 5;
       // The crash lens punch sits on top of the smoothed FOV, like the cut-in on the position.
       camera.fov = THREE.MathUtils.damp(camera.fov - crashFovApplied.current, targetFov, CAR_CONFIG.fovSmoothing, dt);
-      crashFovApplied.current = -crashLevel.current * CRASH_CAM.fovPunch * zoom;
+      crashFovApplied.current = -crashLevel.current * crashStrength.current * CRASH_CAM.fovPunch * zoom;
       camera.fov += crashFovApplied.current;
       const introScreenOffset = 0.43;
       const centeredFilmOffset = introScreenOffset

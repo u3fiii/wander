@@ -14,11 +14,27 @@ const rearWheel = (side: number, out: THREE.Vector3) => out.set(
   -CAR_CONFIG.wheelRearZ * CAR_CONFIG.bodyScale,
 );
 
-// Tire marks: pooled dark strips laid under the rear wheels while sliding; they shrink away over their life.
+// Tire marks: two continuous trails under the rear wheels while sliding. Each piece joins the wheel's last
+// point to its new one (so the trail follows the real path of the slide, not the way the body faces), keeps its
+// width, and fades out by transparency, softly, over its life. A trail breaks when the slide ends.
+const up = new THREE.Vector3();
+const along = new THREE.Vector3();
+const across = new THREE.Vector3();
+const basis = new THREE.Matrix4();
 export function createTireMarks() {
   const count = JUICE_CONFIG.tireMarkPool;
   const geometry = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-  const material = new THREE.MeshBasicMaterial({ color: PALETTE.tires, transparent: true, opacity: 0.35, depthWrite: false });
+  const fade = new THREE.InstancedBufferAttribute(new Float32Array(count), 1);
+  fade.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('aFade', fade);
+  const material = new THREE.MeshBasicMaterial({ color: PALETTE.tires, transparent: true, opacity: JUICE_CONFIG.tireMarkOpacity, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+  material.onBeforeCompile = shader => {
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'attribute float aFade;\nvarying float vFade;\nvoid main() {\n  vFade = aFade;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'varying float vFade;\nvoid main() {')
+      .replace('#include <alphatest_fragment>', '#include <alphatest_fragment>\n  diffuseColor.a *= vFade;');
+  };
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;
   mesh.renderOrder = 3;
@@ -26,39 +42,52 @@ export function createTireMarks() {
   for (let i = 0; i < count; i++) mesh.setMatrixAt(i, zero);
   return {
     mesh,
-    age: new Float32Array(count).fill(1),
-    positions: Array.from({ length: count }, () => new THREE.Vector3()),
-    rotations: Array.from({ length: count }, () => new THREE.Quaternion()),
+    fade,
+    age: new Float32Array(count).fill(Infinity),
+    // The last point laid by each rear wheel (left, right), or null when its trail is broken.
+    last: [null, null] as Array<THREE.Vector3 | null>,
     next: 0,
-    lastDistance: 0,
     dispose: () => { geometry.dispose(); material.dispose(); mesh.dispose(); },
   };
 }
 export type TireMarks = ReturnType<typeof createTireMarks>;
 
 export function updateTireMarks(marks: TireMarks, dt: number, vehicle: THREE.Object3D, car: CarState, active: boolean) {
-  if (active && JUICE_CONFIG.tireMarksEnabled && car.drift && Math.abs(car.speed) > 3
-    && car.distance - marks.lastDistance > JUICE_CONFIG.tireMarkSpacing) {
-    marks.lastDistance = car.distance;
+  const sliding = active && JUICE_CONFIG.tireMarksEnabled && !!car.drift && Math.abs(car.speed) > 3;
+  if (!sliding) marks.last = [null, null];
+  else {
     vehicle.updateMatrix();
-    for (const side of [-1, 1]) {
+    up.set(0, 1, 0).applyQuaternion(vehicle.quaternion);
+    [-1, 1].forEach((side, wheel) => {
+      const point = rearWheel(side, local).applyMatrix4(vehicle.matrix);
+      const last = marks.last[wheel];
+      if (!last) { marks.last[wheel] = point.clone(); return; }
+      const length = point.distanceTo(last);
+      if (length < JUICE_CONFIG.tireMarkSpacing) return;
       const i = marks.next;
       marks.next = (marks.next + 1) % marks.age.length;
-      marks.positions[i].copy(rearWheel(side, local)).applyMatrix4(vehicle.matrix);
-      marks.rotations[i].copy(vehicle.quaternion);
+      along.copy(point).sub(last).divideScalar(length);
+      across.crossVectors(up, along).normalize();
+      basis.makeBasis(across, up, along);
+      dummy.quaternion.setFromRotationMatrix(basis);
+      // A little overlap so the pieces read as one unbroken stripe.
+      dummy.position.copy(point).add(last).multiplyScalar(0.5);
+      dummy.scale.set(JUICE_CONFIG.tireMarkWidth, 1, length + 0.04);
+      dummy.updateMatrix();
+      marks.mesh.setMatrixAt(i, dummy.matrix);
       marks.age[i] = 0;
-    }
+      last.copy(point);
+    });
   }
   for (let i = 0; i < marks.age.length; i++) {
-    if (marks.age[i] >= JUICE_CONFIG.tireMarkLife) continue;
+    if (marks.age[i] > JUICE_CONFIG.tireMarkLife) continue;
     marks.age[i] += dt;
-    const fade = Math.max(0, 1 - marks.age[i] / JUICE_CONFIG.tireMarkLife);
-    dummy.position.copy(marks.positions[i]);
-    dummy.quaternion.copy(marks.rotations[i]);
-    dummy.scale.set(JUICE_CONFIG.tireMarkWidth * fade, 1, JUICE_CONFIG.tireMarkSpacing * 1.6 * fade);
-    dummy.updateMatrix();
-    marks.mesh.setMatrixAt(i, fade > 0 ? dummy.matrix : zero);
+    // Holds dark for most of its life, then eases away; it fades in over the first moment too.
+    const life = marks.age[i] / JUICE_CONFIG.tireMarkLife;
+    marks.fade.setX(i, Math.min(1, marks.age[i] * 12) * (1 - THREE.MathUtils.smoothstep(life, 0.45, 1)));
+    if (life > 1) marks.mesh.setMatrixAt(i, zero);
   }
+  marks.fade.needsUpdate = true;
   marks.mesh.instanceMatrix.needsUpdate = true;
 }
 

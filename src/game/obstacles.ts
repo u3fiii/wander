@@ -1,4 +1,5 @@
 import { GLOBE_RADIUS } from './globe.ts';
+import { difficulty } from './difficulty.ts';
 
 // `impact` is the speed the player hit this obstacle with; moving obstacles read and clear it.
 // `movable` obstacles (traffic) get shoved instead of stopping the player.
@@ -8,6 +9,11 @@ import { GLOBE_RADIUS } from './globe.ts';
 export type Obstacle = {
   latitude: number; longitude: number; radius: number; impact?: number; movable?: boolean; ramCooldown?: number;
   forward?: [number, number]; halfLength?: number;
+  // Movable obstacles: how fast (m/s) the car is driving along `forward`, so hits and near misses can use the
+  // closing speed between the two cars rather than the player's speed alone.
+  velocity?: number;
+  // A traffic car that is off the road for now (fewer cars at low levels): it is ignored entirely.
+  inactive?: boolean;
   // How the player's last hit on this obstacle was scored, so the struck car can react to match.
   hitKind?: 'side' | 'front';
   // The player was boosting when it hit this car: it gets thrown clear much harder.
@@ -18,11 +24,58 @@ export type Obstacle = {
 export const HITBOX_SCALE = 0.7;
 
 // Player hits on traffic, read by the HUD: 'side' is a clip from beside, 'front' is a head-on nose-first hit.
-// `side` is where the struck car was: 1 on the player's right, -1 on its left.
-export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean };
+// `side` is where the struck car was: 1 on the player's right, -1 on its left. `closing` is how fast (m/s) the two
+// cars were coming together along the contact: high for a real smash, low for a nudge or a glancing scrape.
+export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean; closing: number };
 const trafficHits: TrafficHit[] = [];
 export function reportTrafficHit(hit: TrafficHit) { trafficHits.push(hit); }
 export function drainTrafficHits(): TrafficHit[] { return trafficHits.splice(0); }
+
+// Near misses: the player flashed past a traffic car at speed without touching it. `speed` is the relative
+// speed of the pass (m/s), `gap` the closest the two bodies got (m), `side` as for hits.
+export type NearMiss = { speed: number; gap: number; side: number };
+const nearMisses: NearMiss[] = [];
+export function drainNearMisses(): NearMiss[] { return nearMisses.splice(0); }
+
+// One pass by an obstacle, from the moment it comes within `NEAR_MISS.watch` until it is left behind. A pass
+// counts once the bodies have been within `gap` of each other, never touched, and start pulling apart (so the
+// slow motion lands while the player is still right beside the thing it dodged, not after). Traffic and
+// static things (trees, poles, rocks, houses: threading past them off the road) are tracked separately.
+// How close and how fast a pass must be come from the difficulty (generous at low levels); `gap` here is only
+// the scale the reported gap is given on, for scoring.
+export const NEAR_MISS = { watch: 1.6, gap: 0.65, separate: 0.06, minPlayerSpeed: 8 };
+type Pass = { obstacle: Obstacle; closest: number; touched: boolean; reported: boolean; speed: number; side: number };
+function passTracker(gapLimit: () => number) {
+  let pass: Pass | undefined;
+  return {
+    reset() { pass = undefined; },
+    // Called every physics step with the closest obstacle (or none), the relative speed and which side it is on.
+    track(near: { obstacle: Obstacle; gap: number } | undefined, relativeSpeed: number, playerSpeed: number, side: number, boosting: boolean, touched = false) {
+      if (!near || near.gap > NEAR_MISS.watch || (pass && pass.obstacle !== near.obstacle)) pass = undefined;
+      if (!near || near.gap > NEAR_MISS.watch) return;
+      pass ??= { obstacle: near.obstacle, closest: Infinity, touched: false, reported: false, speed: 0, side };
+      if (near.gap < 0 || touched) pass.touched = true;
+      if (near.gap <= pass.closest) { pass.closest = near.gap; pass.speed = relativeSpeed; pass.side = side; return; }
+      const maxGap = gapLimit();
+      if (pass.reported || pass.touched || boosting || pass.closest > maxGap) return;
+      if (near.gap - pass.closest < NEAR_MISS.separate) return;
+      pass.reported = true;
+      if (pass.speed >= difficulty.nearMissSpeed && playerSpeed >= NEAR_MISS.minPlayerSpeed) nearMisses.push({ speed: pass.speed, gap: pass.closest / maxGap * NEAR_MISS.gap, side: pass.side });
+    },
+  };
+}
+const trafficPasses = passTracker(() => difficulty.nearMissGap);
+const staticPasses = passTracker(() => difficulty.nearMissStaticGap);
+export function resetNearMiss() { trafficPasses.reset(); staticPasses.reset(); }
+export function trackNearMiss(contact: TrafficContact | undefined, relativeSpeed: number, playerSpeed: number, side: number, boosting: boolean) {
+  trafficPasses.track(contact, relativeSpeed, playerSpeed, side, boosting);
+}
+// `touched`: the player ran into a static obstacle this step (even if it then slid round it).
+export function trackStaticNearMiss(latitude: number, longitude: number, clearance: number, facing: [number, number], playerSpeed: number, boosting: boolean, touched: boolean) {
+  const near = nearestStatic(latitude, longitude, clearance);
+  const side = near && facing[0] * near.away[1] - facing[1] * near.away[0] > 0 ? 1 : -1;
+  staticPasses.track(near, playerSpeed, playerSpeed, side, boosting, touched);
+}
 
 const groups = new Map<string, Obstacle[]>();
 let flat: Obstacle[] = [];
@@ -51,6 +104,22 @@ export function obstacleAt(latitude: number, longitude: number, clearance: numbe
     if (Math.hypot(dx, dz) < obstacle.radius * HITBOX_SCALE + clearance) return obstacle;
   }
   return undefined;
+}
+
+// The closest static obstacle within a few metres, with the gap between its hitbox and a circle of `clearance`
+// (the same test as obstacleAt, so gap < 0 is a hit) and the unit [east, north] direction from it to the point.
+function nearestStatic(latitude: number, longitude: number, clearance: number) {
+  let best: { obstacle: Obstacle; gap: number; away: [number, number] } | undefined;
+  for (const obstacle of flat) {
+    if (obstacle.movable) continue;
+    const north = (latitude - obstacle.latitude) * GLOBE_RADIUS;
+    const east = wrap(longitude - obstacle.longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
+    const distance = Math.hypot(east, north);
+    const gap = distance - obstacle.radius * HITBOX_SCALE - clearance;
+    if (gap > NEAR_MISS.watch || (best && gap >= best.gap)) continue;
+    best = { obstacle, gap, away: distance > 1e-6 ? [east / distance, north / distance] : [1, 0] };
+  }
+  return best;
 }
 
 // Closest points between segments p0→p1 and q0→q1 in the plane (all [east, north] in metres).
@@ -86,7 +155,7 @@ export function classifyTrafficHit(contact: TrafficContact, facing: [number, num
 export function trafficContact(latitude: number, longitude: number, forward: [number, number], halfLength: number, radius: number): TrafficContact | undefined {
   let best: TrafficContact | undefined;
   for (const obstacle of flat) {
-    if (!obstacle.movable) continue;
+    if (!obstacle.movable || obstacle.inactive) continue;
     const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
     const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     if (Math.hypot(east, north) > 8) continue;

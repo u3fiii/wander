@@ -2,8 +2,12 @@ import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'r
 import type { CSSProperties, ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, SlidersHorizontal, ChevronLeft, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
-import type { Telemetry } from './game/Scene';
-import { emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
+import LoadingScreen from './LoadingScreen';
+import { LogoMark } from './Logo';
+import Coach from './Coach';
+import BoostGauge from './BoostGauge';
+import type { DriftScore, Telemetry } from './game/Scene';
+import { BOOST_EARN, earnBoost, emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
 import type { ControlKey } from './game/driving';
 
 // Touch steering: a round wheel you turn with a finger. Dragging it sets the steering (up to a 270° turn); letting go
@@ -44,7 +48,8 @@ function SteeringWheel({ controls }: { controls: React.RefObject<{ steer?: numbe
     <span className="wheel-top" />
   </div>;
 }
-import type { TrafficHit } from './game/obstacles';
+import type { NearMiss, TrafficHit } from './game/obstacles';
+import { NEAR_MISS } from './game/obstacles';
 import { DAY_LOOK_SAVED, DAY_LOOK_SLIDERS, dayLook } from './game/dayLook';
 import type { DayLook } from './game/dayLook';
 import { NIGHT_LOOK_SAVED, NIGHT_LOOK_SLIDERS, nightLook } from './game/nightLook';
@@ -55,13 +60,30 @@ import { CAMERA_TUNING_SAVED, CAMERA_TUNING_SLIDERS, applyCameraTuning, cameraTu
 import { BOOST_TUNING_COLOURS, BOOST_TUNING_SAVED, BOOST_TUNING_SLIDERS, applyBoostTuning, boostTuning, type BoostTuning } from './game/boostTuning';
 import type { CameraTuning } from './game/cameraTuning';
 import { CAR_CONFIG, JUICE_CONFIG } from './game/config';
+import { NEAR_MISS_LOOK_COLOURS, NEAR_MISS_LOOK_SAVED, NEAR_MISS_LOOK_SLIDERS, nearMissLook } from './game/nearMissLook';
+import type { NearMissLook } from './game/nearMissLook';
+import { cinematicState } from './game/cinematic';
+import { levelFor, loadXp, saveXp, streakXp } from './game/progression';
+import { difficulty, setDifficultyLevel } from './game/difficulty';
+import { goTo, headingToNight, nightAmount, skyAt, twilight } from './game/dayCycle';
 import { setMuted, startAudio } from './game/audio';
 
 const TITLE = 'Just drive.';
-// How long each day or night phase lasts while driving (ms).
-const DAY_CYCLE_MS = 45000;
-// The automatic day/night change plays out slowly, over this many seconds (the button still switches quickly).
-const AUTO_SHIFT_SECONDS = 10;
+// Traffic note wording, kept to a word or two, and which notes win when two land close together.
+const NOTE_TEXT = {
+  smash: ['Big crash!', 'Brutal hit.', 'Total wreck.', 'Ouch.'],
+  near: ['Close call!', 'By a whisker!', 'Threaded it!', 'Inches!'],
+  boost: ['Bulldozer!', 'Unstoppable!', 'Out of my way!', 'Absolute unit!'],
+  flick: ['Nice flick!', 'Sideswipe!', 'Pinball!'],
+  bump: ['Bump.', 'Easy now.', 'Careful.'],
+  level: ['Level up!'],
+  drift: ['Nice drift!', 'Clean slide!'],
+  bigDrift: ['Big drift!', 'Sideways!'],
+  hugeDrift: ['Drift king!', 'Endless slide!'],
+};
+const NOTE_RANK = { level: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
+// Hits slower than this (m/s) still score, but without a note.
+const QUIET_HIT_SPEED = 7;
 const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
 class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
@@ -70,8 +92,8 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
 }
 function Help({ close }: { close: () => void }) {
   return <div className="modal-shade" onClick={close}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={e => e.stopPropagation()}>
-    <button className="close-button" autoFocus aria-label="Close help" onClick={close}><X size={20} /></button>
-    <span className="eyebrow">BEHIND THE WHEEL</span><h2 id="help-title">Circle the little world.</h2>
+    <button className="close-button" autoFocus aria-label="Close help" onClick={close}><X size={18} /></button>
+    <span className="eyebrow">CONTROLS</span><h2 id="help-title">Circle the little world.</h2>
     <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>W</kbd> <kbd>S</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></span></div>
     <div className="help-row"><span>Steer left / right</span><span><kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd></span></div>
     <div className="help-row"><span>Brake / handbrake drift</span><kbd>Space</kbd></div>
@@ -107,7 +129,7 @@ function NightSky() {
 // nightLook.json. Picking a tab switches the game to that time of day so the changes can be seen.
 type LookValues = Record<string, number | string>;
 type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
-type LookMode = 'day' | 'night' | 'car' | 'camera' | 'boost';
+type LookMode = 'day' | 'night' | 'car' | 'camera' | 'boost' | 'nearMiss';
 function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onChange, onClose }: {
   mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
   endpoint: string; onChange: (look: LookValues) => void; onClose: () => void;
@@ -129,6 +151,7 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onCh
         <button className={mode === 'car' ? 'on' : ''} onClick={() => { onMode('car'); setStatus(''); }}>Car</button>
         <button className={mode === 'camera' ? 'on' : ''} onClick={() => { onMode('camera'); setStatus(''); }}>Camera</button>
         <button className={mode === 'boost' ? 'on' : ''} onClick={() => { onMode('boost'); setStatus(''); }}>Boost</button>
+        <button className={mode === 'nearMiss' ? 'on' : ''} onClick={() => { onMode('nearMiss'); setStatus(''); }}>Near miss</button>
       </div>
       <button aria-label="Close" onClick={onClose}><X size={14} /></button>
     </div>
@@ -156,7 +179,6 @@ export default function App() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const [night, setNight] = useState(false);
-  const [autoShift, setAutoShift] = useState(false);
   // Day look panel (dev): live daytime mood settings, mirrored into the shared dayLook object the scene reads.
   const [look, setLook] = useState<DayLook>({ ...dayLook });
   const [showLook, setShowLook] = useState(false);
@@ -168,19 +190,38 @@ export default function App() {
   const changeCamera = (next: CameraTuning) => { applyCameraTuning(next); setCameraValues(next); };
   const [boostValues, setBoostValues] = useState<BoostTuning>({ ...boostTuning });
   const changeBoost = (next: BoostTuning) => { applyBoostTuning(next); setBoostValues(next); };
+  const [nearMissValues, setNearMissValues] = useState<NearMissLook>({ ...nearMissLook });
+  const changeNearMiss = (next: NearMissLook) => { Object.assign(nearMissLook, next); setNearMissValues(next); };
+  // While the Near miss tab is open its grade stays on screen, so it can be tuned without chasing near misses.
+  useEffect(() => { cinematicState.preview = showLook && lookMode === 'nearMiss'; }, [showLook, lookMode]);
   const [carValues, setCarValues] = useState<CarTuning>(() => Object.fromEntries(Object.keys(CAR_TUNING_SAVED).map(key => [key, CAR_CONFIG[key as keyof CarTuning]])) as CarTuning);
   const changeCar = (next: CarTuning) => { Object.assign(CAR_CONFIG, next); setCarValues(next); };
-  // Day and night cycle by themselves while you drive: each phase lasts a few minutes. The button still switches
-  // at any time, and a manual switch restarts the count for the new phase.
+  // The time of day runs as one slow clock (dayCycle.ts, advanced by the scene). Each frame the sky gradient
+  // takes its colours from it, the stars fade with it, and the page switches to its night styling halfway.
+  const mainRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (!started || paused) return;
-    const timer = window.setTimeout(() => { setAutoShift(true); setNight(value => !value); }, DAY_CYCLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [started, paused, night]);
+    let frame = 0;
+    const tick = () => {
+      const sky = skyAt({ top: dayLook.skyTop, horizon: dayLook.skyHorizon }, { top: nightLook.skyTop, horizon: nightLook.skyHorizon });
+      const n = nightAmount();
+      const style = mainRef.current?.style;
+      style?.setProperty('--sky-top', sky.top);
+      style?.setProperty('--sky-horizon', sky.horizon);
+      style?.setProperty('--night-amount', n.toFixed(3));
+      // The pale sun glow in the sky is a daytime thing only: gone as soon as sunset colours start.
+      style?.setProperty('--sun-glow', ((1 - n) * (1 - twilight()) ** 3).toFixed(3));
+      setNight(n > 0.5);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const [cameraMode, setCameraMode] = useState(0);
   const [resetKey, setResetKey] = useState(0);
   const [help, setHelp] = useState(false);
   const [ready, setReady] = useState(false);
+  // The intro reveal waits until the loading screen starts fading away.
+  const [revealed, setRevealed] = useState(false);
   const [data, setData] = useState<Telemetry>(initialLoopCar);
   const [gamepad, setGamepad] = useState(false);
   const [muted, setMutedState] = useState(false);
@@ -189,32 +230,66 @@ export default function App() {
   const [streakLevel, setStreakLevel] = useState(0);
   const streakMessages = ['Smooth driving', 'Nice line', 'Clean drive', 'Great flow', 'On a roll', 'Cruising', 'Road master', 'Zen mode'];
   const [streakShown, setStreakShown] = useState(false);
-  // Traffic scoring: clipping a car from the side pays and gets a compliment; a head-on hit costs points and gets condolences.
+  // Traffic notes match what the camera shows: a red smash (the slow-motion crash) costs points, a grey near
+  // miss pays, a clip from the side pays a little, a soft bump costs a little, and under boost every hit pays.
+  // They stay short and quiet: slow nudges score without a note, and a lesser note never covers a bigger one
+  // that is still on screen.
+  type NoteKind = keyof typeof NOTE_TEXT;
   const [score, setScore] = useState(0);
-  const [hitNote, setHitNote] = useState<{ id: number; kind: 'side' | 'front'; points: number; text: string } | null>(null);
+  const [hitNote, setHitNote] = useState<{ id: number; kind: NoteKind; points: number; text: string; badge?: string } | null>(null);
+  // Driver level: positive points and streaks add XP (see progression.ts); it is kept between visits.
+  const [xp, setXp] = useState(loadXp);
+  const level = levelFor(xp);
+  const shownLevel = useRef(level.level);
   const hitCount = useRef(0);
   const hitTimer = useRef<number | undefined>(undefined);
-  const hitMessages = {
-    side: ['Nice flick!', 'Clean sideswipe!', 'Pinball pro!', 'Smooth knock!'],
-    front: ['Ouch, our condolences.', 'Rough head-on hit.', 'Sorry for your loss.', 'Oof, that one hurt.'],
-  };
-  // A negative hit tints the frame red for the length of the crash cut-in (restarted on every new crash).
-
-  // Under boost every hit is a win: the car is a bulldozer, so no condolences, only awe (and bonus points).
-  const boostMessages = ['Who even are you?!', 'Absolute unit!', 'Out of my way!', 'Unstoppable!', 'Bulldozer mode!', 'Way too strong!'];
+  const shownNote = useRef<{ rank: number; until: number }>({ rank: 0, until: 0 });
+  const lastText = useRef('');
+  const showNote = useCallback((kind: NoteKind, rawPoints: number, quiet: boolean, badge?: string) => {
+    // Early levels are kinder: good moves pay a little more and crashes cost less (see difficulty.ts).
+    const points = Math.round(rawPoints * (rawPoints > 0 ? difficulty.bonus : difficulty.penalty));
+    if (kind !== 'level') setScore(total => total + points);
+    if (points > 0 && kind !== 'level') setXp(total => total + points);
+    const rank = NOTE_RANK[kind];
+    const now = performance.now();
+    if (quiet || (now < shownNote.current.until && rank < shownNote.current.rank)) return;
+    const fresh = NOTE_TEXT[kind].filter(text => text !== lastText.current);
+    const options = fresh.length ? fresh : NOTE_TEXT[kind];
+    const text = options[Math.floor(Math.random() * options.length)];
+    lastText.current = text;
+    shownNote.current = { rank, until: now + 1400 };
+    setHitNote({ id: hitCount.current++, kind, points, text, badge });
+    window.clearTimeout(hitTimer.current);
+    hitTimer.current = window.setTimeout(() => setHitNote(null), kind === 'level' ? 3000 : 2200);
+  }, []);
+  // A level-up takes the caption slot over anything else, with the new title.
+  useEffect(() => {
+    saveXp(xp);
+    setDifficultyLevel(level.level);
+    if (level.level > shownLevel.current) { showNote('level', 0, false, `${level.level} · ${level.title}`); earnBoost(car.current, BOOST_EARN.levelUp); }
+    shownLevel.current = level.level;
+  }, [xp, level.level, level.title, showNote]);
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
     const magnitude = Math.round(hit.speed * 2) + 5;
-    const points = hit.boosted ? Math.round(magnitude * 1.5) : hit.kind === 'side' ? magnitude : -magnitude;
-    const count = hitCount.current++;
-    const messages = hit.boosted ? boostMessages : hitMessages[hit.kind];
-    setScore(total => total + points);
-    setHitNote({ id: count, kind: hit.boosted ? 'side' : hit.kind, points, text: messages[count % messages.length] });
-    window.clearTimeout(hitTimer.current);
-    hitTimer.current = window.setTimeout(() => setHitNote(null), 2200);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (hit.boosted) showNote('boost', Math.round(magnitude * 1.5), false);
+    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) showNote('smash', -(Math.round(hit.closing * 2) + 5), false);
+    else if (hit.kind === 'side') { showNote('flick', magnitude, hit.speed < QUIET_HIT_SPEED); if (hit.speed >= QUIET_HIT_SPEED) earnBoost(car.current, BOOST_EARN.flick); }
+    else showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED);
+  }, [showNote]);
+  // A drift pays for how long and how fast it slid; longer ones get bigger words.
+  const handleDrift = useCallback((drift: DriftScore) => {
+    showNote(drift.time >= 3.5 ? 'hugeDrift' : drift.time >= 2 ? 'bigDrift' : 'drift', Math.round(drift.time * drift.speed * 1.2), false);
+    earnBoost(car.current, BOOST_EARN.drift + BOOST_EARN.driftPerSecond * drift.time);
+  }, [showNote]);
+  // Near misses pay more the faster the pass and the thinner the gap.
+  const handleNearMiss = useCallback((miss: NearMiss) => {
+    showNote('near', Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5, false);
+    earnBoost(car.current, BOOST_EARN.nearMiss);
+  }, [showNote]);
   useEffect(() => {
     if (streakLevel === 0) { setStreakShown(false); return; }
+    setXp(total => total + streakXp(streakLevel));
+    earnBoost(car.current, BOOST_EARN.streak);
     setStreakShown(true);
     const timer = setTimeout(() => setStreakShown(false), JUICE_CONFIG.streakShowTime * 1000);
     return () => clearTimeout(timer);
@@ -242,7 +317,7 @@ export default function App() {
   const dataRef = useRef(data);
   dataRef.current = data;
   const speedText = useRef<HTMLElement>(null);
-  const speedArc = useRef<SVGPathElement>(null);
+  const speedArc = useRef<SVGCircleElement>(null);
   useEffect(() => {
     let frame = 0, last = performance.now(), value = 0, velocity = 0;
     const tick = (now: number) => {
@@ -252,7 +327,7 @@ export default function App() {
       value += velocity * dt;
       const shown = Math.max(0, value);
       if (speedText.current) speedText.current.textContent = formatNumber(shown);
-      if (speedArc.current) speedArc.current.setAttribute('stroke-dasharray', `${Math.min(shown / (CAR_CONFIG.maxSpeed * 3.6), 1) * 100} 100`);
+      if (speedArc.current) speedArc.current.setAttribute('stroke-dasharray', `${Math.min(shown / (CAR_CONFIG.maxSpeed * 3.6), 1) * 75} 100`);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -353,36 +428,45 @@ export default function App() {
     onPointerCancel: () => { controls.current[key] = false; },
     onLostPointerCapture: () => { controls.current[key] = false; },
   });
-  return <main className={`app scale-study ${night ? 'night' : ''} ${autoShift ? 'slow-shift' : ''} ${started ? 'playing' : 'intro'} ${ready ? 'ready' : ''}`} style={{ '--sky-top': look.skyTop, '--sky-horizon': look.skyHorizon, '--night-top': nightValues.skyTop, '--night-horizon': nightValues.skyHorizon, '--aurora': nightValues.aurora, '--boost-tint': boostValues.tintColour, '--boost-tint-opacity': boostValues.tintOpacity } as CSSProperties}>
+  return <main ref={mainRef} className={`app scale-study ${night ? 'night' : ''} ${started ? 'playing' : 'intro'} ${revealed ? 'ready' : ''}`} style={{ '--night-top': nightValues.skyTop, '--night-horizon': nightValues.skyHorizon, '--aurora': nightValues.aurora, '--boost-tint': boostValues.tintColour, '--boost-tint-opacity': boostValues.tintOpacity } as CSSProperties}>
     {showLook && <LookPanel
       mode={lookMode}
-      onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night') { setAutoShift(false); setNight(mode === 'night'); } }}
-      look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues }[lookMode]}
-      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS }[lookMode]}
-      colours={lookMode === 'boost' ? BOOST_TUNING_COLOURS : undefined}
-      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED }[lookMode]}
-      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning' }[lookMode]}
+      onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
+      look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues }[lookMode]}
+      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS }[lookMode]}
+      colours={lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : undefined}
+      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED }[lookMode]}
+      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look' }[lookMode]}
       onChange={values => {
         if (lookMode === 'day') changeLook(values as DayLook);
         else if (lookMode === 'night') changeNightLook(values as NightLook);
         else if (lookMode === 'car') changeCar(values as unknown as CarTuning);
         else if (lookMode === 'camera') changeCamera(values as unknown as CameraTuning);
-        else changeBoost(values as unknown as BoostTuning);
+        else if (lookMode === 'boost') changeBoost(values as unknown as BoostTuning);
+        else changeNearMiss(values as unknown as NearMissLook);
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><NightSky /><SceneBoundary><Scene started={started} paused={paused || help} night={night} nightFade={autoShift ? AUTO_SHIFT_SECONDS : undefined} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><NightSky /><SceneBoundary><Scene started={started} paused={paused || help} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className="topbar">
-      <a href="#" className="brand" aria-label="Wander, home" onClick={e => { e.preventDefault(); setStarted(false); setPaused(false); reset(); }}>
-        <div className="brand-icon"><svg viewBox="0 0 32 32" fill="none"><path d="M5 26 12 6h8l7 20h-6c-1-7-3-11-5-13-2 2-4 6-5 13H5Z" stroke="currentColor" strokeWidth="1.8" /><path d="M13 9h6M3 28h26" stroke="currentColor" strokeWidth="1.4" /></svg></div>
-        <div><strong dir="ltr">Wander<span>.</span></strong><small>DRIVE · DISCOVER</small></div>
-      </a>
+      {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
+          (centre, driving only), and the settings with pause (right). No logo while driving. */}
+      {started
+        ? <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
+          <span className="level-number" key={level.level}>{level.level}</span>
+          <div><strong>{level.title}</strong><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i><small>{level.into} / {level.need} XP</small></div>
+        </div>
+        : <a href="#" className="brand" aria-label="Wander, home" onClick={e => e.preventDefault()}>
+          <LogoMark size={46} />
+          <div><strong dir="ltr">Wander<span>.</span></strong><small>DRIVE · DISCOVER</small></div>
+        </a>}
+      {started && <div className="score-pill" aria-label={`Score ${score}`}><span>Score</span><b key={score}>{formatNumber(score)}</b></div>}
       {stuckHint
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
         : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
       <nav className="toolbar" aria-label="Game settings">
-        <button aria-label={night ? 'Switch to evening' : 'Switch to night'} title={night ? 'Evening' : 'Night'} onClick={() => { setAutoShift(false); setNight(n => !n); }}>{night ? <Sun /> : <Moon />}</button>
+        <button aria-label={night ? 'Switch to evening' : 'Switch to night'} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>
         {import.meta.env.DEV && <button aria-label="Day look" title="Day look" className={showLook ? 'active' : ''} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         <button className={cameraMode ? 'active' : ''} aria-label="Change camera view" title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
@@ -403,15 +487,35 @@ export default function App() {
     </section>}
 
     {started && <>
-      <div className="speedometer"><svg className="speed-arc" viewBox="0 0 160 130"><path d="M 24 112 A 65 65 0 1 1 136 112" className="arc-track" /><path d="M 24 112 A 65 65 0 1 1 136 112" className="arc-fill" pathLength="100" strokeDasharray="0 100" ref={speedArc} /></svg><div className="speed-readout"><strong ref={speedText}>0</strong><small>km/h</small></div><div className="gear"><span>{car.current.speed < -0.1 ? 'R' : 'D'}</span><b>{formatNumber(data.distance)} m driven</b></div><div className="throttle-bar" aria-hidden="true"><span style={{ transform: `scaleX(${data.throttle ?? 0})` }} /></div><div className={`boost-bar${data.boosting ? ' firing' : ''}`} aria-label="Boost meter"><span style={{ transform: `scaleX(${data.boost ?? 1})` }} /></div></div>
-      {hitNote && <div key={hitNote.id} className={`hit-note ${hitNote.kind}`} role="status">{hitNote.text} <b>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b></div>}
-      {streakShown && <div key={streakLevel} className="streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
-      <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="score-chip">Score <b>{score}</b></span><span><kbd>Space</kbd> Brake</span><span><kbd>Shift</kbd> Boost</span><span><kbd>F</kbd> Back to road</span><span><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
+      <Coach active={!paused && !help && !roadWarning && !stuckHint} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={(data.boost ?? 1) >= 1 && !data.boosting} />
+      <div className="speedometer">
+        <svg className="speed-dial" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27" pathLength="100" fill="none" className="arc-track" /><circle cx="32" cy="32" r="27" pathLength="100" fill="none" className="arc-fill" strokeDasharray="0 100" ref={speedArc} /></svg>
+        <div className="speed-readout"><strong ref={speedText}>0</strong><small>km/h</small></div>
+        <span className="speed-label"><b>{car.current.speed < -0.1 ? 'R' : 'D'}</b>{formatNumber(data.distance)} m</span>
+      </div>
+      <BoostGauge car={car} controls={controls} offroad={!!data.offroad} />
+      {hitNote && <div key={hitNote.id} className={`hit-note ${/drift/i.test(hitNote.kind) ? `drift ${hitNote.kind}` : hitNote.kind}`} role="status">{hitNote.text} <b>{hitNote.badge ?? `${hitNote.points > 0 ? '+' : ''}${hitNote.points}`}</b></div>}
+      {/* One line of captions at a time: a traffic note takes the slot over a streak. */}
+      {streakShown && !hitNote && <div key={streakLevel} className="hit-note streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
+      <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="key-hint"><kbd>Space</kbd> Brake</span><span className="key-hint"><kbd>Shift</kbd> Boost</span><span className="key-hint"><kbd>F</kbd> Back to road</span><span className="key-hint"><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
       <div className="touch-controls" aria-label="Touch controls"><SteeringWheel controls={controls} /><div className="pedals"><button className="reverse-touch" aria-label="Reverse" {...touch('back')}><ArrowDown /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button><button className="gas-touch" aria-label="Accelerate" {...touch('forward')}>Gas</button></div></div>
     </>}
 
-    <footer className="page-footer"><span>WANDER · TAKE THE LONG WAY</span></footer>
-    {started && paused && !help && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title"><span className="eyebrow">TAKE A BREATHER</span><h2 id="pause-title">The road will be here.</h2><p>Whenever you're ready, keep circling.</p><button autoFocus className="primary" onClick={() => setPaused(false)}>Resume drive <Play size={18} /></button><button className="text-button" onClick={() => { setStarted(false); setPaused(false); }}>Back to globe <ChevronLeft size={15} /></button></section></div>}
+    {!started && <footer className="page-footer"><span>WANDER · TAKE THE LONG WAY</span></footer>}
+    {started && paused && !help && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+      <span className="eyebrow">PAUSED</span><h2 id="pause-title">The road will be here.</h2>
+      <div className="pause-stats">
+        <div><small>Score</small><b>{formatNumber(score)}</b></div>
+        <div><small>Level {level.level}</small><b>{level.title}</b><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i></div>
+        <div><small>Driven</small><b>{formatNumber(data.distance)} m</b></div>
+      </div>
+      <button autoFocus className="primary" onClick={() => setPaused(false)}>Resume drive <Play size={18} /></button>
+      <div className="modal-row">
+        <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
+        <button className="secondary" onClick={() => { setStarted(false); setPaused(false); }}><ChevronLeft size={15} /> Back to globe</button>
+      </div>
+    </section></div>}
     {help && <Help close={() => setHelp(false)} />}
+    <LoadingScreen ready={ready} onLeave={() => setRevealed(true)} />
   </main>;
 }

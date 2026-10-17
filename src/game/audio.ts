@@ -129,3 +129,22 @@ export function updateAudio(speedRatio: number, throttle: number, drift: number,
   glide(engineGain.gain, on ? JUICE_CONFIG.engineVolume * (0.45 + pedal * 0.55) : 0, now, 0.1);
   glide(squealGain.gain, on ? JUICE_CONFIG.squealVolume * drift * Math.min(ratio * 2, 1) : 0, now, 0.05);
 }
+
+// Boost ready: a soft, bright two-note rise (a fifth), quiet enough to sit under the engine.
+export function playBoostReady() {
+  if (!graph || muted) return;
+  const { context, master } = graph;
+  const now = context.currentTime;
+  [[660, 0], [990, 0.09]].forEach(([frequency, delay]) => {
+    const tone = context.createOscillator();
+    tone.type = 'triangle';
+    tone.frequency.value = frequency;
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0, now + delay);
+    gain.gain.linearRampToValueAtTime(JUICE_CONFIG.whooshVolume * 0.55, now + delay + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.35);
+    tone.connect(gain).connect(master);
+    tone.start(now + delay);
+    tone.stop(now + delay + 0.4);
+  });
+}

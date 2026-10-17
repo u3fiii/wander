@@ -28,4 +28,4 @@ function lookSaver(route: string, file: string): Plugin {
   };
 }
 
-export default defineConfig({ plugins: [react(), lookSaver('/__day-look', './src/game/dayLook.json'), lookSaver('/__night-look', './src/game/nightLook.json'), lookSaver('/__car-tuning', './src/game/carTuning.json'), lookSaver('/__camera-tuning', './src/game/cameraTuning.json'), lookSaver('/__boost-tuning', './src/game/boostTuning.json')], build: { chunkSizeWarningLimit: 1100 } });
+export default defineConfig({ plugins: [react(), lookSaver('/__day-look', './src/game/dayLook.json'), lookSaver('/__night-look', './src/game/nightLook.json'), lookSaver('/__car-tuning', './src/game/carTuning.json'), lookSaver('/__camera-tuning', './src/game/cameraTuning.json'), lookSaver('/__boost-tuning', './src/game/boostTuning.json'), lookSaver('/__near-miss-look', './src/game/nearMissLook.json')], build: { chunkSizeWarningLimit: 1100 } });

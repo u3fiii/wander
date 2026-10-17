@@ -25,10 +25,8 @@
 }
 
 /* sky-gradient */
-.scene{background:radial-gradient(ellipse 40% 19% at var(--boost-light-x,50%) 25%,color-mix(in srgb,var(--boost-pink,transparent) var(--boost-pink-strength,0%),transparent) 0,transparent 100%),radial-gradient(ellipse 100% 55% at 50% 0%,color-mix(in srgb,var(--boost-violet,transparent) var(--boost-violet-strength,0%),transparent) 0,transparent 100%),radial-gradient(circle at 18% 8%,rgba(241,253,246,.96) 0,rgba(214,248,247,.62) 13%,rgba(214,248,247,0) 31%),linear-gradient(180deg,var(--sky-top,#72cef0) 0%,color-mix(in srgb,var(--sky-top,#72cef0) 50%,var(--sky-horizon,#e6f7f3)) 52%,var(--sky-horizon,#e6f7f3) 100%)}
-/* Night sky cross-fades over the day sky instead of switching. */
-.scene::before{content:'';position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1.6s ease;background:linear-gradient(180deg,var(--night-top,#07162d) 0%,color-mix(in srgb,var(--night-top,#07162d) 60%,var(--night-horizon,#77726f)) 56%,var(--night-horizon,#77726f) 100%)}
-.night .scene::before{opacity:1}
+.scene{background:radial-gradient(ellipse 40% 19% at var(--boost-light-x,50%) 25%,color-mix(in srgb,var(--boost-pink,transparent) var(--boost-pink-strength,0%),transparent) 0,transparent 100%),radial-gradient(ellipse 100% 55% at 50% 0%,color-mix(in srgb,var(--boost-violet,transparent) var(--boost-violet-strength,0%),transparent) 0,transparent 100%),radial-gradient(circle at 18% 8%,rgba(241,253,246,calc(.5 * var(--sun-glow,1))) 0,rgba(214,248,247,calc(.28 * var(--sun-glow,1))) 13%,rgba(214,248,247,0) 31%),linear-gradient(180deg,var(--sky-top,#72cef0) 0%,color-mix(in srgb,var(--sky-top,#72cef0) 50%,var(--sky-horizon,#e6f7f3)) 52%,var(--sky-horizon,#e6f7f3) 100%)}
+/* The sky colours themselves move through the day (see dayCycle.ts), so no separate night layer is needed. */
 
 /* A single, restrained edge vignette keeps overview and driving color
    consistent. Atmospheric depth is handled by Three.js fog in the scene. */
@@ -93,29 +91,53 @@
 .boost-bar span{display:block;height:100%;background:#e2795a;transform-origin:left;transition:transform .1s linear}
 .boost-bar.firing span{background:#f4b544}
 
-/* Smooth-driving streak: pops in with a little overshoot each time it levels up. */
-@keyframes streak-pop{0%{opacity:0;transform:translateX(-50%) scale(.6)}60%{opacity:1;transform:translateX(-50%) scale(1.12)}100%{opacity:1;transform:translateX(-50%) scale(1)}}
-.streak{position:absolute;bottom:58px;left:50%;transform:translateX(-50%);padding:8px 16px;border-radius:40px;background:#173e3ce6;color:#f7efda;font-size:12px;letter-spacing:.3px;box-shadow:0 6px 20px #173e3c33;pointer-events:none;animation:streak-pop .45s cubic-bezier(.34,1.56,.64,1) both}
-.streak b{color:#f4b544;margin-left:4px}
-/* Hit notes: green pill for a side clip, red for a head-on hit. They rise in softly, the points pop a beat
-   later, and the pill drifts up and fades before it is removed (shown for 2.2 s). */
-.hit-note{position:absolute;bottom:104px;left:50%;display:flex;align-items:center;gap:8px;padding:8px 14px 8px 16px;border-radius:40px;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;pointer-events:none;white-space:nowrap;transform:translateX(-50%);animation:hit-note-in .42s cubic-bezier(.2,.9,.3,1.15) both,hit-note-out .4s ease-in 1.8s forwards}
-.hit-note b{padding:2px 8px;border-radius:20px;background:#ffffff2e;font-weight:700;animation:hit-points-pop .5s cubic-bezier(.3,1.6,.5,1) .12s both}
-.hit-note.side{background:#2f9a62;box-shadow:0 6px 22px #2f9a6255,inset 0 1px 0 #ffffff33}
-.hit-note.front{background:#c94a33;box-shadow:0 6px 22px #c94a3355,inset 0 1px 0 #ffffff33}
-.hit-note.front{animation:hit-note-in .42s cubic-bezier(.2,.9,.3,1.15) both,hit-note-shake .36s ease-in-out .38s,hit-note-out .4s ease-in 1.8s forwards}
-@keyframes hit-note-in{0%{opacity:0;transform:translate(-50%,10px) scale(.94)}100%{opacity:1;transform:translate(-50%,0) scale(1)}}
-@keyframes hit-note-out{to{opacity:0;transform:translate(-50%,-10px) scale(.98)}}
-@keyframes hit-points-pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
-@keyframes hit-note-shake{0%,100%{transform:translate(-50%,0)}25%{transform:translate(calc(-50% - 3px),0)}75%{transform:translate(calc(-50% + 3px),0)}}
-@media (prefers-reduced-motion:reduce){.hit-note,.hit-note.front,.hit-note b{animation:none}}
+/* Captions: one pill style for every note. The colour says what happened and the motion says how it felt:
+   a smash slams in and shakes hard, a bump wobbles once, a near miss whooshes in sideways, a clip or a boost hit
+   pops with a bounce, and a driving streak rises in with a light sweeping across it. All leave the same way. */
+.hit-note{position:absolute;bottom:58px;left:50%;translate:-50% 0;display:flex;align-items:center;gap:8px;padding:8px 14px 8px 16px;border-radius:40px;color:#fff;font-size:13px;font-weight:600;letter-spacing:.2px;pointer-events:none;white-space:nowrap;overflow:hidden;box-shadow:0 6px 22px var(--note-glow),inset 0 1px 0 #ffffff33;background:var(--note);animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both,note-out .4s ease-in 1.8s forwards}
+.hit-note b{padding:2px 8px;border-radius:20px;background:#ffffff2e;font-weight:700;animation:points-pop .5s cubic-bezier(.3,1.6,.5,1) .12s both}
+.hit-note.flick{--note:#2f9a62;--note-glow:#2f9a6255}
+.hit-note.boost{--note:#e07a3c;--note-glow:#e07a3c66;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both,note-throb .5s ease-in-out .45s 2,note-out .4s ease-in 1.8s forwards}
+.hit-note.streak{--note:#2b7d9a;--note-glow:#2b7d9a55;animation:note-rise .5s cubic-bezier(.2,.9,.3,1.1) both,note-out .4s ease-in 1.8s forwards}
+.hit-note.streak b{color:#ffd77a}
+.hit-note.streak::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#ffffff55 50%,transparent 70%);translate:-100% 0;animation:note-shine .9s ease-out .35s both}
+.hit-note.near{--note:#3b3f44;--note-glow:#0005;letter-spacing:.6px;animation:note-whoosh .55s cubic-bezier(.16,1,.3,1) both,note-out .4s ease-in 1.8s forwards}
+.hit-note.near b{background:#ffffff22;color:#f2f2f2}
+.hit-note.bump{--note:#a8774c;--note-glow:#a8774c44;animation:note-pop .4s cubic-bezier(.3,1.6,.5,1) both,note-wobble .45s ease-in-out .3s,note-out .4s ease-in 1.8s forwards}
+.hit-note.smash{--note:#c94a33;--note-glow:#c94a3366;animation:note-slam .3s cubic-bezier(.2,.9,.3,1) both,note-shake .5s linear .25s,note-out .4s ease-in 1.8s forwards}
+.hit-note.smash b,.hit-note.bump b{animation:points-drop .45s cubic-bezier(.3,1.6,.5,1) .15s both}
+@keyframes note-pop{0%{opacity:0;transform:translateY(10px) scale(.7)}100%{opacity:1;transform:none}}
+@keyframes note-rise{0%{opacity:0;transform:translateY(16px)}100%{opacity:1;transform:none}}
+@keyframes note-shine{to{translate:100% 0}}
+@keyframes note-whoosh{0%{opacity:0;transform:translateX(-70px) skewX(-18deg);filter:blur(3px)}60%{opacity:1;transform:translateX(6px) skewX(4deg);filter:blur(0)}100%{opacity:1;transform:none}}
+@keyframes note-slam{0%{opacity:0;transform:scale(1.6)}100%{opacity:1;transform:none}}
+@keyframes note-shake{0%,100%{transform:none}10%{transform:translate(-6px,1px) rotate(-2deg)}25%{transform:translate(5px,-1px) rotate(1.5deg)}40%{transform:translate(-4px,1px) rotate(-1deg)}55%{transform:translate(3px,0) rotate(.6deg)}70%{transform:translate(-2px,0)}85%{transform:translate(1px,0)}}
+@keyframes note-wobble{0%,100%{transform:none}30%{transform:rotate(-3deg)}65%{transform:rotate(2deg)}}
+@keyframes note-throb{50%{transform:scale(1.07)}}
+@keyframes note-out{to{opacity:0;transform:translateY(-10px) scale(.98)}}
+@keyframes points-pop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes points-drop{0%{transform:translateY(-10px);opacity:0}100%{transform:none;opacity:1}}
+.hit-note.drift{--note:#7a4fc4;--note-glow:#7a4fc455;animation:note-drift .6s cubic-bezier(.2,.9,.3,1.1) both,note-out .4s ease-in 1.8s forwards}
+.hit-note.hugeDrift{animation:note-drift .6s cubic-bezier(.2,.9,.3,1.1) both,note-throb .5s ease-in-out .6s 2,note-out .4s ease-in 1.8s forwards}
+@keyframes note-drift{0%{opacity:0;transform:translateX(60px) rotate(6deg) skewX(14deg)}55%{opacity:1;transform:translateX(-8px) rotate(-2deg) skewX(-4deg)}100%{opacity:1;transform:none}}
+.hit-note.level{--note:#d69b2d;--note-glow:#f4b54488;font-size:15px;padding:10px 16px 10px 20px;animation:note-slam .35s cubic-bezier(.2,.9,.3,1) both,note-throb .6s ease-in-out .35s 2,note-out .4s ease-in 2.6s forwards}
+.hit-note.level b{background:#fff;color:#8a5a12}
+.hit-note.level::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#ffffff77 50%,transparent 70%);translate:-100% 0;animation:note-shine 1s ease-out .3s 2 both}
+@media (prefers-reduced-motion:reduce){.hit-note,.hit-note b,.hit-note::after{animation:none!important}}
+
+/* Driver level, at the left of the header while driving: the number, the title and a thin XP bar. */
+.level-badge{display:flex;align-items:center;gap:10px;padding:6px 15px 6px 6px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;pointer-events:none;z-index:3;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
+.level-number{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--gold);color:#3a2a08;box-shadow:inset 0 1px 0 #ffffff66;font-size:15px;font-weight:900;animation:points-pop .5s cubic-bezier(.3,1.6,.5,1) both}
+.level-badge strong{display:block;font-size:12px;font-weight:700;letter-spacing:.2px}
+.level-badge i{display:block;width:110px;height:4px;margin:4px 0 3px;border-radius:2px;background:#ffffff26;overflow:hidden}
+.level-badge i span{display:block;height:100%;background:var(--gold);transform-origin:left;transition:transform .5s cubic-bezier(.2,.9,.3,1)}
+.level-badge small{display:block;font-size:9px;color:#ffffffa6;font-variant-numeric:tabular-nums}
+
 .score-chip{color:#f7efda;font-size:12px;opacity:.85}
 .score-chip b{color:#f4b544;margin-left:2px}
-@media (prefers-reduced-motion:reduce){.streak{animation:none}}
 
 /* Night sky */
-.night-sky{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity 1.6s ease;overflow:hidden}
-.night .night-sky{opacity:1}
+.night-sky{position:absolute;inset:0;pointer-events:none;opacity:var(--night-amount,0);overflow:hidden}
 .stars{position:absolute;left:0;top:0;width:1px;height:1px;border-radius:50%;animation:star-twinkle 4.5s ease-in-out infinite}
 .stars-1{animation-duration:6.5s;animation-delay:-2s}
 .stars-2{animation-duration:3.2s;animation-delay:-1s;filter:drop-shadow(0 0 3px #fff6dd)}
@@ -145,15 +167,15 @@
 /* Phone layout for the intro: the globe stays whole at the top, and the copy and start button sit in a panel at the
    bottom, on a soft cream fade, so nothing sits on top of the planet. */
 @media (max-width:600px){
-  .intro .intro-card{left:22px;right:22px;top:auto;bottom:22px;width:auto;translate:none;text-align:center}
+  .intro .intro-card{left:22px;right:22px;top:auto;bottom:42px;width:auto;translate:none;text-align:center}
   .intro .intro-card h1{font-size:min(15vw,64px);line-height:1.02;margin:10px 0 8px;white-space:nowrap}
   .intro .intro-card p{font-size:15px;line-height:1.55;margin:0 0 14px}
   .intro .intro-card .start-button{width:100%;max-width:none;min-height:52px}
   .intro .intro-controls{display:none}
   .intro .intro-caption{display:none}
-  .intro .vignette{background:linear-gradient(0deg,#f5f0db 0%,#f5f0dbf0 40%,#f5f0db00 72%)}
-  /* Night: the class sits on the same element as .intro, so these use .night.intro. A black fade with white text. */
-  .night.intro .vignette{background:linear-gradient(0deg,#000 0%,#000000f0 40%,#00000000 72%)}
+  /* The fade is the sky's own colour (it follows the time of day), so the copy sits on sky, not on a pale band. */
+  .intro .vignette,.night.intro .vignette{--veil:color-mix(in srgb,var(--sky-top,#72cef0) 55%,var(--sky-horizon,#e6f7f3));background:linear-gradient(0deg,var(--veil) 0%,color-mix(in srgb,var(--veil) 94%,transparent) 40%,color-mix(in srgb,var(--veil) 0%,transparent) 72%)}
+  /* Night: the class sits on the same element as .intro, so these use .night.intro. White text on the dark sky. */
   .night.intro .intro-card h1,.night.intro .intro-card h1 .ch{color:#fff}
   .night.intro .intro-card p,.night.intro .intro-card .eyebrow{color:#ffffffd9}
   .night.intro .intro-card .start-button{background:#fff;border-color:#fff;color:#111}
@@ -188,9 +210,178 @@
 .day-look-actions button{flex:1;border:1px solid #c9c6b4;background:#fff;border-radius:8px;padding:7px 0;font-size:12px}
 .day-look-actions .apply{background:#1e5954;border-color:#1e5954;color:#fff8dd;font-weight:600}
 .day-look-status{margin:8px 0 0;font-size:11px;color:#5d6b5f}
-.day-look-tabs{display:flex;gap:4px;background:#ece8d8;border-radius:9px;padding:3px}
+.day-look-tabs{display:flex;flex-wrap:wrap;gap:4px;background:#ece8d8;border-radius:9px;padding:3px}
 .day-look-tabs button{border:0;background:none;border-radius:7px;padding:4px 9px;font-size:12px;width:auto;height:auto;color:#5d6b5f}
 .day-look-tabs button.on{background:#fff;color:#173e3c;font-weight:600;box-shadow:0 1px 3px #0001}
-.slow-shift .scene::before,.slow-shift .night-sky{transition-duration:10s}
-.slow-shift .intro-card h1,.slow-shift .intro-card p,.slow-shift .intro-card .eyebrow,.slow-shift .intro-controls,.slow-shift .intro-caption{transition-duration:10s}
 .day-look-group{margin:14px 0 2px;font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#8a6a3c}
+
+
+/* Driving screen: the rest of the HUD speaks the captions' language. Rounded pills of dark glass with a light top
+   edge and a soft shadow, white text at weight 600, gold for numbers, and the captions' colours where they mean
+   the same thing (green to go, red to stop). Things pop in with the same springy ease. */
+:root{--glass:#18232bcc;--glass-line:#ffffff1f;--glass-shadow:0 6px 22px #0b161a40,inset 0 1px 0 #ffffff26;--gold:#f4b544;--go:#2f9a62;--stop:#c94a33}
+.toolbar button{background:var(--glass);border-color:var(--glass-line);color:#fff;box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
+.toolbar button:hover{background:#24323be6;transform:translateY(-2px) scale(1.06)}
+.toolbar button.active{background:var(--gold);border-color:var(--gold);color:#3a2a08}
+.driving-actions{gap:8px;color:#fff}
+.driving-actions button,.driving-actions>span{display:flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);color:#fff;font-size:11px;font-weight:600;letter-spacing:.2px;box-shadow:var(--glass-shadow);backdrop-filter:blur(8px)}
+.driving-actions button{transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
+.driving-actions button:hover{background:#24323be6;transform:scale(1.05)}
+.driving-actions button svg{width:14px;height:14px}
+.driving-actions .key-hint{background:#18232b80;color:#ffffffd9;font-weight:500;box-shadow:inset 0 1px 0 #ffffff1a}
+.driving-actions kbd{height:19px;min-width:19px;background:#ffffff1f;border:1px solid #ffffff33;border-bottom-width:1px;border-radius:6px;color:#fff;font-size:9px}
+.driving-actions .gamepad-hint{background:var(--go);color:#fff}
+/* The off-road warning gets the pill's weight and top edge too. */
+.road-warning{font-size:13px;padding:9px 17px;border:1px solid #ffffff55}
+/* Touch controls: glass pedals, gas green and brake red, that squash a little when pressed; a glass wheel. */
+.pedals button{background:var(--glass);color:#fff;border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);font-weight:700;transition:transform .15s cubic-bezier(.3,1.6,.5,1),filter .15s}
+.pedals .gas-touch{background:#2f9a62e6}
+.pedals .brake-touch{background:#c94a33e6}
+.touch-controls .pedals button:active{transform:scale(.93);filter:brightness(1.15)}
+.touch-controls .pedals .gas-touch:active{background:#2f9a62e6}
+.touch-controls .pedals .brake-touch:active{background:#c94a33e6}
+.touch-controls .pedals .reverse-touch:active{background:var(--glass)}
+.steering-wheel{background:radial-gradient(circle at 40% 35%,#2a3842d9,#18232bcc);border-color:#f5f2e8e6;box-shadow:var(--glass-shadow);backdrop-filter:blur(8px)}
+.steering-wheel::before,.steering-wheel::after{background:#f5f2e8b3}
+.steering-wheel .wheel-top{background:var(--gold)}
+@media (prefers-reduced-motion:reduce){.level-badge,.score-pill,.score-pill b,.modal{animation:none}}
+
+/* Header while driving: level on the left, score in the middle, settings and pause on the right, all one height. */
+.brand .logo-mark{display:block;filter:drop-shadow(0 4px 10px #1f3e3026)}
+.score-pill{position:absolute;left:50%;translate:-50% 0;display:flex;align-items:center;gap:9px;height:44px;padding:0 20px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
+.score-pill span{font-size:10px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;opacity:.7}
+.score-pill b{display:inline-block;min-width:2ch;color:var(--gold);font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;animation:points-pop .4s cubic-bezier(.3,1.6,.5,1) both}
+.playing .toolbar button{width:44px;height:44px}
+.road-warning{top:calc(100% - 8px)}
+@media (max-width:600px){
+  .level-badge{padding:4px 10px 4px 4px;gap:7px}.level-number{width:28px;height:28px;font-size:13px}
+  .level-badge strong{font-size:11px}.level-badge i{width:64px}.level-badge small{display:none}
+  .playing .toolbar button{width:34px;height:34px}
+  .score-pill{top:calc(100% - 6px);height:36px;padding:0 15px}.score-pill b{font-size:16px}
+  .road-warning{top:calc(100% + 38px)}
+}
+
+/* Pause and help: cards of the same dark glass as the HUD, so they read the same over the start screen and the
+   road. Gold eyebrow and main button, glass secondary buttons, and they pop in like the captions. */
+.modal-shade{background:#0b161a59;backdrop-filter:blur(8px)}
+.modal{background:#18232be8;color:#fff;border:1px solid #ffffff1f;border-radius:26px;box-shadow:0 24px 80px #0b161a80,inset 0 1px 0 #ffffff26;backdrop-filter:blur(16px);animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
+.modal .eyebrow{color:var(--gold);font-weight:700;letter-spacing:2px;font-size:11px}
+.modal h2{color:#fff;font-weight:800;letter-spacing:-.8px}
+.modal p{color:#ffffffb3}
+.modal .primary{width:100%;gap:12px;background:var(--gold);border-color:var(--gold);color:#2b1d05;border-radius:999px;font-size:16px;box-shadow:0 8px 24px #f4b54440,inset 0 1px 0 #ffffff66;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
+.modal .primary:hover{background:#ffc65e;transform:scale(1.02)}
+.modal-row{display:flex;gap:10px;margin-top:10px}
+.modal .secondary{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:#ffffff14;border:1px solid #ffffff26;color:#fff;font-size:13px;font-weight:600;box-shadow:inset 0 1px 0 #ffffff1a;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
+.modal .secondary:hover{background:#ffffff24;transform:scale(1.03)}
+.modal .secondary svg{width:15px;height:15px}
+.close-button{background:#ffffff14;border:1px solid #ffffff26;color:#fff;right:20px;left:auto}
+.close-button:hover{background:#ffffff24}
+.help-row{color:#ffffffd9;padding:9px 0;margin:0;border-bottom:1px solid #ffffff12}
+.help-row:last-of-type{border-bottom:0}
+.modal kbd{background:#ffffff1f;border:1px solid #ffffff33;border-bottom-width:1px;border-radius:6px;color:#fff}
+.pause-modal{width:440px;padding:38px 32px 30px}
+.pause-modal h2{margin:12px 0 22px}
+.pause-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:22px;text-align:left}
+.pause-stats>div{padding:12px 13px;border-radius:16px;background:#ffffff0f;border:1px solid #ffffff14;min-width:0}
+.pause-stats small{display:block;font-size:9px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#ffffff8c}
+.pause-stats b{display:block;margin-top:4px;font-size:16px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.pause-stats>div:first-child b{color:var(--gold);font-size:20px}
+.pause-stats i{display:block;height:3px;margin-top:7px;border-radius:2px;background:#ffffff26;overflow:hidden}
+.pause-stats i span{display:block;height:100%;background:var(--gold);transform-origin:left}
+@media (max-width:600px){.pause-modal{padding:30px 20px 22px}.pause-stats{gap:6px}.pause-stats>div{padding:10px}.pause-stats b{font-size:13px}.pause-stats>div:first-child b{font-size:16px}.modal-row{flex-direction:column}}
+
+/* First-drive coach: a small glass pill under the header. Key caps light gold while pressed (and keep a gold
+   edge once used), the throttle bar under the pill fills with speed, and a finished step turns green with a
+   tick. Later tips use the same pill. */
+.coach{position:absolute;top:96px;left:50%;translate:-50% 0;z-index:3;display:flex;align-items:center;gap:10px;height:40px;padding:0 8px 0 10px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both;transition:background .25s}
+.coach.ticked{background:#2f9a62e6;border-color:#ffffff33}
+.coach.tip{animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both,note-out .5s ease-in 5s forwards}
+.coach.tip.ticked{animation:none}
+.coach-keys{display:flex;align-items:center;gap:3px}
+.coach kbd{height:24px;min-width:24px;background:#ffffff1f;border:1px solid #ffffff33;border-bottom-width:3px;border-radius:7px;color:#fff;font-size:10px;font-weight:700;transition:transform .08s,background .12s,border-color .12s,color .12s}
+.coach kbd.used{border-color:var(--gold)}
+.coach kbd.on{background:var(--gold);border-color:#c98f22;color:#2b1d05;transform:translateY(2px);border-bottom-width:1px}
+.coach:not(.ticked):not(.working) kbd:not(.used){animation:key-nudge 1.6s ease-in-out .6s infinite}
+@keyframes key-nudge{0%,70%,100%{transform:none}80%{transform:translateY(2px)}90%{transform:none}}
+.coach button{display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:50%;background:#ffffff14;color:#ffffffb3}
+.coach button:hover{background:#ffffff26;color:#fff}
+.coach button svg{width:13px;height:13px}
+.coach-tick{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:#fff;color:#2f9a62;font-size:13px;animation:points-pop .4s cubic-bezier(.3,1.6,.5,1) both}
+.coach-fill{position:absolute;left:0;right:0;bottom:0;height:3px;background:#ffffff14}
+.coach-fill span{display:block;height:100%;background:var(--gold);transform-origin:left;transition:transform .2s linear}
+.coach.ticked .coach-fill span{background:#fff}
+@media (max-width:600px){.coach{top:112px;font-size:11px}}
+@media (prefers-reduced-motion:reduce){.coach,.coach-tick,.coach kbd{animation:none!important}}
+
+/* Boost meter, beside the speedometer: a glass disc with a ring that fills while charging (soft orange), turns
+   gold and breathes when ready (with a pop and a ripple the moment it gets there), and drains in fire colours
+   while burning. Off the road a ready boost dims. It is a button too (tap to boost on touch screens). */
+.boost-gauge{position:absolute;right:218px;bottom:104px;width:72px;height:72px;padding:0;border-radius:50%;display:grid;place-items:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;touch-action:none;user-select:none;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .3s,opacity .3s,filter .3s}
+.boost-gauge:hover{transform:scale(1.05)}
+.boost-gauge .boost-dial{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible}
+.boost-track{fill:none;stroke:#ffffff1f;stroke-width:4}
+.boost-ring{fill:none;stroke:#e2795a;stroke-width:4;stroke-linecap:round;transition:stroke .3s}
+.boost-flame{width:36px;height:36px;color:#ffffff66;transition:color .3s,translate .3s}
+.boost-seconds{font-style:normal;font-weight:700;font-variant-numeric:tabular-nums;color:#fff}
+.boost-label{position:absolute;top:calc(100% + 7px);left:50%;translate:-50% 0;display:flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.5px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffbf;transition:background .3s,color .3s}
+.boost-label kbd{height:16px;min-width:16px;padding:0 4px;font-size:8px;font-weight:700;background:#2b1d0526;border:1px solid #2b1d0540;border-radius:4px;color:#2b1d05}
+.boost-gauge.ready .boost-ring{stroke:var(--gold)}
+.boost-gauge.ready .boost-flame{color:var(--gold);filter:drop-shadow(0 0 6px #f4b544aa)}
+.boost-gauge.ready .boost-label{background:var(--gold);border-color:var(--gold);color:#2b1d05}
+.boost-gauge.ready{animation:boost-pop .55s cubic-bezier(.3,1.6,.5,1),boost-breathe 1.8s ease-in-out .55s infinite}
+.boost-gauge.burning{background:#3a1a12d9;transform:scale(1.06)}
+.boost-gauge.burning .boost-ring{stroke:url(#boost-fire)}
+.boost-gauge.burning .boost-flame{color:#ffb347;filter:drop-shadow(0 0 8px #ff7a2ecc);animation:flame-flicker .14s ease-in-out infinite alternate}
+.boost-gauge.burning .boost-label{background:#e07a3c;border-color:#e07a3c;color:#fff}
+.boost-gauge.blocked{opacity:.6;filter:saturate(.35);animation:none}
+.boost-gauge.blocked .boost-label{background:var(--glass);border-color:var(--glass-line);color:#ffffffbf}
+.boost-ripple{position:absolute;inset:-2px;border-radius:50%;border:3px solid var(--gold);pointer-events:none;animation:boost-ripple .75s ease-out forwards}
+@keyframes boost-pop{0%{transform:scale(1)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes boost-breathe{0%,100%{box-shadow:var(--glass-shadow),0 0 0 0 #f4b54400}50%{box-shadow:var(--glass-shadow),0 0 22px 2px #f4b54466}}
+@keyframes boost-ripple{from{transform:scale(1);opacity:1}to{transform:scale(1.9);opacity:0}}
+@keyframes flame-flicker{from{transform:scale(1) rotate(-4deg)}to{transform:scale(1.14) rotate(4deg)}}
+/* With a keyboard: the speedometer and the boost meter sit side by side in the bottom-right corner, the row of
+   buttons and key hints in the bottom-left. */
+/* Side by side and about the same size: the speedometer is scaled down a little and the boost meter up, with
+   their centres level. */
+@media (pointer:fine){
+  .playing .speedometer{right:42px;bottom:62px;width:114px;height:114px}
+  .speed-readout strong{font-size:36px}
+  .boost-gauge{width:114px;height:114px;right:178px;bottom:62px}
+  .boost-flame{width:44px;height:44px}
+  .boost-label{font-size:11px;padding:4px 12px}
+}
+@media (pointer:coarse){.playing .speedometer{right:18px;bottom:222px}.boost-gauge{right:128px;bottom:234px}.boost-label kbd{display:none}}
+@media (pointer:coarse) and (max-width:600px){.playing .speedometer{bottom:240px;width:84px;height:84px}.speed-readout strong{font-size:26px}.boost-gauge{right:114px;bottom:251px;width:62px;height:62px}.boost-flame{width:26px;height:26px}}
+@media (prefers-reduced-motion:reduce){.boost-gauge,.boost-gauge.ready,.boost-flame,.boost-ripple{animation:none!important}}
+
+/* Phones: the header shows just the logo mark, so it never crowds the buttons. */
+@media (max-width:600px){.brand>div{display:none}.brand .logo-mark{width:42px;height:42px}}
+/* A top-up from a skilled move: "+22%" floats up off the boost meter and the ring flashes. */
+.boost-gain{position:absolute;top:-6px;right:-10px;padding:2px 8px;border-radius:20px;background:var(--gold);color:#2b1d05;font-size:11px;font-weight:800;box-shadow:0 4px 12px #f4b54466;pointer-events:none;animation:boost-gain 1.1s cubic-bezier(.2,.9,.3,1) forwards}
+@keyframes boost-gain{0%{opacity:0;transform:translateY(8px) scale(.6)}20%{opacity:1;transform:translateY(0) scale(1.1)}35%{transform:scale(1)}100%{opacity:0;transform:translateY(-22px)}}
+.boost-gauge:has(.boost-gain) .boost-ring{filter:drop-shadow(0 0 6px #f4b544)}
+@media (prefers-reduced-motion:reduce){.boost-gain{animation:none;opacity:0}}
+
+/* Speedometer in the boost meter's style: the same glass disc and ring (a gold arc that opens at the bottom and
+   fills with speed), the number in the middle, and a label pill under it with the gear and the distance. */
+.speedometer{right:42px;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;text-align:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;filter:none;transform:none}
+.speed-dial{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible;transform:rotate(135deg)}
+.speed-dial circle{fill:none;stroke-width:4;stroke-linecap:round}
+.speed-dial .arc-track{stroke:#ffffff1f;stroke-dasharray:75 100}
+.speed-dial .arc-fill{stroke:var(--gold);transition:stroke-dasharray .15s}
+.speed-readout{position:static;width:auto;display:flex;flex-direction:column;align-items:center}
+.speed-readout strong{font-size:30px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+.speed-readout small{margin-top:3px;font-size:9px;font-weight:600;letter-spacing:1px;opacity:.7}
+.speed-label{position:absolute;top:calc(100% + 7px);left:50%;translate:-50% 0;display:flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;border-radius:20px;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.3px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffbf;font-variant-numeric:tabular-nums}
+.speed-label b{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#ffffff1f;color:#fff;font-size:9px}
+@media (pointer:fine){.speed-label{font-size:11px;padding:4px 12px 4px 5px}}
+
+/* Driving: the restart button and key hints move to the bottom-left (the meters own the bottom-right), and a
+   soft dark fade along the bottom edge keeps them readable over bright ground. On narrower screens the key hints
+   step aside so they never run under the centred captions. */
+.driving-actions{right:auto;left:38px}
+@media (max-width:1250px){.driving-actions .key-hint{display:none}}
+@media (max-width:600px){.driving-actions{left:18px}}
+.playing .vignette{background:linear-gradient(0deg,#0b161a66 0%,#0b161a2e 11%,#0b161a00 24%),radial-gradient(circle at 48% 43%,transparent 61%,rgba(35,61,52,.1) 100%)}
+.night.playing .vignette{background:linear-gradient(0deg,#05090f80 0%,#05090f33 11%,#05090f00 24%),radial-gradient(circle at 48% 43%,transparent 56%,rgba(7,20,34,.2) 100%)}

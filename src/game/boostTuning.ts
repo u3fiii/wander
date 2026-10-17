@@ -40,7 +40,7 @@ export const BOOST_TUNING_SLIDERS: Array<{ key: keyof BoostTuning; label: string
   { key: 'tintOpacity', label: 'Edge tint strength', min: 0, max: 1, step: 0.01 },
   { key: 'flameLength', label: 'Flame length', min: 0, max: 3, step: 0.05 },
   { key: 'duration', label: 'Boost length (s)', min: 1, max: 12, step: 0.1, group: 'Drive' },
-  { key: 'cooldown', label: 'Cooldown (s)', min: 0, max: 15, step: 0.1 },
+  { key: 'cooldown', label: 'Cooldown (s)', min: 0, max: 60, step: 0.5 },
   { key: 'speedFactor', label: 'Top speed ×', min: 1, max: 2, step: 0.01 },
   { key: 'accelFactor', label: 'Acceleration ×', min: 1, max: 4, step: 0.05 },
   { key: 'pullBack', label: 'Camera pull back', min: 0, max: 12, step: 0.1, group: 'Camera' },

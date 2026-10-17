@@ -15,6 +15,7 @@ import { dayLook } from './dayLook';
 import { nightLook } from './nightLook';
 import { cameraTuning } from './cameraTuning';
 import { boostTuning } from './boostTuning';
+import { nearMissLook } from './nearMissLook';
 
 const settings = ART_DIRECTION.introDepthOfField;
 const driving = ART_DIRECTION.drivingDepthOfField;
@@ -59,6 +60,7 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
   const amount = useRef(1);
   const boostAmount = useRef(0);
   const boostColour = useMemo(() => new THREE.Color(), []);
+  const nearMissTint = useMemo(() => new THREE.Color(), []);
   const center = useRef(new THREE.Vector3());
   const surface = useRef(new THREE.Vector3());
   const carFocus = useRef(new THREE.Vector3());
@@ -91,6 +93,17 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     // A cool hit gets its own look here (uGrade 0..1): faded, bleached colour with firm contrast and very soft
     // light glowing out of the highlights.
     output.material.uniforms.uGrade = { value: 0 };
+    // A held drift (0..1): a little more contrast and a deeper vignette, nothing else.
+    output.material.uniforms.uDrift = { value: 0 };
+    // The night version of that look (see nearMissLook.ts): uNight blends to it, the rest are its panel settings.
+    output.material.uniforms.uNight = { value: 0 };
+    output.material.uniforms.uNmTint = { value: new THREE.Vector3(0.44, 0.84, 0.88) };
+    output.material.uniforms.uNmTintMix = { value: 0.6 };
+    output.material.uniforms.uNmExposure = { value: 1.5 };
+    output.material.uniforms.uNmContrast = { value: 1.15 };
+    output.material.uniforms.uNmLift = { value: 0.1 };
+    output.material.uniforms.uNmGlow = { value: 0.55 };
+    output.material.uniforms.uNmDay = { value: 1 };
     // A gentle warm grade for daytime (strength 0..1), fading out at night.
     output.material.uniforms.uWarm = { value: 0 };
     // Day saturation from the Day look panel (1 = unchanged), faded out at night.
@@ -108,7 +121,7 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
     // Head-on crashes (the red ones) push the contrast up instead (uImpact 0..1).
     output.material.uniforms.uImpact = { value: 0 };
     output.material.fragmentShader = output.material.fragmentShader
-      .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform float uGrade;\nuniform vec2 uTexel;\nuniform float uImpact;\nuniform float uWarm;\nuniform float uBoost;\nuniform vec3 uBoostTint;\nuniform float uBoostMix;\nuniform float uBoostSat;\nuniform float uSat;\nuniform float uFringe;')
+      .replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\nuniform float uGrade;\nuniform float uDrift;\nuniform float uNight;\nuniform vec3 uNmTint;\nuniform float uNmTintMix;\nuniform float uNmExposure;\nuniform float uNmContrast;\nuniform float uNmLift;\nuniform float uNmGlow;\nuniform float uNmDay;\nuniform vec2 uTexel;\nuniform float uImpact;\nuniform float uWarm;\nuniform float uBoost;\nuniform vec3 uBoostTint;\nuniform float uBoostMix;\nuniform float uBoostSat;\nuniform float uSat;\nuniform float uFringe;')
       .replace('gl_FragColor = texture2D( tDiffuse, vUv );', `gl_FragColor = texture2D( tDiffuse, vUv );
  gl_FragColor.rgb /= max(gl_FragColor.a, 0.00001);
  gl_FragColor.a = mix(smoothstep(0.4, 0.95, gl_FragColor.a), gl_FragColor.a, clamp(uFringe, 0.0, 1.0));
@@ -132,7 +145,21 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
    tone = mix(tone, vec3(0.97, 0.94, 0.88), 0.12);
    float softLuma = dot(softLight, vec3(0.299, 0.587, 0.114));
    vec3 bloom = vec3(smoothstep(0.45, 1.0, softLuma)) * vec3(1.0, 0.98, 0.94);
-   vec3 graded = tone + bloom * 0.35 * (1.0 - tone * 0.5);
+   vec3 graded = mix(gl_FragColor.rgb, tone + bloom * 0.35 * (1.0 - tone * 0.5), uNmDay);
+   // Night: draining the colour from a dark frame only leaves mud, so instead the frame is brightened and mapped
+   // onto a tint ramp (deep tint in the shadows to a pale tint in the light, on a square-root curve that opens up
+   // the darks), the shadows are lifted in the tint, and lamps and headlights bloom.
+   if (uNight > 0.001) {
+     vec3 lit = gl_FragColor.rgb * uNmExposure;
+     float litLuma = dot(lit, vec3(0.299, 0.587, 0.114));
+     vec3 ramp = mix(uNmTint * 0.12, mix(uNmTint, vec3(1.0), 0.55), smoothstep(0.0, 0.85, sqrt(litLuma)));
+     vec3 night = mix(lit, ramp, uNmTintMix);
+     night = (night - 0.2) * uNmContrast + 0.2;
+     night += uNmTint * uNmLift * (1.0 - clamp(night, 0.0, 1.0));
+     float glowLuma = dot(softLight, vec3(0.299, 0.587, 0.114)) * uNmExposure;
+     night += smoothstep(0.2, 0.8, glowLuma) * mix(uNmTint, vec3(1.0), 0.5) * uNmGlow * (1.0 - clamp(night, 0.0, 1.0) * 0.5);
+     graded = mix(graded, night, uNight);
+   }
    gl_FragColor.rgb = clamp(mix(gl_FragColor.rgb, graded, uGrade), 0.0, 1.0);
  }
  float edge = smoothstep(0.3, 0.85, length((vUv - 0.5) * vec2(1.0, 1.2)));
@@ -162,7 +189,8 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
  vec2 vignetteOffset = vUv - 0.5;
  float vignette = 1.0 - dot(vignetteOffset, vignetteOffset) * 0.5;
  gl_FragColor.rgb *= mix(vec3(1.0), vec3(1.035, 1.0, 0.94), smoothstep(0.35, 1.0, finishLuma));
- gl_FragColor.rgb *= mix(1.0, vignette, 0.55);
+ gl_FragColor.rgb = mix(gl_FragColor.rgb, clamp((gl_FragColor.rgb - 0.45) * 1.12 + 0.45, 0.0, 1.0), uDrift);
+ gl_FragColor.rgb *= mix(1.0, vignette, 0.55 + 0.5 * uDrift);
  gl_FragColor.rgb *= gl_FragColor.a;
  if (uImpact > 0.001) {
    // The sky is CSS behind the canvas, so the crash's dark red vignette is laid over it here too.
@@ -241,7 +269,19 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
       uniforms.aperture.value = THREE.MathUtils.lerp(uniforms.aperture.value, crashSettings.aperture, crash);
       uniforms.maxblur.value = THREE.MathUtils.lerp(uniforms.maxblur.value, crashSettings.maxBlur, crash);
     }
-    current.output.material.uniforms.uGrade.value = cinematicState.cool;
+    const uniforms = current.output.material.uniforms;
+    uniforms.uGrade.value = cinematicState.preview ? 1 : cinematicState.cool;
+    uniforms.uNight.value = nightState.blend;
+    uniforms.uDrift.value = cinematicState.drift;
+    // Raw picker values, like the boost colour.
+    nearMissTint.setStyle(nearMissLook.nightTint, THREE.LinearSRGBColorSpace);
+    uniforms.uNmTint.value.set(nearMissTint.r, nearMissTint.g, nearMissTint.b);
+    uniforms.uNmTintMix.value = nearMissLook.nightTintMix;
+    uniforms.uNmExposure.value = nearMissLook.nightExposure;
+    uniforms.uNmContrast.value = nearMissLook.nightContrast;
+    uniforms.uNmLift.value = nearMissLook.nightLift;
+    uniforms.uNmGlow.value = nearMissLook.nightGlow;
+    uniforms.uNmDay.value = nearMissLook.dayStrength;
     // During a boost the daytime warmth and haze step back, so the boost's orange isn't stacked into yellow.
     const daytime = (1 - nightState.blend) * (1 - boostAmount.current);
     current.output.material.uniforms.uWarm.value = daytime * dayLook.warmFilter;
