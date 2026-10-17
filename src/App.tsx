@@ -4,7 +4,6 @@ import type { CSSProperties, ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Trophy, Map as MapIcon, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
 import LoadingScreen from './LoadingScreen';
-import { LogoMark } from './Logo';
 import Coach from './Coach';
 import BoostGauge from './BoostGauge';
 import type { DriftScore, Telemetry } from './game/Scene';
@@ -812,7 +811,6 @@ export default function App() {
           </div>
         </div>
         : <a href="#" className="brand" aria-label="Wander, home" onClick={e => e.preventDefault()}>
-          <span className="brand-mark"><LogoMark size={34} /></span>
           <div><strong dir="ltr">Wander<span>.</span></strong><small>Just drive</small></div>
         </a>}
       {/* Score and hearts side by side in the middle of the header. The score counts up smoothly (distance adds

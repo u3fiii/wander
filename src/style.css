@@ -950,3 +950,7 @@
 @media (max-width:600px){.intro-card h1{font-size:min(12vw,58px)}}
 .intro-level{position:relative;top:-8px;padding:3.6px 10px 3.6px 3.6px;gap:6.3px;font-size:8.6px}
 .intro-level .level-number{width:20px;height:20px;font-size:9.4px}
+
+/* Header: no logo mark; the "Wander." wordmark is the logo. On phones the tagline is dropped and the name stays. */
+.topbar .brand{padding:0 20px}
+@media (max-width:600px){.topbar .brand>div{display:flex}.topbar .brand small{display:none}.topbar .brand{width:auto;padding:0 15px}.topbar .brand strong{font-size:17px}}
