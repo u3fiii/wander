@@ -10,20 +10,22 @@ const DUSK_START = CYCLE.day, NIGHT_START = DUSK_START + CYCLE.dusk, DAWN_START 
 const JUMP_SECONDS = 0.3;
 
 // Sky keyframes between the day and night colours (which come from the look panel): [progress, top, horizon].
-const DUSK_SKY: Array<[number, string, string]> = [
+type Keys = Array<[number, string, string]>;
+const DUSK_SKY: Keys = [
   [0.25, '#79b9dc', '#ffe0a8'], // golden hour
   [0.5, '#4f6ea8', '#ff9e6e'], // sunset
   [0.72, '#2a2d5c', '#c0667a'], // dusk
   [0.88, '#161a38', '#4a3a5e'], // blue hour
 ];
-const DAWN_SKY: Array<[number, string, string]> = [
+const DAWN_SKY: Keys = [
   [0.3, '#1a2142', '#5b4a78'], // first light
   [0.55, '#4d74ad', '#ffb48a'], // sunrise
   [0.8, '#6fb9e0', '#fde6c4'], // morning
 ];
 
 // `jump` is the button's cross-fade: from one time of day to another, `progress` 0..1.
-export const cycle = { time: 20, jump: null as { from: number; to: number; progress: number } | null };
+// `day` counts whole turns of the clock.
+export const cycle = { time: 20, day: 0, jump: null as { from: number; to: number; progress: number } | null };
 
 const smooth = (t: number) => t * t * (3 - 2 * t);
 const step = (t: number, from: number, to: number) => smooth(Math.min(1, Math.max(0, (t - from) / (to - from))));
@@ -65,7 +67,7 @@ function twilightAt(time: number) {
 }
 
 const parse = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
-const mixHex = (a: string, b: string, t: number) => {
+export const mixHex = (a: string, b: string, t: number) => {
   const x = parse(a), y = parse(b);
   return `#${x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
 };
@@ -89,7 +91,7 @@ function skyAtTime(day: Sky, night: Sky, time: number): Sky {
   const { name, p } = part(time);
   if (name === 'day') return day;
   if (name === 'night') return night;
-  const keys: Array<[number, string, string]> = name === 'dusk'
+  const keys: Keys = name === 'dusk'
     ? [[0, day.top, day.horizon], ...DUSK_SKY, [1, night.top, night.horizon]]
     : [[0, night.top, night.horizon], ...DAWN_SKY, [1, day.top, day.horizon]];
   return along(keys, p);
@@ -101,8 +103,12 @@ export function advanceCycle(dt: number, running: boolean) {
   const jump = cycle.jump;
   if (jump) {
     jump.progress += dt / JUMP_SECONDS;
-    if (jump.progress >= 1) { cycle.time = jump.to; cycle.jump = null; }
-  } else if (running) cycle.time = wrap(cycle.time + dt);
+    if (jump.progress >= 1) { if (jump.to < jump.from) cycle.day++; cycle.time = jump.to; cycle.jump = null; }
+  } else if (running) {
+    const next = cycle.time + dt;
+    if (next >= TOTAL) cycle.day++;
+    cycle.time = wrap(next);
+  }
 }
 
 // The sun/moon button: cross-fade straight to full night or full day. Pressed again mid-fade, it turns round.

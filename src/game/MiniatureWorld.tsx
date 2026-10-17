@@ -4,6 +4,7 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { withDraco } from './gltf';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
 import { GLOBE_RADIUS, roadLatitude, sphereNormal, spherePoint } from './globe';
 import { MOUNTAIN_SITES, REGIONS, ROAD_PATHS, WORLD_SETTINGS, distanceToRoadNetwork, isLandAt, landInfluence, regionInfluence, roadPathFrame, roadPoint, roadSurfaceElevation, terrainElevation, groundNormal, terrainPoint } from './worldMap';
@@ -13,6 +14,7 @@ import { nightState } from './nightState';
 import { nightLook } from './nightLook';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
 import { ART_DIRECTION } from './artDirection';
+import { batchStatic } from './staticBatch';
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
 import type { PaletteKey } from './palette';
 import type { FaceSample } from './recolor';
@@ -468,7 +470,7 @@ function LoopRoad() {
 }
 
 function JapaneseBridgeGarden() {
-  const gltf = useLoader(GLTFLoader, japaneseGardenUrl);
+  const gltf = useLoader(GLTFLoader, japaneseGardenUrl, withDraco);
   const { bridge, rocks, groundCover, flowers, lanterns } = useMemo(() => {
     gltf.scene.updateMatrixWorld(true);
     logMaterials('japanese garden', gltf.scene);
@@ -1186,7 +1188,7 @@ function Town() {
 }
 
 function LowPolyTrees() {
-  const gltf = useLoader(GLTFLoader, lowPolyTreesUrl);
+  const gltf = useLoader(GLTFLoader, lowPolyTreesUrl, withDraco);
   const templates = useMemo(() => {
     logMaterials('low poly trees', gltf.scene);
     gltf.scene.updateMatrixWorld(true);
@@ -1324,7 +1326,7 @@ function LowPolyTrees() {
 const ROPE_BRIDGE = { from: [0.75, 5.023], to: [0.495, 5.352], naturalLength: 7.5 } as const;
 
 function RopeBridge() {
-  const gltf = useLoader(GLTFLoader, ropeBridgeUrl);
+  const gltf = useLoader(GLTFLoader, ropeBridgeUrl, withDraco);
   const placement = useMemo(() => {
     const model = gltf.scene.clone(true);
     logMaterials('rope bridge', model);
@@ -1375,7 +1377,7 @@ const wellRoleColor = (name: string): PaletteKey => {
 };
 
 function Well() {
-  const gltf = useLoader(GLTFLoader, wellUrl);
+  const gltf = useLoader(GLTFLoader, wellUrl, withDraco);
   const placement = useMemo(() => {
     const model = gltf.scene.clone(true);
     logMaterials('well', model);
@@ -1416,7 +1418,7 @@ function Well() {
 const MEADOW_HOUSE = { latitude: 0.22, longitude: 5.53, height: 3.8, rotation: -0.45, radius: 3.4 } as const;
 
 function MeadowHouse() {
-  const gltf = useLoader(GLTFLoader, medievalHouseUrl);
+  const gltf = useLoader(GLTFLoader, medievalHouseUrl, withDraco);
   const placement = useMemo(() => {
     const model = gltf.scene.clone(true);
     model.traverse(child => {
@@ -1537,8 +1539,8 @@ function buildLightPool() {
 }
 
 function StreetFurniture() {
-  const lightsGltf = useLoader(GLTFLoader, streetLightsUrl);
-  const propsGltf = useLoader(GLTFLoader, streetPropsUrl);
+  const lightsGltf = useLoader(GLTFLoader, streetLightsUrl, withDraco);
+  const propsGltf = useLoader(GLTFLoader, streetPropsUrl, withDraco);
   const shared = useMemo(() => {
     const lampHead = new THREE.MeshStandardMaterial({ color: PALETTE.flowerCream, emissive: STREET.lampColor, emissiveIntensity: 0, roughness: 0.6, flatShading: true });
     const pole = paletteMaterial('tires', { roughness: 0.7 });
@@ -1675,7 +1677,7 @@ function StreetFurniture() {
 const STREET_WORK = { roadLongitudes: [0.45, 0.59], side: -1, setback: 5.35, barrierScale: 0.85, coneScale: 0.9 } as const;
 
 function StreetWork() {
-  const gltf = useLoader(GLTFLoader, streetWorkUrl);
+  const gltf = useLoader(GLTFLoader, streetWorkUrl, withDraco);
   const placed = useMemo(() => {
     const prepare = (mesh: THREE.Mesh) => {
       const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
@@ -1793,7 +1795,7 @@ function Boat() {
 const SWIM_RING = { diameter: 1.05, offshore: 2.6, bob: 0.025, spin: 0.15 };
 
 function BeachFloats() {
-  const gltf = useLoader(GLTFLoader, swimRingUrl);
+  const gltf = useLoader(GLTFLoader, swimRingUrl, withDraco);
   const floating = useRef<THREE.Group>(null!);
   const template = useMemo(() => {
     const ring = gltf.scene.clone(true);
@@ -1867,7 +1869,7 @@ const BOULDERS = {
 };
 
 function Boulders() {
-  const gltf = useLoader(GLTFLoader, bouldersUrl);
+  const gltf = useLoader(GLTFLoader, bouldersUrl, withDraco);
   const { templates, materials } = useMemo(() => {
     gltf.scene.updateMatrixWorld(true);
     const materials = BOULDERS.tones.map(jitter => paletteMaterial('roadShoulder', { jitter, vertexColors: true, roughness: 1 }));
@@ -2059,7 +2061,7 @@ function islandGround(mound: THREE.Mesh, bounds: THREE.Box3) {
 }
 
 function PalmIsland({ latitude, longitude }: { latitude: number; longitude: number }) {
-  const gltf = useLoader(GLTFLoader, islandUrl);
+  const gltf = useLoader(GLTFLoader, islandUrl, withDraco);
   const object = useMemo(() => {
     const island = gltf.scene.clone(true);
     let mound: THREE.Mesh | null = null;
@@ -2117,7 +2119,7 @@ function fishingBoatRole({ hue, saturation, lightness }: FaceSample): PaletteKey
 }
 
 function FishingBoat({ latitude, longitude }: { latitude: number; longitude: number }) {
-  const gltf = useLoader(GLTFLoader, fishingBoatUrl);
+  const gltf = useLoader(GLTFLoader, fishingBoatUrl, withDraco);
   const group = useRef<THREE.Group>(null!);
   const model = useMemo(() => {
     const boat = gltf.scene.clone(true);
@@ -2368,7 +2370,7 @@ const planeRoleColor = (role: string): { key: PaletteKey; roughness?: number } =
 };
 
 function Airplane() {
-  const gltf = useLoader(GLTFLoader, planeModelUrl);
+  const gltf = useLoader(GLTFLoader, planeModelUrl, withDraco);
   const group = useRef<THREE.Group>(null!);
   const plane = useMemo(() => {
     const model = gltf.scene.clone(true);
@@ -2468,7 +2470,7 @@ function bendToGlobe(template: THREE.Object3D, rotation: number, scale: number) 
 }
 
 function LowPolyMountains() {
-  const gltf = useLoader(GLTFLoader, mountainModelUrl);
+  const gltf = useLoader(GLTFLoader, mountainModelUrl, withDraco);
   const templates = useMemo(() => {
     gltf.scene.updateMatrixWorld(true);
     const original = gltf.scene.getObjectByName('Mountain');
@@ -2552,11 +2554,33 @@ function Coast() {
   </>;
 }
 
+// Everything that never moves sits under StaticBatch, which merges it into a few big meshes once it has loaded
+// (see staticBatch.ts); things that move or animate stay outside it. `?nobatch` in the address turns it off.
+const BATCHING = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('nobatch');
+function StaticBatch({ children }: { children: React.ReactNode }) {
+  const group = useRef<THREE.Group>(null!);
+  useEffect(() => {
+    if (!BATCHING) return;
+    let undo: (() => void) | undefined;
+    // A frame later, once every child has placed itself.
+    const frame = requestAnimationFrame(() => {
+      const result = batchStatic(group.current, new THREE.Vector3(0, -GLOBE_RADIUS, 0));
+      undo = result.undo;
+      if (import.meta.env.DEV) console.info(`[wander] merged ${result.stats.meshes} static meshes into ${result.stats.batches}`);
+    });
+    return () => { cancelAnimationFrame(frame); undo?.(); };
+  }, []);
+  return <group ref={group}>{children}</group>;
+}
+
 export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
   return <group>
-    <Terrain />
-    <JapaneseBridgeGarden />
-    <LoopRoad />
-    <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boat /><BeachFloats /><Boulders /><Meadow /><Footpaths /><Fireflies /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
+    <StaticBatch>
+      <Terrain />
+      <JapaneseBridgeGarden />
+      <LoopRoad />
+      <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boulders /><Meadow /><Footpaths /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} />
+    </StaticBatch>
+    <Boat /><BeachFloats /><Fireflies /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
   </group>;
 }

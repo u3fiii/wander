@@ -68,9 +68,9 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
   const orientation = useRef(new THREE.Quaternion());
 
   useEffect(() => {
-    if ((!settings.enabled && !driving.enabled) || !ACTIVE_QUALITY.depthOfField || new URLSearchParams(window.location.search).get('introDof') === 'off') return;
+    if ((!settings.enabled && !driving.enabled) || new URLSearchParams(window.location.search).get('introDof') === 'off') return;
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
-    target.samples = Math.min(4, gl.capabilities.maxSamples);
+    target.samples = Math.min(ACTIVE_QUALITY.msaa, gl.capabilities.maxSamples);
     const composer = new EffectComposer(gl, target);
     const color = new RenderPass(scene, camera);
     const bokeh = new SurfaceBokehPass(scene, camera as THREE.PerspectiveCamera, {
@@ -198,6 +198,9 @@ export default function IntroDepthOfField({ zoom, globe, vehicle, car, active }:
    gl_FragColor = vec4(vec3(0.5, 0.05, 0.04) * veil + gl_FragColor.rgb * (1.0 - veil), veil + gl_FragColor.a * (1.0 - veil));
  }
 \t\t}`);
+    // On low quality the blur pass is skipped (it draws the whole scene a second time, for depth); the colour
+    // grades in the output pass still run.
+    bokeh.enabled = ACTIVE_QUALITY.depthOfField;
     composer.addPass(color); composer.addPass(bokeh); composer.addPass(output);
     pipeline.current = { composer, bokeh, output, dispose: () => {
       color.dispose(); bokeh.dispose(); output.dispose(); composer.dispose();

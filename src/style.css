@@ -126,7 +126,7 @@
 @media (prefers-reduced-motion:reduce){.hit-note,.hit-note b,.hit-note::after{animation:none!important}}
 
 /* Driver level, at the left of the header while driving: the number, the title and a thin XP bar. */
-.level-badge{display:flex;align-items:center;gap:10px;padding:6px 15px 6px 6px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;pointer-events:none;z-index:3;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
+.level-badge{display:flex;align-items:center;gap:10px;padding:6px 15px 6px 6px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;pointer-events:none;z-index:3;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
 .level-number{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--gold);color:#3a2a08;box-shadow:inset 0 1px 0 #ffffff66;font-size:15px;font-weight:900;animation:points-pop .5s cubic-bezier(.3,1.6,.5,1) both}
 .level-badge strong{display:block;font-size:12px;font-weight:700;letter-spacing:.2px}
 .level-badge i{display:block;width:110px;height:4px;margin:4px 0 3px;border-radius:2px;background:#ffffff26;overflow:hidden}
@@ -218,13 +218,15 @@
 
 /* Driving screen: the rest of the HUD speaks the captions' language. Rounded pills of dark glass with a light top
    edge and a soft shadow, white text at weight 600, gold for numbers, and the captions' colours where they mean
-   the same thing (green to go, red to stop). Things pop in with the same springy ease. */
-:root{--glass:#18232bcc;--glass-line:#ffffff1f;--glass-shadow:0 6px 22px #0b161a40,inset 0 1px 0 #ffffff26;--gold:#f4b544;--go:#2f9a62;--stop:#c94a33}
-.toolbar button{background:var(--glass);border-color:var(--glass-line);color:#fff;box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
+   the same thing (green to go, red to stop). Things pop in with the same springy ease. No backdrop blur on the
+   HUD: over a scene that changes every frame it has to be redrawn every frame, which is heavy on phones, so the
+   glass is just a little more opaque instead. */
+:root{--glass:#1a252dde;--glass-line:#ffffff1f;--glass-shadow:0 6px 22px #0b161a40,inset 0 1px 0 #ffffff26;--gold:#f4b544;--go:#2f9a62;--stop:#c94a33}
+.toolbar button{background:var(--glass);border-color:var(--glass-line);color:#fff;box-shadow:var(--glass-shadow);transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
 .toolbar button:hover{background:#24323be6;transform:translateY(-2px) scale(1.06)}
 .toolbar button.active{background:var(--gold);border-color:var(--gold);color:#3a2a08}
 .driving-actions{gap:8px;color:#fff}
-.driving-actions button,.driving-actions>span{display:flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);color:#fff;font-size:11px;font-weight:600;letter-spacing:.2px;box-shadow:var(--glass-shadow);backdrop-filter:blur(8px)}
+.driving-actions button,.driving-actions>span{display:flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);color:#fff;font-size:11px;font-weight:600;letter-spacing:.2px;box-shadow:var(--glass-shadow)}
 .driving-actions button{transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
 .driving-actions button:hover{background:#24323be6;transform:scale(1.05)}
 .driving-actions button svg{width:14px;height:14px}
@@ -234,21 +236,21 @@
 /* The off-road warning gets the pill's weight and top edge too. */
 .road-warning{font-size:13px;padding:9px 17px;border:1px solid #ffffff55}
 /* Touch controls: glass pedals, gas green and brake red, that squash a little when pressed; a glass wheel. */
-.pedals button{background:var(--glass);color:#fff;border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);font-weight:700;transition:transform .15s cubic-bezier(.3,1.6,.5,1),filter .15s}
+.pedals button{background:var(--glass);color:#fff;border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);font-weight:700;transition:transform .15s cubic-bezier(.3,1.6,.5,1),filter .15s}
 .pedals .gas-touch{background:#2f9a62e6}
 .pedals .brake-touch{background:#c94a33e6}
 .touch-controls .pedals button:active{transform:scale(.93);filter:brightness(1.15)}
 .touch-controls .pedals .gas-touch:active{background:#2f9a62e6}
 .touch-controls .pedals .brake-touch:active{background:#c94a33e6}
 .touch-controls .pedals .reverse-touch:active{background:var(--glass)}
-.steering-wheel{background:radial-gradient(circle at 40% 35%,#2a3842d9,#18232bcc);border-color:#f5f2e8e6;box-shadow:var(--glass-shadow);backdrop-filter:blur(8px)}
+.steering-wheel{background:radial-gradient(circle at 40% 35%,#2a3842d9,#18232bcc);border-color:#f5f2e8e6;box-shadow:var(--glass-shadow)}
 .steering-wheel::before,.steering-wheel::after{background:#f5f2e8b3}
 .steering-wheel .wheel-top{background:var(--gold)}
 @media (prefers-reduced-motion:reduce){.level-badge,.score-pill,.score-pill b,.modal{animation:none}}
 
 /* Header while driving: level on the left, score in the middle, settings and pause on the right, all one height. */
 .brand .logo-mark{display:block;filter:drop-shadow(0 4px 10px #1f3e3026)}
-.score-pill{position:absolute;left:50%;translate:-50% 0;display:flex;align-items:center;gap:9px;height:44px;padding:0 20px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
+.score-pill{position:absolute;left:50%;translate:-50% 0;display:flex;align-items:center;gap:9px;height:44px;padding:0 20px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
 .score-pill span{font-size:10px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;opacity:.7}
 .score-pill b{display:inline-block;min-width:2ch;color:var(--gold);font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;animation:points-pop .4s cubic-bezier(.3,1.6,.5,1) both}
 .playing .toolbar button{width:44px;height:44px}
@@ -293,7 +295,7 @@
 /* First-drive coach: a small glass pill under the header. Key caps light gold while pressed (and keep a gold
    edge once used), the throttle bar under the pill fills with speed, and a finished step turns green with a
    tick. Later tips use the same pill. */
-.coach{position:absolute;top:96px;left:50%;translate:-50% 0;z-index:3;display:flex;align-items:center;gap:10px;height:40px;padding:0 8px 0 10px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both;transition:background .25s}
+.coach{position:absolute;top:96px;left:50%;translate:-50% 0;z-index:3;display:flex;align-items:center;gap:10px;height:40px;padding:0 8px 0 10px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both;transition:background .25s}
 .coach.ticked{background:#2f9a62e6;border-color:#ffffff33}
 .coach.tip{animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both,note-out .5s ease-in 5s forwards}
 .coach.tip.ticked{animation:none}
@@ -316,12 +318,12 @@
 /* Boost meter, beside the speedometer: a glass disc with a ring that fills while charging (soft orange), turns
    gold and breathes when ready (with a pop and a ripple the moment it gets there), and drains in fire colours
    while burning. Off the road a ready boost dims. It is a button too (tap to boost on touch screens). */
-.boost-gauge{position:absolute;right:218px;bottom:104px;width:72px;height:72px;padding:0;border-radius:50%;display:grid;place-items:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;touch-action:none;user-select:none;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .3s,opacity .3s,filter .3s}
+.boost-gauge{position:absolute;right:218px;bottom:104px;width:72px;height:72px;padding:0;border-radius:50%;display:grid;place-items:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;touch-action:none;user-select:none;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .3s,opacity .3s,filter .3s}
 .boost-gauge:hover{transform:scale(1.05)}
 .boost-gauge .boost-dial{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible}
 .boost-track{fill:none;stroke:#ffffff1f;stroke-width:4}
 .boost-ring{fill:none;stroke:#e2795a;stroke-width:4;stroke-linecap:round;transition:stroke .3s}
-.boost-flame{width:36px;height:36px;color:#ffffff66;transition:color .3s,translate .3s}
+.boost-flame{width:41px;height:41px;color:#ffffff33;transition:color .3s,translate .3s}
 .boost-seconds{font-style:normal;font-weight:700;font-variant-numeric:tabular-nums;color:#fff}
 .boost-label{position:absolute;top:calc(100% + 7px);left:50%;translate:-50% 0;display:flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;white-space:nowrap;font-size:10px;font-weight:700;letter-spacing:.5px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffbf;transition:background .3s,color .3s}
 .boost-label kbd{height:16px;min-width:16px;padding:0 4px;font-size:8px;font-weight:700;background:#2b1d0526;border:1px solid #2b1d0540;border-radius:4px;color:#2b1d05}
@@ -348,11 +350,11 @@
   .playing .speedometer{right:42px;bottom:62px;width:114px;height:114px}
   .speed-readout strong{font-size:36px}
   .boost-gauge{width:114px;height:114px;right:178px;bottom:62px}
-  .boost-flame{width:44px;height:44px}
+  .boost-flame{width:51px;height:51px}
   .boost-label{font-size:11px;padding:4px 12px}
 }
 @media (pointer:coarse){.playing .speedometer{right:18px;bottom:222px}.boost-gauge{right:128px;bottom:234px}.boost-label kbd{display:none}}
-@media (pointer:coarse) and (max-width:600px){.playing .speedometer{bottom:240px;width:84px;height:84px}.speed-readout strong{font-size:26px}.boost-gauge{right:114px;bottom:251px;width:62px;height:62px}.boost-flame{width:26px;height:26px}}
+@media (pointer:coarse) and (max-width:600px){.playing .speedometer{bottom:240px;width:84px;height:84px}.speed-readout strong{font-size:26px}.boost-gauge{right:114px;bottom:251px;width:62px;height:62px}.boost-flame{width:30px;height:30px}}
 @media (prefers-reduced-motion:reduce){.boost-gauge,.boost-gauge.ready,.boost-flame,.boost-ripple{animation:none!important}}
 
 /* Phones: the header shows just the logo mark, so it never crowds the buttons. */
@@ -365,7 +367,7 @@
 
 /* Speedometer in the boost meter's style: the same glass disc and ring (a gold arc that opens at the bottom and
    fills with speed), the number in the middle, and a label pill under it with the gear and the distance. */
-.speedometer{right:42px;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;text-align:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);backdrop-filter:blur(8px);color:#fff;filter:none;transform:none}
+.speedometer{right:42px;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;text-align:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;filter:none;transform:none}
 .speed-dial{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible;transform:rotate(135deg)}
 .speed-dial circle{fill:none;stroke-width:4;stroke-linecap:round}
 .speed-dial .arc-track{stroke:#ffffff1f;stroke-dasharray:75 100}
@@ -385,3 +387,83 @@
 @media (max-width:600px){.driving-actions{left:18px}}
 .playing .vignette{background:linear-gradient(0deg,#0b161a66 0%,#0b161a2e 11%,#0b161a00 24%),radial-gradient(circle at 48% 43%,transparent 61%,rgba(35,61,52,.1) 100%)}
 .night.playing .vignette{background:linear-gradient(0deg,#05090f80 0%,#05090f33 11%,#05090f00 24%),radial-gradient(circle at 48% 43%,transparent 56%,rgba(7,20,34,.2) 100%)}
+
+/* Low-quality devices: the pause and help cards skip the backdrop blur too. */
+.q-low .modal-shade,.q-low .modal{backdrop-filter:none}
+.q-low .modal-shade{background:#0b161a99}
+/* Low-quality devices: no aurora (a large blurred layer) and steady stars. */
+.q-low .aurora{display:none}
+.q-low .stars{animation:none}
+
+/* Phones and tablets: the header keeps only day/night, sound and pause (camera, help and the dev look panel are
+   keyboard-and-mouse things). The cards fit the screen: the shade's single column can shrink, the card takes the
+   width it is given, and the buttons stack at full height. */
+@media (pointer:coarse),(max-width:600px){.toolbar .desktop-only{display:none}}
+.modal-shade{grid-template-columns:minmax(0,1fr)}
+.modal{justify-self:center;width:min(440px,100%)}
+@media (max-width:600px){
+  .modal-shade{padding:16px}
+  .pause-modal{padding:28px 18px 20px;border-radius:22px}
+  .pause-modal h2{font-size:24px;margin:10px 0 18px}
+  .pause-stats{gap:6px;margin-bottom:16px}
+  .pause-stats small{font-size:8px;letter-spacing:1px}
+  .modal-row .secondary{flex:none;width:100%}
+  .modal .primary{min-height:52px;font-size:15px}
+}
+
+/* Rails mode (phones and tablets): each half of the screen below the header steers that way. A round glass
+   button in each bottom corner shows it; held, it turns gold, presses in and gets a soft gold ring, and its half
+   of the screen glows faintly from that edge. The speedometer and boost meter sit together in the middle of the
+   bottom edge, between the buttons, and the captions rise above them. */
+.steer-pads{position:absolute;inset:96px 0 0 0;z-index:2;display:flex;touch-action:none}
+.steer-zone{position:relative;flex:1;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:background .25s}
+.steer-zone.left.held{background:linear-gradient(90deg,#f4b54421,#f4b54400 45%)}
+.steer-zone.right.held{background:linear-gradient(270deg,#f4b54421,#f4b54400 45%)}
+.steer-button{position:absolute;bottom:calc(30px + env(safe-area-inset-bottom));display:grid;place-items:center;width:78px;height:78px;border-radius:50%;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;transition:transform .18s cubic-bezier(.3,1.6,.5,1),background .15s,color .15s,box-shadow .2s}
+.steer-zone.left .steer-button{left:20px}
+.steer-zone.right .steer-button{right:20px}
+.steer-button svg{width:36px;height:36px;stroke-width:2.6}
+.steer-zone.held .steer-button{background:var(--gold);border-color:var(--gold);color:#2b1d05;transform:scale(.9);box-shadow:0 0 0 7px #f4b5442e,var(--glass-shadow)}
+.rails.playing .speedometer{right:auto;left:calc(50% + 7px);bottom:calc(52px + env(safe-area-inset-bottom));width:84px;height:84px;z-index:3}
+.rails .boost-gauge{left:auto;right:calc(50% + 7px);bottom:calc(63px + env(safe-area-inset-bottom));width:62px;height:62px;z-index:3}
+.rails .speed-readout strong{font-size:26px}
+.rails .boost-flame{width:30px;height:30px}
+.rails .hit-note{bottom:calc(178px + env(safe-area-inset-bottom))}
+@media (max-width:380px){.steer-button{width:66px;height:66px}.steer-zone.left .steer-button{left:14px}.steer-zone.right .steer-button{right:14px}}
+@media (prefers-reduced-motion:reduce){.steer-button{transition:none}}
+
+/* Day sky: the odd flock of birds behind the globe, fading out with the night. */
+.day-sky{position:absolute;inset:0;pointer-events:none;overflow:hidden;opacity:calc(1 - var(--night-amount,0))}
+.day-birds{position:absolute;top:22%;left:0;display:flex;gap:6px;animation:birds-fly 70s linear infinite;animation-delay:-20s}
+.day-birds svg{width:16px;height:7px;fill:#2f4a52;opacity:.55;translate:0 calc(var(--i) * 4px - (var(--i) - 2) * (var(--i) - 2) * 3px);animation:wing-flap .5s ease-in-out infinite alternate;animation-delay:calc(var(--i) * -.13s)}
+@keyframes birds-fly{0%{transform:translate(-12vw,0)}35%{transform:translate(112vw,-6vh)}100%{transform:translate(112vw,-6vh)}}
+@keyframes wing-flap{from{transform:scaleY(1)}to{transform:scaleY(.45)}}
+.q-low .day-birds{display:none}
+@media (prefers-reduced-motion:reduce){.day-birds,.day-birds svg{animation:none}}
+
+/* Slow-motion notes: while the cut-in plays the player can only watch, so the note takes the stage. Big, in the
+   middle of the screen, built letter by letter; the points land after the word; it all pulls back and fades as
+   the slow motion lets go.
+   - Crash (red): each letter slams down from huge and blurred with a twist, the word shudders, its edges split
+     red and blue like a hard hit, and a red shockwave rings out behind it.
+   - Near miss (grey): the letters slam down the same way, in a cool white, and a streak of light sweeps across
+     behind them (no colour split, shudder or shockwave). */
+.big-note{position:absolute;left:50%;top:40%;translate:-50% -50%;z-index:6;display:flex;flex-direction:column;align-items:center;gap:12px;pointer-events:none;white-space:nowrap;animation:big-note-out .3s cubic-bezier(.5,0,.75,0) 1.2s forwards}
+.big-note strong{position:relative;display:block;font-size:clamp(40px,7.5vw,92px);font-weight:900;letter-spacing:.03em;line-height:1;color:#fff}
+.big-note strong span{display:inline-block}
+.big-note b{padding:6px 18px;border-radius:40px;font-size:clamp(20px,2.6vw,30px);font-weight:900;font-variant-numeric:tabular-nums;animation:big-points .55s cubic-bezier(.3,1.7,.5,1) both;animation-delay:calc(var(--i) * 55ms + 120ms)}
+.big-note.smash strong{text-shadow:4px 0 0 #ff3b3bcc,-4px 0 0 #3bd5ffaa,0 10px 40px #0008;animation:big-shudder .5s linear .35s}
+.big-note.smash strong span{animation:letter-slam .5s cubic-bezier(.2,1.5,.4,1) both;animation-delay:calc(var(--i) * 55ms)}
+.big-note.smash::before{content:'';position:absolute;left:50%;top:40%;width:260px;height:260px;margin:-130px 0 0 -130px;border-radius:50%;border:6px solid #ff4a3a;opacity:0;animation:shockwave .7s cubic-bezier(.2,.8,.3,1) .1s both}
+.big-note.smash b{background:#c94a33;color:#fff;box-shadow:0 8px 28px #c94a3388}
+.big-note.near strong{color:#f3f6f8;text-shadow:0 0 24px #ffffff55,0 10px 40px #0006}
+.big-note.near strong span{animation:letter-slam .5s cubic-bezier(.2,1.5,.4,1) both;animation-delay:calc(var(--i) * 55ms)}
+.big-note.near::before{content:'';position:absolute;left:-30%;right:-30%;top:34%;height:3px;border-radius:3px;background:linear-gradient(90deg,transparent,#ffffffcc,transparent);opacity:0;animation:light-sweep .9s cubic-bezier(.2,.8,.3,1) .05s both}
+.big-note.near b{background:#3b3f44;color:#fff;box-shadow:0 8px 28px #0006}
+@keyframes letter-slam{0%{opacity:0;transform:translateY(-40px) scale(3.2) rotate(-14deg);filter:blur(8px)}55%{opacity:1;filter:blur(0)}75%{transform:translateY(4px) scale(.94) rotate(2deg)}100%{opacity:1;transform:none}}
+@keyframes big-shudder{0%,100%{transform:none}10%{transform:translate(-9px,3px) rotate(-1.5deg)}25%{transform:translate(8px,-3px) rotate(1.2deg)}40%{transform:translate(-6px,2px)}55%{transform:translate(5px,-1px)}70%{transform:translate(-3px,0)}85%{transform:translate(2px,0)}}
+@keyframes shockwave{0%{opacity:.9;transform:scale(.2)}100%{opacity:0;transform:scale(2.6)}}
+@keyframes light-sweep{0%{opacity:0;transform:translateX(-40%) scaleX(.3)}40%{opacity:1}100%{opacity:0;transform:translateX(40%) scaleX(1)}}
+@keyframes big-points{0%{opacity:0;transform:translateY(16px) scale(.4)}100%{opacity:1;transform:none}}
+@keyframes big-note-out{to{opacity:0;transform:scale(.85);filter:blur(4px)}}
+@media (prefers-reduced-motion:reduce){.big-note,.big-note *{animation:none!important;opacity:1}.big-note::before{display:none}}

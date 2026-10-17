@@ -1,16 +1,17 @@
-import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { Suspense, memo, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { withDraco } from './gltf';
 import { CAR_CONFIG, JUICE_CONFIG, LOOP_DRIVE } from './config';
 import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
-import { playWhoosh, updateAudio } from './audio';
+import { playBoost, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
 import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
-import { initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
+import { DRIVE_MODE, RAILS, initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
 import { clearObstacleGroup, drainNearMisses, drainTrafficHits, setObstacleGroup } from './obstacles';
 import type { NearMiss, Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
@@ -22,7 +23,7 @@ import { advanceCycle, nightAmount, twilight } from './dayCycle';
 import { difficulty, trafficActive } from './difficulty';
 import { dayLook } from './dayLook';
 import { nightLook } from './nightLook';
-import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
+import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
 import { bakeRoles, jitterAmount, kenneyCarKey, logMaterials, playerCarRole, resolveKenneyCar, roleMaterials, textureSampler } from './recolor';
@@ -129,7 +130,7 @@ function surfaceAt(car: CarState) {
 }
 
 function PlayerCar({ car }: { car: React.RefObject<CarState> }) {
-  const gltf = useLoader(GLTFLoader, playerModelUrl);
+  const gltf = useLoader(GLTFLoader, playerModelUrl, withDraco);
   const model = useMemo(() => {
     const clone = gltf.scene.clone(true);
     if (CAR_CONFIG.logModelNodes) logModelNodes(clone);
@@ -987,6 +988,8 @@ function DrivingScene(props: SceneProps) {
     if (pad.recover && !padRecoverHeld.current && props.started && !props.paused) recoverToRoad(car);
     padRecoverHeld.current = pad.recover;
     let throttle = Math.max(pedals.current.throttle, pad.throttle);
+    // Rails mode (touch screens): the car drives itself; the player only steers.
+    if (DRIVE_MODE.rails && props.started) throttle = Math.max(throttle, RAILS.autoThrottle);
     if (keys.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
     const keySteer = Number(keys.left) - Number(keys.right);
     const driveControls = {
@@ -1008,7 +1011,9 @@ function DrivingScene(props: SceneProps) {
     for (const hit of drainTrafficHits()) {
       if (driftRun.current.time > 0) driftRun.current.spoiled = true;
       const smash = !hit.boosted && hit.closing >= JUICE_CONFIG.crashCinematicClosing;
+      let cinematic = false;
       if (smash) {
+        cinematic = crashTime.current >= 0 || crashRest.current <= 0;
         if (crashTime.current < 0 && crashRest.current <= 0) {
           crashTime.current = 0;
           crashSide.current = hit.side;
@@ -1020,6 +1025,7 @@ function DrivingScene(props: SceneProps) {
           crashCool.current = false;
         }
         trauma.current = Math.min(1, trauma.current + CRASH_CAM.shake);
+        // The red slow motion keeps the short synthesised whoosh; the recorded one is for near misses only.
         playWhoosh();
       } else {
         dutchVelocity.current += -hit.side * SIDE_HIT_CAMERA.dutchKick;
@@ -1027,7 +1033,7 @@ function DrivingScene(props: SceneProps) {
         fovKick.current += SIDE_HIT_CAMERA.fovKick;
         trauma.current = Math.min(1, trauma.current + SIDE_HIT_CAMERA.shake);
       }
-      props.onTrafficHit?.(hit);
+      props.onTrafficHit?.({ ...hit, cinematic });
     }
     for (const miss of drainNearMisses()) {
       if (cutInFree && crashTime.current < 0 && nearMissRest.current <= 0 && props.started) {
@@ -1037,8 +1043,9 @@ function DrivingScene(props: SceneProps) {
         coolBlend.current = 1;
         crashStrength.current = NEAR_MISS_CAM.strength;
         nearMissRest.current = difficulty.nearMissRest;
-        playWhoosh();
-      }
+        playSlowMoWhoosh();
+        miss.cinematic = true;
+      } else if (props.started) playSlowMoWhoosh(0.6);
       if (props.started) props.onNearMiss?.(miss);
     }
 
@@ -1047,6 +1054,7 @@ function DrivingScene(props: SceneProps) {
     const onRoad = distanceToRoadNetwork(latitude, car.x) < 0.7;
     if (wasOnRoad.current !== null && wasOnRoad.current !== onRoad && !landingActive.current) {
       landingCompression.current = Math.max(landingCompression.current, onRoad ? 0.11 : 0.2);
+      if (props.started && Math.abs(car.speed) > 2) playThud(onRoad ? 0.5 : 1);
     }
     wasOnRoad.current = onRoad;
     const drifting = props.started && !props.paused && car.drift > 0 && Math.abs(car.speed) > DRIFT_SCORE.minSpeed;
@@ -1206,7 +1214,7 @@ function DrivingScene(props: SceneProps) {
       trauma.current = Math.min(1, trauma.current + JUICE_CONFIG.shakeBoost);
       fovKick.current += JUICE_CONFIG.boostFovKick;
       boostCameraPulse.current = 1;
-      playWhoosh();
+      playBoost();
     }
     if (driving && cameraAcceleration.current < -JUICE_CONFIG.hardBrakeAccel && Math.abs(car.speed) > 8) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBrake);
     if (offRoadDriving) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
@@ -1258,8 +1266,9 @@ function DrivingScene(props: SceneProps) {
     updateTireMarks(tireMarks, dt, vehicle.current, car, driving);
     updateDust(dust, dt, vehicle.current, car, throttle, driving);
     updateSoilClods(soilClods, dt, vehicle.current, car, offRoadDriving);
-    updateSpeedLines(speedLines, dt, camera, car.speed, driving && zoom > 0.9);
-    updateAudio(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, throttle, car.drift, driving);
+    // The red crash cut-in gets the strong focus lines; the near-miss one doesn't.
+    updateSpeedLines(speedLines, dt, camera, car.speed, driving && zoom > 0.9, crashLevel.current * (1 - coolBlend.current), realDt);
+    updateAudio({ speedRatio: Math.abs(car.speed) / CAR_CONFIG.maxSpeed, throttle, drift: car.drift, active: driving, timeScale: gameTime.scale, acceleration: car.acceleration, offroad: !onRoad });
     telemetryTime.current += dt;
     if (telemetryTime.current > 0.1) {
       props.onTelemetry({ ...car, speed: Math.abs(car.speed) * 3.6, offroad: props.started && !onRoad, throttle, boost: car.boost, boosting: car.boosting });
@@ -1306,8 +1315,80 @@ function DrivingScene(props: SceneProps) {
   </>;
 }
 
-export default function Scene(props: SceneProps) {
-  return <Canvas shadows dpr={[1, ACTIVE_QUALITY.maxDpr]} camera={{ position: [0, 40, 94], fov: 48, near: 0.1, far: 400 }} gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }} onCreated={({ gl }) => gl.setClearAlpha(0)}>
+// Frame pacing: frames are drawn on demand at most 60 times a second (30 while paused), so a 120 Hz screen
+// doesn't make the GPU do twice the work for no visible gain.
+function FrameLimiter({ fps }: { fps: number }) {
+  const invalidate = useThree(state => state.invalidate);
+  useEffect(() => {
+    let frame = 0, last = 0;
+    const interval = 1000 / fps;
+    const tick = (now: number) => {
+      if (now - last >= interval - 2) { last = now; invalidate(); }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [fps, invalidate]);
+  return null;
+}
+
+// Adaptive resolution: every couple of seconds of driving, if frames have been coming slowly the pixel density
+// steps down (to the quality profile's floor), and after a good while of smooth frames it steps back up. The
+// current value is kept outside React so a re-render of the canvas never resets it.
+const resolution = { dpr: typeof window === 'undefined' ? 1 : Math.max(ACTIVE_QUALITY.minDpr, Math.min(window.devicePixelRatio || 1, ACTIVE_QUALITY.maxDpr)) };
+const ADAPT = { window: 1.5, slow: 1 / 48, smooth: 1 / 57, down: 0.15, up: 0.1, goodWindows: 4, warmup: 3 };
+function AdaptiveResolution({ active }: { active: boolean }) {
+  const setDpr = useThree(state => state.setDpr);
+  const stats = useRef({ time: 0, frames: 0, good: 0, age: 0 });
+  useFrame((_, delta) => {
+    const s = stats.current;
+    s.age += delta;
+    if (!active || s.age < ADAPT.warmup || delta > 0.25) { s.time = 0; s.frames = 0; return; }
+    s.time += delta; s.frames++;
+    if (s.time < ADAPT.window) return;
+    const average = s.time / s.frames;
+    s.time = 0; s.frames = 0;
+    let next = resolution.dpr;
+    if (average > ADAPT.slow) { next = Math.max(ACTIVE_QUALITY.minDpr, resolution.dpr - ADAPT.down); s.good = 0; }
+    else if (average < ADAPT.smooth && ++s.good >= ADAPT.goodWindows) { next = Math.min(ACTIVE_QUALITY.maxDpr, resolution.dpr + ADAPT.up); s.good = 0; }
+    else if (average >= ADAPT.smooth) s.good = 0;
+    if (Math.abs(next - resolution.dpr) > 0.01) { resolution.dpr = next; setDpr(next); }
+  });
+  return null;
+}
+
+// `?stats` in the address: a small panel with frames per second, draw calls and triangles per frame (all
+// passes: shadows, depth, colour), pixel density and quality tier. For measuring on real devices.
+function RenderStats() {
+  const gl = useThree(state => state.gl);
+  const panel = useRef<HTMLDivElement | null>(null);
+  const totals = useRef({ frames: 0, time: 0, calls: 0, triangles: 0 });
+  useEffect(() => {
+    gl.info.autoReset = false;
+    const div = document.createElement('div');
+    div.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;padding:6px 9px;border-radius:8px;background:#000c;color:#9f9;font:11px/1.4 ui-monospace,monospace;white-space:pre;pointer-events:none';
+    document.body.appendChild(div);
+    panel.current = div;
+    return () => { div.remove(); gl.info.autoReset = true; };
+  }, [gl]);
+  useFrame(() => { gl.info.reset(); }, -1000);
+  useFrame((_, delta) => {
+    const t = totals.current;
+    t.frames++; t.time += delta; t.calls += gl.info.render.calls; t.triangles += gl.info.render.triangles;
+    if (t.time < 1 || !panel.current) return;
+    panel.current.textContent = `${Math.round(t.frames / t.time)} fps · ${VISUAL_QUALITY} · dpr ${resolution.dpr.toFixed(2)}\n${Math.round(t.calls / t.frames)} draw calls · ${Math.round(t.triangles / t.frames / 1000)}k triangles`;
+    Object.assign(t, { frames: 0, time: 0, calls: 0, triangles: 0 });
+  }, 1000);
+  return null;
+}
+const SHOW_STATS = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('stats');
+
+// Memoised: the HUD re-renders often (speed, score), and none of that should reach the 3D scene.
+export default memo(function Scene(props: SceneProps) {
+  return <Canvas shadows frameloop="demand" dpr={resolution.dpr} camera={{ position: [0, 40, 94], fov: 48, near: 0.1, far: 400 }} gl={{ antialias: false, alpha: true, powerPreference: 'high-performance' }} onCreated={({ gl }) => gl.setClearAlpha(0)}>
+    <FrameLimiter fps={props.paused ? 30 : 60} />
+    <AdaptiveResolution active={!props.paused} />
+    {SHOW_STATS && <RenderStats />}
     <Suspense fallback={null}><DrivingScene {...props} /></Suspense>
   </Canvas>;
-}
+});

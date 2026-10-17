@@ -21,8 +21,8 @@ let shownThisVisit = false;
 // What the player has already used this visit, so tips never explain something they know.
 const used = { boost: false, brake: false };
 
-export default function Coach({ active, controls, speed, offroad, boostReady }: {
-  active: boolean; controls: RefObject<Controls>; speed: number; offroad: boolean; boostReady: boolean;
+export default function Coach({ rails = false, active, controls, speed, offroad, boostReady }: {
+  rails?: boolean; active: boolean; controls: RefObject<Controls>; speed: number; offroad: boolean; boostReady: boolean;
 }) {
   const touch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
   const [phase, setPhase] = useState<Phase>(() => (shownThisVisit ? 'off' : 'wait'));
@@ -37,9 +37,10 @@ export default function Coach({ active, controls, speed, offroad, boostReady }: 
   useEffect(() => {
     if (!active || phase !== 'wait') return;
     shownThisVisit = true;
-    const timer = window.setTimeout(() => setPhase('drive'), START_DELAY_MS);
+    // In rails mode the car drives itself, so the coach starts at steering.
+    const timer = window.setTimeout(() => setPhase(rails ? 'steer' : 'drive'), START_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [active, phase]);
+  }, [active, phase, rails]);
 
   // One watcher for everything: key lights, step completion and the moment for a tip.
   useEffect(() => {
@@ -64,14 +65,14 @@ export default function Coach({ active, controls, speed, offroad, boostReady }: 
       hardTurn = kmh > DRIFT_TIP.minKmh && (left || right) ? hardTurn + dt : 0;
       setTip(current => {
         if (current) return current.kind === 'boost' && c.boost || current.kind === 'drift' && c.brake && (left || right) ? { ...current, ticked: true } : current;
-        if (!used.brake && !tipsShown.current.has('drift') && hardTurn > DRIFT_TIP.hardSteer) { tipsShown.current.add('drift'); return { kind: 'drift', ticked: false }; }
+        if (!rails && !used.brake && !tipsShown.current.has('drift') && hardTurn > DRIFT_TIP.hardSteer) { tipsShown.current.add('drift'); return { kind: 'drift', ticked: false }; }
         if (!touch && !used.boost && ready && !tipsShown.current.has('boost') && driving > BOOST_TIP.afterDriving) { tipsShown.current.add('boost'); return { kind: 'boost', ticked: false }; }
         return null;
       });
-      if (tipsShown.current.size === (touch ? 1 : 2) && !tip) setPhase('off');
+      if (tipsShown.current.size === (rails ? 0 : touch ? 1 : 2) && !tip) setPhase('off');
     }, 50);
     return () => window.clearInterval(timer);
-  }, [active, phase, controls, touch, tip]);
+  }, [active, phase, controls, touch, tip, rails]);
 
   // Steering is done once both sides have been used.
   useEffect(() => { if (phase === 'steer' && sides.left && sides.right) setDone(true); }, [phase, sides]);
@@ -108,7 +109,7 @@ export default function Coach({ active, controls, speed, offroad, boostReady }: 
       {!touch && <span className="coach-keys">
         <kbd className={`${keys.left ? 'on' : ''}${sides.left ? ' used' : ''}`}>A</kbd><kbd className={`${keys.right ? 'on' : ''}${sides.right ? ' used' : ''}`}>D</kbd>
       </span>}
-      <span>{done ? 'Nice, you\'ve got it.' : touch ? 'Turn the wheel to steer' : 'Steer left and right'}</span>
+      <span>{done ? 'Nice, you\'ve got it.' : rails ? 'Hold left or right to steer' : touch ? 'Turn the wheel to steer' : 'Steer left and right'}</span>
       {done ? tick : close}
     </>;
   } else if (tip) {

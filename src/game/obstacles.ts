@@ -26,14 +26,15 @@ export const HITBOX_SCALE = 0.7;
 // Player hits on traffic, read by the HUD: 'side' is a clip from beside, 'front' is a head-on nose-first hit.
 // `side` is where the struck car was: 1 on the player's right, -1 on its left. `closing` is how fast (m/s) the two
 // cars were coming together along the contact: high for a real smash, low for a nudge or a glancing scrape.
-export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean; closing: number };
+// `cinematic` is set by the scene when the hit got the slow-motion cut-in (the HUD then shows it big).
+export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean; closing: number; cinematic?: boolean };
 const trafficHits: TrafficHit[] = [];
 export function reportTrafficHit(hit: TrafficHit) { trafficHits.push(hit); }
 export function drainTrafficHits(): TrafficHit[] { return trafficHits.splice(0); }
 
 // Near misses: the player flashed past a traffic car at speed without touching it. `speed` is the relative
 // speed of the pass (m/s), `gap` the closest the two bodies got (m), `side` as for hits.
-export type NearMiss = { speed: number; gap: number; side: number };
+export type NearMiss = { speed: number; gap: number; side: number; cinematic?: boolean };
 const nearMisses: NearMiss[] = [];
 export function drainNearMisses(): NearMiss[] { return nearMisses.splice(0); }
 

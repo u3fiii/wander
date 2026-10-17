@@ -92,6 +92,10 @@ export function updateTireMarks(marks: TireMarks, dt: number, vehicle: THREE.Obj
 }
 
 // Speed lines: thin streaks around the screen edges that rush past the camera above a speed threshold.
+// A crash (the red slow motion) gets a far stronger set on top: more, longer, thicker and brighter streaks,
+// pulled in closer to the centre of the frame, like the focus lines of an action shot. They move on game time, so
+// in the slow motion they crawl past.
+const CRASH_LINES = { count: 34, innerRadius: 1.3, outerRadius: 4.4, length: 10, thickness: 0.1, opacity: 1, speed: 46, color: '#ffffff' };
 export function createSpeedLines() {
   const count = JUICE_CONFIG.speedLineCount;
   const group = new THREE.Group();
@@ -105,23 +109,51 @@ export function createSpeedLines() {
     group.add(mesh);
     return mesh;
   });
-  return { group, lines, material, dispose: () => { geometry.dispose(); material.dispose(); } };
+  const crashGeometry = new THREE.BoxGeometry(CRASH_LINES.thickness, CRASH_LINES.thickness, CRASH_LINES.length);
+  // Added on top of the frame (additive), so they read as light, strong even over the red grade.
+  const crashMaterial = new THREE.MeshBasicMaterial({ color: CRASH_LINES.color, transparent: true, opacity: 0, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
+  const crashGroup = new THREE.Group();
+  const crashLines = Array.from({ length: CRASH_LINES.count }, () => {
+    const mesh = new THREE.Mesh(crashGeometry, crashMaterial);
+    const angle = Math.random() * Math.PI * 2;
+    const radius = CRASH_LINES.innerRadius + Math.random() * (CRASH_LINES.outerRadius - CRASH_LINES.innerRadius);
+    mesh.position.set(Math.cos(angle) * radius * 1.6, Math.sin(angle) * radius, -3 - Math.random() * 24);
+    mesh.scale.setScalar(0.6 + Math.random() * 0.8);
+    crashGroup.add(mesh);
+    return mesh;
+  });
+  group.add(crashGroup);
+  return {
+    group, lines, material, crashGroup, crashLines, crashMaterial,
+    dispose: () => { geometry.dispose(); material.dispose(); crashGeometry.dispose(); crashMaterial.dispose(); },
+  };
 }
 export type SpeedLines = ReturnType<typeof createSpeedLines>;
 
-export function updateSpeedLines(lines: SpeedLines, dt: number, camera: THREE.Camera, speed: number, active: boolean) {
+// `crash` (0..1) is how far into a crash cut-in the frame is. `dt` is game time (it moves the lines, slowed in
+// slow motion); `realDt` is real time, which the fades run on, so they end with the cut-in, not five times later.
+export function updateSpeedLines(lines: SpeedLines, dt: number, camera: THREE.Camera, speed: number, active: boolean, crash = 0, realDt = dt) {
   const ratio = Math.abs(speed) / CAR_CONFIG.maxSpeed;
   const strength = active && JUICE_CONFIG.speedLinesEnabled
     ? THREE.MathUtils.clamp((ratio - JUICE_CONFIG.speedLinesThreshold) / (1 - JUICE_CONFIG.speedLinesThreshold), 0, 1)
     : 0;
-  lines.material.opacity = THREE.MathUtils.damp(lines.material.opacity, strength * 0.55, 6, dt);
-  lines.group.visible = lines.material.opacity > 0.01;
+  const hit = active ? crash : 0;
+  lines.material.opacity = THREE.MathUtils.damp(lines.material.opacity, Math.max(strength * 0.55, hit * 0.7), 10, realDt);
+  // Squared, so the strong lines are gone a little before the cut-in has fully let go.
+  lines.crashMaterial.opacity = CRASH_LINES.opacity * hit * hit;
+  lines.crashGroup.visible = lines.crashMaterial.opacity > 0.01;
+  lines.group.visible = lines.material.opacity > 0.01 || lines.crashGroup.visible;
   if (!lines.group.visible) return;
   lines.group.position.copy(camera.position);
   lines.group.quaternion.copy(camera.quaternion);
   for (const line of lines.lines) {
     line.position.z += (12 + Math.abs(speed) * 2.2) * dt;
     if (line.position.z > -1) line.position.z -= 30;
+  }
+  if (!lines.crashGroup.visible) return;
+  for (const line of lines.crashLines) {
+    line.position.z += CRASH_LINES.speed * dt;
+    if (line.position.z > -1) line.position.z -= 26;
   }
 }
 

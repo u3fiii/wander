@@ -150,3 +150,20 @@ test('under boost, traffic never slows, turns or shoves the player', () => {
   assert.ok(Math.abs(rammed.heading - clear.heading) < 1e-6, 'same heading');
   assert.ok(Math.abs(rammed.z - clear.z) < 1e-6 && Math.abs(rammed.x - clear.x) < 1e-6, 'same line');
 });
+
+test('in rails mode the car never leaves the road, even steering hard into the verge', async () => {
+  const { DRIVE_MODE, RAILS } = await import('./driving.ts');
+  DRIVE_MODE.rails = true;
+  try {
+    const { distanceToRoadNetwork } = await import('./worldMap.ts');
+    const car = initialLoopCar();
+    let worst = 0;
+    for (let i = 0; i < 600; i++) {
+      stepLoopCar(car, { ...controls, left: i < 300, right: i >= 300, throttle: RAILS.autoThrottle }, 1 / 60, true);
+      // The same test the game uses for "on the road".
+      worst = Math.max(worst, distanceToRoadNetwork(loopLatitude(car.x) + car.z / GLOBE_RADIUS, car.x));
+    }
+    assert.ok(car.speed > 10, 'kept driving');
+    assert.ok(worst < 0.7, `went ${worst.toFixed(2)} off the road`);
+  } finally { DRIVE_MODE.rails = false; }
+});

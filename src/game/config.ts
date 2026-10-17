@@ -210,7 +210,7 @@ export const JUICE_CONFIG = {
   crashCinematicClosing: 12,
   // Sound
   soundEnabled: true,
-  engineVolume: 0.03,
-  squealVolume: 0.025,
+  engineVolume: 0.025,
+  squealVolume: 0.016,
   whooshVolume: 0.06,
 };

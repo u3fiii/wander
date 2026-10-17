@@ -53,3 +53,4 @@ test('the button back to day ends in full day, and turns round if pressed mid-fa
   for (let i = 0; i < 1000 && cycle.jump; i++) advanceCycle(1 / 60, false);
   assert.equal(nightAmount(), 0);
 });
+

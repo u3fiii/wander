@@ -2,9 +2,20 @@ import { PALETTE } from './palette.ts';
 
 export type VisualQuality = 'low' | 'high';
 
-// Main visual controls for the miniature-world look. Switch to `low` to
-// reduce shadow resolution and pixel density on less capable devices.
-export const VISUAL_QUALITY: VisualQuality = 'high';
+// Picked per device at load: phones and tablets, and computers with few cores or little memory, get `low`
+// (smaller shadows, fewer pixels, no depth-of-field pass, no multisampling); the rest get `high`. `?quality=low`
+// or `?quality=high` in the address forces one. On top of this the scene trims its own resolution while frames run
+// slow (see AdaptiveResolution in Scene.tsx).
+function detectQuality(): VisualQuality {
+  if (typeof window === 'undefined') return 'high';
+  const forced = new URLSearchParams(window.location.search).get('quality');
+  if (forced === 'low' || forced === 'high') return forced;
+  const touch = window.matchMedia?.('(pointer: coarse)').matches;
+  const cores = navigator.hardwareConcurrency ?? 8;
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8;
+  return touch || cores <= 4 || memory <= 4 ? 'low' : 'high';
+}
+export const VISUAL_QUALITY: VisualQuality = detectQuality();
 
 export const ART_DIRECTION = {
   quality: VISUAL_QUALITY,
@@ -90,8 +101,9 @@ export const ART_DIRECTION = {
     vehicleRoughness: 0.9,
   },
   qualityProfiles: {
-    low: { shadowMapSize: 1536, maxDpr: 1.25, depthOfField: false },
-    high: { shadowMapSize: 3072, maxDpr: 1.6, depthOfField: true },
+    // `minDpr` is as far as the adaptive resolution may drop; `msaa` is the samples of the post-processing target.
+    low: { shadowMapSize: 1024, minDpr: 0.7, maxDpr: 1.25, depthOfField: false, msaa: 0 },
+    high: { shadowMapSize: 2048, minDpr: 0.9, maxDpr: 1.5, depthOfField: true, msaa: 4 },
   },
 } as const;
 

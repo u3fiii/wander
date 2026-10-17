@@ -60,6 +60,21 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
   car.boost = car.boosting ? car.boostTime / CAR_CONFIG.boostDuration : car.boostCharge;
 }
 
+// Rails mode, for touch screens: the car drives itself (the scene holds the throttle at `autoThrottle`), the
+// player only steers, and the car never leaves the road. Its offset from the road's centre line is held inside
+// `halfWidth`; at the edge its heading is turned back along the road (by `edgeTurn`) so it slides along the edge
+// instead of grinding, and the road assist pulls it straight `assist` times harder when the player lets go.
+export const DRIVE_MODE = { rails: false };
+export const RAILS = { halfWidth: 2.15, edgeTurn: 14, assist: 3, autoThrottle: 1 };
+function keepOnRails(car: CarState, dt: number) {
+  const limit = RAILS.halfWidth / lateralScale(car.x);
+  if (Math.abs(car.z) <= limit) return;
+  car.z = Math.sign(car.z) * limit;
+  const along = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
+  car.heading = along + wrapAngle(car.heading - along) * Math.exp(-RAILS.edgeTurn * dt);
+  car.yawRate = 0;
+}
+
 // Boost is earned as well as waited for: skilled moves top the meter up (shares of a full charge), a level-up
 // fills it. Nothing is added while a burst is burning.
 export const BOOST_EARN = { nearMiss: 0.22, drift: 0.08, driftPerSecond: 0.05, flick: 0.06, streak: 0.06, levelUp: 1 };
@@ -349,6 +364,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   const nearRoadUnderBoost = car.boosting > 0 && distanceToRoadNetwork(movement.latitude, movement.longitude) < CAR_CONFIG.boostAssistReach;
   if (respectWater && (nextOnRoad || car.hitAssist > 0 || nearRoadUnderBoost || car.boosting > 0)) assistRoad(car, controls, previousZ, dt);
   keepOnBridge(car, previousX, previousZ, dt);
+  if (DRIVE_MODE.rails) keepOnRails(car, dt);
   car.distance += Math.abs(effectiveTravel);
   car.wheelTravel += effectiveTravel;
 }
@@ -395,7 +411,7 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   // up with the road (and the deck) even when the player isn't steering.
   const bridgeDistance = Math.abs(wrapAngle(car.x - WORLD_SETTINGS.roads.bridgeLongitude));
   const funnel = bridgeDistance < CAR_CONFIG.bridgeFunnelReach ? CAR_CONFIG.bridgeFunnelAssist * (1 - bridgeDistance / CAR_CONFIG.bridgeFunnelReach) : 0;
-  const rate = (CAR_CONFIG.roadAssist * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
+  const rate = (CAR_CONFIG.roadAssist * (DRIVE_MODE.rails ? RAILS.assist : 1) * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
     + (recovering ? CAR_CONFIG.crashAssist * (1 - steering * 0.5) : 0);
   car.heading = along + error * Math.exp(-rate * dt);
 }
