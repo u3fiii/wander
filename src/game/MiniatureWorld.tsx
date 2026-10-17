@@ -946,11 +946,22 @@ const cityRoleColor = (colors: CityColors) => (role: string): { key: PaletteKey;
 
 // `planter` models (planters, trees) are split into foliage / soil / pot; `stone` models are drawn all in stone.
 // Lit windows glow warm after dark (each house is lit or not, so the village doesn't look uniform).
-const WINDOW_GLOW = { color: '#ffc77a', intensity: 2.2 };
+// A few houses burn pink or violet instead, for a touch of colour in the night; every lit house also spills a soft
+// pool of its light onto the ground in front of it (`porch`: how far in front (m), how wide, how bright).
+const WINDOW_GLOW = {
+  color: '#ffc77a', intensity: 2.2,
+  tints: {
+    warm: { window: '#ffc77a', poolCentre: '#ffc08a', poolRim: '#ff7a3c' },
+    pink: { window: '#ff7ab8', poolCentre: '#ff9cc8', poolRim: '#e8408c' },
+    violet: { window: '#a982ff', poolCentre: '#b89cff', poolRim: '#6a3cdc' },
+  },
+  porch: { forward: 3.6, radius: 6.5, peak: 0.14 },
+};
+type WindowTint = keyof typeof WINDOW_GLOW.tints;
 
-function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, colors, planter = false, stone = false, sink = 0, windowsLit = false }: {
+function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, colors, planter = false, stone = false, sink = 0, windowsLit = false, tint = 'warm' }: {
   modelUrl: string; latitude: number; longitude: number; scale?: number; orientation: THREE.Quaternion; colors: CityColors;
-  planter?: boolean; stone?: boolean; sink?: number; windowsLit?: boolean;
+  planter?: boolean; stone?: boolean; sink?: number; windowsLit?: boolean; tint?: WindowTint;
 }) {
   const source = useLoader(OBJLoader, modelUrl);
   const texture = useLoader(THREE.TextureLoader, cityTextureUrl);
@@ -966,7 +977,7 @@ function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, co
       const materials = roleMaterials(baked.roles, cityRoleColor(colors), colors.jitter);
       if (windowsLit) baked.roles.forEach((role, index) => {
         if (role !== 'window') return;
-        materials[index].emissive.set(WINDOW_GLOW.color);
+        materials[index].emissive.set(WINDOW_GLOW.tints[tint].window);
         windows.push(materials[index]);
       });
       child.material = materials;
@@ -974,8 +985,26 @@ function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, co
       child.receiveShadow = true;
     });
     return { model: clone, windows };
-  }, [source, texture, colors, planter, stone, windowsLit]);
-  useFrame(() => { for (const material of windows) material.emissiveIntensity = nightState.blend * WINDOW_GLOW.intensity * nightLook.cityLights; });
+  }, [source, texture, colors, planter, stone, windowsLit, tint]);
+  // The porch pool: the house's light on the ground in front of it, after dark.
+  const porch = useMemo(() => {
+    if (!windowsLit) return null;
+    const { poolCentre, poolRim } = WINDOW_GLOW.tints[tint];
+    const { forward, radius, peak } = WINDOW_GLOW.porch;
+    return {
+      geometry: buildLightPool(poolCentre, poolRim, radius, peak),
+      material: new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, fog: false }),
+      // In front of the house, dropped by the planet's curve over that distance.
+      position: [0, 0.05 - (forward * forward) / (2 * GLOBE_RADIUS), forward] as [number, number, number],
+    };
+  }, [windowsLit, tint]);
+  useEffect(() => () => { porch?.geometry.dispose(); porch?.material.dispose(); }, [porch]);
+  const porchMesh = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    const glow = nightState.blend * nightLook.cityLights;
+    for (const material of windows) material.emissiveIntensity = glow * WINDOW_GLOW.intensity;
+    if (porch && porchMesh.current) { porch.material.opacity = Math.min(1, glow); porchMesh.current.visible = glow > 0.01; }
+  });
   const position = useMemo(() => terrainPoint(latitude, longitude, 0.05 - sink), [latitude, longitude, sink]);
   useEffect(() => () => {
     model.traverse(child => {
@@ -985,6 +1014,7 @@ function CityAsset({ modelUrl, latitude, longitude, scale = 3.4, orientation, co
   }, [model]);
   return <group position={position} quaternion={orientation}>
     <primitive object={model} scale={scale} />
+    {porch && <mesh ref={porchMesh} geometry={porch.geometry} material={porch.material} position={porch.position} renderOrder={2} />}
   </group>;
 }
 
@@ -1071,7 +1101,7 @@ function Town() {
   const { houses, planters, paths, trees } = useMemo(() => {
     const random = seededRandom(1207);
     const placed: Array<{ point: THREE.Vector3; roof: PaletteKey }> = [];
-    const houses: Array<{ modelUrl: string; scale: number; latitude: number; longitude: number; orientation: THREE.Quaternion; colors: CityColors; sink: number; windowsLit: boolean }> = [];
+    const houses: Array<{ modelUrl: string; scale: number; latitude: number; longitude: number; orientation: THREE.Quaternion; colors: CityColors; sink: number; windowsLit: boolean; tint: WindowTint }> = [];
     const gaps: Array<{ longitude: number; side: number }> = [];
     const paths: Array<{ latitude: number; longitude: number; orientation: THREE.Quaternion; sink: number }> = [];
     const trees: Array<{ latitude: number; longitude: number; orientation: THREE.Quaternion; modelUrl: string; scale: number; colors: CityColors }> = [];
@@ -1116,6 +1146,8 @@ function Town() {
           ...HOUSE_MODELS[modelIndex++ % HOUSE_MODELS.length],
           ...spot,
           windowsLit: (houses.length * 7 + 3) % 4 !== 0,
+          // Two in every nine houses glow pink or violet; the rest warm.
+          tint: (houses.length % 9 === 2 ? 'pink' : houses.length % 9 === 6 ? 'violet' : 'warm') as WindowTint,
           colors: {
             roof,
             wall: weightedPick(random, WALL_WEIGHTS),
@@ -1157,6 +1189,7 @@ function Town() {
       colors={house.colors}
       sink={house.sink}
       windowsLit={house.windowsLit}
+      tint={house.tint}
     />)}
     {planters.map((planter, index) => <CityAsset
       key={`planter-${index}`}
@@ -1465,10 +1498,19 @@ function MeadowHouse() {
 // the lamp heads light up with a small halo and a faceted pool of warm light on the ground beneath them.
 const STREET = {
   lampScale: 1.3, lampSetback: 4.5, propScale: 1.1, benchSetback: 5.3, mailboxSetback: 4.7,
-  lampColor: '#ffc27a', headGlow: 1.9,
+  lampColor: '#ff8a5a', headGlow: 1.9,
   // The pool of light under a lamp: how far it reaches (m), how bright its centre is, and how finely it is built.
-  pool: { radius: 6.5, peak: 0.34, rings: 18, segments: 28, lift: 0.06 },
-  poolCentre: '#ffd29a', poolRim: '#ff9a3c',
+  pool: { radius: 9, peak: 0.2, rings: 22, segments: 32, lift: 0.06, spread: 0.62 },
+  poolCentre: '#ffae7e', poolRim: '#ff6a36',
+  // A few lamps burn a different colour, for variety: `share` of them (picked at random, the same every time), with
+  // their own head, halo and pool colours. The rest keep the warm colours above.
+  tints: [
+    { share: 0.1, lamp: '#ff3a2a', poolCentre: '#ff6e56', poolRim: '#e0221a', halo: [255, 120, 100] },
+    { share: 0.2, lamp: '#ff6650', poolCentre: '#ff9c86', poolRim: '#f04a3a', halo: [255, 160, 140] },
+    // Rare accents: pink and violet.
+    { share: 0.06, lamp: '#ff5aa8', poolCentre: '#ff8ec0', poolRim: '#e0307e', halo: [255, 140, 200] },
+    { share: 0.06, lamp: '#9a6aff', poolCentre: '#b090ff', poolRim: '#6236d8', halo: [190, 150, 255] },
+  ],
   // Lamps along the rest of the loop (beyond the village and the bridge), about this far apart (m), on alternating
   // sides, so the whole road is lit at night.
   roadLampSpacing: 11,
@@ -1529,15 +1571,15 @@ function streetPropRole({ hue, saturation, lightness }: FaceSample): PaletteKey 
 // A lamp's pool of light on the ground: a soft, warm glow with no visible edge. Fine rings whose colours blend
 // smoothly from vertex to vertex, falling off like a bell from a warm, slightly paler centre to a deep amber and
 // then to exactly nothing at the rim.
-function buildLightPool() {
-  const { radius, peak, rings, segments, lift } = STREET.pool;
-  const centre = new THREE.Color(STREET.poolCentre), rim = new THREE.Color(STREET.poolRim);
+function buildLightPool(centreColour: string, rimColour: string, radius = STREET.pool.radius, peak = STREET.pool.peak) {
+  const { rings, segments, lift, spread } = STREET.pool;
+  const centre = new THREE.Color(centreColour), rim = new THREE.Color(rimColour);
   const positions: number[] = [0, lift, 0];
   const colors: number[] = [...centre.clone().multiplyScalar(peak).toArray()];
   for (let ring = 1; ring <= rings; ring++) {
     const t = ring / rings, r = t * radius;
     // A bell curve that is cut smoothly to zero at the rim.
-    const level = Math.exp(-Math.pow(t / 0.45, 2)) * (1 - THREE.MathUtils.smoothstep(t, 0.7, 1)) * peak;
+    const level = Math.exp(-Math.pow(t / spread, 2)) * (1 - THREE.MathUtils.smoothstep(t, 0.65, 1)) * peak;
     const color = centre.clone().lerp(rim, Math.min(1, t * 1.4)).multiplyScalar(level);
     for (let k = 0; k < segments; k++) {
       const a = (k / segments) * Math.PI * 2;
@@ -1566,21 +1608,28 @@ function StreetFurniture() {
   const lightsGltf = useLoader(GLTFLoader, streetLightsUrl, withDraco);
   const propsGltf = useLoader(GLTFLoader, streetPropsUrl, withDraco);
   const shared = useMemo(() => {
-    const lampHead = new THREE.MeshStandardMaterial({ color: PALETTE.flowerCream, emissive: STREET.lampColor, emissiveIntensity: 0, roughness: 0.6, flatShading: true });
     const pole = paletteMaterial('tires', { roughness: 0.7 });
     const pool = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, fog: false });
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 64;
-    const context = canvas.getContext('2d')!;
-    const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(255,214,150,0.8)');
-    gradient.addColorStop(0.25, 'rgba(255,190,120,0.35)');
-    gradient.addColorStop(0.6, 'rgba(255,170,100,0.1)');
-    gradient.addColorStop(1, 'rgba(255,160,90,0)');
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, 64, 64);
-    const glow = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
-    return { lampHead, pole, pool, glow, poolGeometry: buildLightPool() };
+    // One look per lamp colour: index 0 is the usual warm one, then each of STREET.tints.
+    const looks = [{ lamp: STREET.lampColor, poolCentre: STREET.poolCentre, poolRim: STREET.poolRim, halo: [255, 190, 120] }, ...STREET.tints].map(tint => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 64;
+      const context = canvas.getContext('2d')!;
+      const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
+      const [red, green, blue] = tint.halo;
+      gradient.addColorStop(0, `rgba(${red},${Math.min(255, green + 24)},${Math.min(255, blue + 30)},0.8)`);
+      gradient.addColorStop(0.25, `rgba(${red},${green},${blue},0.35)`);
+      gradient.addColorStop(0.6, `rgba(${red},${green - 20},${blue - 20},0.1)`);
+      gradient.addColorStop(1, `rgba(${red},${green - 30},${blue - 30},0)`);
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, 64, 64);
+      return {
+        head: new THREE.MeshStandardMaterial({ color: PALETTE.flowerCream, emissive: tint.lamp, emissiveIntensity: 0, roughness: 0.6, flatShading: true }),
+        glow: new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+        poolGeometry: buildLightPool(tint.poolCentre, tint.poolRim),
+      };
+    });
+    return { lampHead: looks[0].head, pole, pool, looks };
   }, []);
   const templates = useMemo(() => {
     const lamp = (name: string) => extractStreetProp(lightsGltf.scene, name, mesh => {
@@ -1603,8 +1652,9 @@ function StreetFurniture() {
   const placed = useMemo(() => {
     type Item = { object: THREE.Object3D; position: [number, number, number]; orientation: THREE.Quaternion; latitude: number; longitude: number; radius: number };
     const items: Item[] = [];
-    const pools: Array<{ position: [number, number, number]; orientation: THREE.Quaternion }> = [];
-    const glows: Array<[number, number, number]> = [];
+    const pools: Array<{ position: [number, number, number]; orientation: THREE.Quaternion; look: number }> = [];
+    const glows: Array<{ position: [number, number, number]; look: number }> = [];
+    const lamps: Array<{ holder: THREE.Object3D; pool: number; glow: number }> = [];
     const step = TOWN.spacing / GLOBE_RADIUS;
     const onLand = (latitude: number, longitude: number) => landInfluence(latitude, longitude) >= 0.75;
     const put = (template: PropTemplate, spot: { latitude: number; longitude: number; orientation: THREE.Quaternion }, scale: number, yaw: number, radius: number) => {
@@ -1627,14 +1677,15 @@ function StreetFurniture() {
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(spot.orientation);
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(spot.orientation);
       const head = base.clone().addScaledVector(up, template.head.y * scale - 0.15).addScaledVector(forward, reach);
-      glows.push(head.toArray() as [number, number, number]);
+      glows.push({ position: head.toArray() as [number, number, number], look: 0 });
       const below = toLatLon(head);
       const onRoad = distanceToRoadNetwork(below.latitude, below.longitude) < 1.2;
       const ground = onRoad
         ? spherePoint(below.latitude, below.longitude, roadSurfaceElevation(below.latitude, below.longitude))
         : terrainPoint(below.latitude, below.longitude);
       const normal = new THREE.Vector3(...sphereNormal(below.latitude, below.longitude));
-      pools.push({ position: ground, orientation: new THREE.Quaternion().setFromUnitVectors(up.set(0, 1, 0), normal) });
+      pools.push({ position: ground, orientation: new THREE.Quaternion().setFromUnitVectors(up.set(0, 1, 0), normal), look: 0 });
+      lamps.push({ holder: item.object, pool: pools.length - 1, glow: glows.length - 1 });
     };
     // Village street: lamps on alternating sides between the houses.
     [[1, 1.5], [-1, 2], [1, 3.5], [-1, 4]].forEach(([side, at]) => {
@@ -1678,30 +1729,42 @@ function StreetFurniture() {
       put(templates.bench, spotAt(0), STREET.propScale, Math.PI / 2, 0.9);
       put(templates.bin, spotAt(1.9), STREET.propScale, 0, 0.4);
     }
+    // Give a few lamps another colour (STREET.tints): shuffle them in a fixed order, then hand out each tint's share.
+    const order = lamps.map((_, index) => index).sort((a, b) => Math.sin((a + 1) * 12.9898) * 43758.5453 % 1 - Math.sin((b + 1) * 12.9898) * 43758.5453 % 1);
+    let next = 0;
+    STREET.tints.forEach((tint, tintIndex) => {
+      for (let count = Math.round(tint.share * lamps.length); count > 0 && next < order.length; count--, next++) {
+        const lamp = lamps[order[next]], look = tintIndex + 1;
+        pools[lamp.pool].look = look;
+        glows[lamp.glow].look = look;
+        lamp.holder.traverse(child => {
+          if (child instanceof THREE.Mesh && child.material === shared.lampHead) child.material = shared.looks[look].head;
+        });
+      }
+    });
     return { items, pools, glows };
-  }, [templates]);
+  }, [templates, shared]);
   useEffect(() => {
     setObstacleGroup('street', placed.items.map(item => ({ latitude: item.latitude, longitude: item.longitude, radius: item.radius })));
     return () => clearObstacleGroup('street');
   }, [placed]);
   useEffect(() => () => {
-    shared.lampHead.dispose(); shared.pole.dispose(); shared.pool.dispose(); shared.poolGeometry.dispose();
-    shared.glow.map?.dispose(); shared.glow.dispose();
+    shared.pole.dispose(); shared.pool.dispose();
+    shared.looks.forEach(look => { look.head.dispose(); look.poolGeometry.dispose(); look.glow.map?.dispose(); look.glow.dispose(); });
   }, [shared]);
   const glowGroup = useRef<THREE.Group>(null!);
   useFrame(() => {
     const n = nightState.blend;
     const city = nightLook.cityLights;
-    shared.lampHead.emissiveIntensity = n * 3.4 * city;
     shared.pool.opacity = Math.min(1, n * city);
-    shared.glow.opacity = Math.min(1, n * 0.8 * city);
+    shared.looks.forEach(look => { look.head.emissiveIntensity = n * 3.4 * city; look.glow.opacity = Math.min(1, n * 0.8 * city); });
     glowGroup.current.visible = n > 0.01;
   });
   return <>
     {placed.items.map((item, index) => <group key={`street-${index}`} position={item.position} quaternion={item.orientation}><primitive object={item.object} /></group>)}
     <group ref={glowGroup}>
-      {placed.pools.map((pool, index) => <mesh key={`pool-${index}`} geometry={shared.poolGeometry} material={shared.pool} position={pool.position} quaternion={pool.orientation} renderOrder={2} />)}
-      {placed.glows.map((position, index) => <sprite key={`glow-${index}`} material={shared.glow} position={position} scale={[STREET.headGlow, STREET.headGlow, 1]} />)}
+      {placed.pools.map((pool, index) => <mesh key={`pool-${index}`} geometry={shared.looks[pool.look].poolGeometry} material={shared.pool} position={pool.position} quaternion={pool.orientation} renderOrder={2} />)}
+      {placed.glows.map((glow, index) => <sprite key={`glow-${index}`} material={shared.looks[glow.look].glow} position={glow.position} scale={[STREET.headGlow, STREET.headGlow, 1]} />)}
     </group>
   </>;
 }

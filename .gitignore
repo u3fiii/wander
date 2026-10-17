@@ -3,3 +3,5 @@ dist/
 .sites-runtime/
 *.tsbuildinfo
 .DS_Store
+.env.local
+.env.*.local

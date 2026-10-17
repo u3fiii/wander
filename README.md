@@ -85,3 +85,19 @@ The palm island uses [Island](https://sketchfab.com/3d-models/island-3dd8d58630f
 The fishing boat uses [Fishing Boat](https://sketchfab.com/3d-models/fishing-boat-e07c8b9cc38543879a4e2fe145e62df6) by [JasperTobias](https://sketchfab.com/JasperTobias), licensed under [CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/) — **non-commercial only**, like the island. Source files, runtime GLB conversion and license are in `src/assets/fishing_boat`.
 
 The player vehicle uses [Low Poly Car](https://sketchfab.com/3d-models/low-poly-car-ffcf987149df4e528ebf1e2dec6a9f8a) by [ion_omat](https://sketchfab.com/ion_omat), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_car`.
+
+## Shared leaderboard (Supabase)
+
+Without setup, each browser keeps its own top five. To share one board between every player:
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In the project, open **SQL Editor → New query**, paste the contents of `supabase/leaderboard.sql`, and run it. It
+   creates the `scores` table, lets anyone read it and add a run (but not change or delete one), and rejects
+   implausible scores.
+3. In **Project Settings → API**, copy the **Project URL** and the **anon / publishable** key.
+4. Copy `.env.example` to `.env.local` and fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. For the
+   hosted site, set the same two variables wherever the site is built, then rebuild (`npm run build`): Vite bakes
+   them into the build.
+
+The key is public by design (it ships to every browser); what it can do is limited by the table's policies. Runs
+are always kept on the device too, so the game still works offline or if the board can't be reached.

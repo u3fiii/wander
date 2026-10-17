@@ -1,0 +1,11 @@
+{
+  "strength": 0.96,
+  "nightStrength": 0.44,
+  "colour": "#fbc088",
+  "angle": 65,
+  "front": 0.75,
+  "distance": 3,
+  "reach": 5,
+  "hueDrift": 15,
+  "driftPeriod": 54
+}

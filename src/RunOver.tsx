@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { fetchTop, sharedBoard, submitRun } from './game/globalBoard';
 import type { FormEvent } from 'react';
 import { ChevronLeft, RotateCcw, Route, Timer, Trophy, Wind } from 'lucide-react';
 import { addEntry, cleanName, loadBoard, loadName, qualifies, saveBoard, saveName } from './game/leaderboard';
@@ -13,18 +14,33 @@ const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.fl
 export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: {
   score: number; newBest: boolean; stats: RunStats; onPlayAgain: () => void; onHome: () => void;
 }) {
+  // The board shown is everyone's when the shared board is set up and reachable, else this device's. A run is asked
+  // for a name if it makes either; it is always kept on this device, and sent to the shared board too.
   const [board, setBoard] = useState<Entry[]>(loadBoard);
-  const [step, setStep] = useState<'name' | 'board'>(() => (qualifies(loadBoard(), score) ? 'name' : 'board'));
+  const [step, setStep] = useState<'name' | 'board' | 'saving'>(() => (qualifies(loadBoard(), score) ? 'name' : 'board'));
   const [name, setName] = useState(loadName);
   const [rank, setRank] = useState(-1);
-  const save = (event: FormEvent) => {
+  const saved = useRef(false);
+  useEffect(() => {
+    if (!sharedBoard) return;
+    fetchTop().then(top => {
+      // Once the run is saved, its own result (with its rank) is what shows.
+      if (!top || saved.current) return;
+      if (qualifies(top, score)) setStep(s => (s === 'board' ? 'name' : s));
+      setBoard(top);
+    });
+  }, [score]);
+  const save = async (event: FormEvent) => {
     event.preventDefault();
     const driver = cleanName(name);
-    const result = addEntry(board, { name: driver, score, distance: stats.distance, seconds: stats.seconds, date: Date.now() });
-    saveBoard(result.board);
+    const local = addEntry(loadBoard(), { name: driver, score, distance: stats.distance, seconds: stats.seconds, date: Date.now() });
+    saveBoard(local.board);
     saveName(driver);
-    setBoard(result.board);
-    setRank(result.rank);
+    saved.current = true;
+    setStep('saving');
+    const shared = sharedBoard ? await submitRun({ name: driver, score, distance: stats.distance, seconds: stats.seconds }) : null;
+    setBoard(shared ? shared.board : local.board);
+    setRank(shared ? shared.rank : local.rank);
     setStep('board');
   };
   // Three numbers that tell the run: how far, how long, how many cars it slipped past.
@@ -38,6 +54,7 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     <h2 id="run-over-title" className="run-score">{number(score)}</h2>
     {newBest && <span className="run-best">New best!</span>}
     <div className="run-stats">{tiles.map(tile => <div key={tile.label}>{tile.icon}<b>{tile.value}</b><small>{tile.label}</small></div>)}</div>
+    {step === 'saving' && <p className="board-empty">Putting you on the board…</p>}
     {step === 'name'
       ? <form className="run-name" onSubmit={save}>
         <label htmlFor="run-name-input"><Trophy size={15} /> You made the leaderboard</label>
@@ -46,7 +63,7 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
           <button type="submit" className="primary">Save</button>
         </div>
       </form>
-      : <>
+      : step === 'board' && <>
         <Podium board={board} highlight={rank} />
         <button autoFocus className="primary" onClick={onPlayAgain}>Play again <RotateCcw size={18} /></button>
         <div className="modal-row"><button className="secondary" onClick={onHome}><ChevronLeft size={15} /> Home</button></div>

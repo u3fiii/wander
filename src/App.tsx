@@ -189,6 +189,8 @@ import type { CameraTuning } from './game/cameraTuning';
 import { CAR_CONFIG, JUICE_CONFIG } from './game/config';
 import { NEAR_MISS_LOOK_COLOURS, NEAR_MISS_LOOK_SAVED, NEAR_MISS_LOOK_SLIDERS, nearMissLook } from './game/nearMissLook';
 import type { NearMissLook } from './game/nearMissLook';
+import { WARM_LIGHT_COLOURS, WARM_LIGHT_SAVED, WARM_LIGHT_SLIDERS, warmLight } from './game/warmLight';
+import type { WarmLight } from './game/warmLight';
 import { SOUND_TUNING_SAVED, SOUND_TUNING_SLIDERS, applySoundTuning, soundTuning } from './game/soundTuning';
 import type { SoundTuning } from './game/soundTuning';
 import { cinematicState } from './game/cinematic';
@@ -244,7 +246,7 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
 function Help({ close }: { close: () => void }) {
   return <div className="modal-shade" onClick={close}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={e => e.stopPropagation()}>
     <button className="close-button" autoFocus aria-label="Close help" onClick={close}><X size={18} /></button>
-    <span className="eyebrow">CONTROLS</span><h2 id="help-title">Circle the little world.</h2>
+    <span className="eyebrow">CONTROLS</span><h2 id="help-title">Keep the wheel and the road.</h2>
     <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>W</kbd> <kbd>S</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></span></div>
     <div className="help-row"><span>Steer left / right</span><span><kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd></span></div>
     <div className="help-row"><span>Brake / handbrake drift</span><kbd>Space</kbd></div>
@@ -255,7 +257,7 @@ function Help({ close }: { close: () => void }) {
     <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
     <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
     <div className="help-row"><span>Pause / resume</span><kbd>Esc</kbd></div>
-    <p>Steer freely around the globe. Ease off the accelerator and slow down for corners. Hold reverse to brake, then back up.</p>
+    <p>The car rolls on its own once you start; you choose the line. Lift off for corners, hold back to reverse. Weave through traffic, drift the bends, and bank your hearts for a bigger run.</p>
     <button className="primary" onClick={close}>Got it <Check size={18} /></button>
   </section></div>;
 }
@@ -287,7 +289,7 @@ function NightSky() {
 // nightLook.json. Picking a tab switches the game to that time of day so the changes can be seen.
 type LookValues = Record<string, number | string>;
 type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
-type LookMode = 'day' | 'night' | 'car' | 'camera' | 'boost' | 'nearMiss' | 'sound';
+type LookMode = 'day' | 'night' | 'car' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
 function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onChange, onClose }: {
   mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
   endpoint: string; onChange: (look: LookValues) => void; onClose: () => void;
@@ -311,6 +313,7 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onCh
         <button className={mode === 'boost' ? 'on' : ''} onClick={() => { onMode('boost'); setStatus(''); }}>Boost</button>
         <button className={mode === 'nearMiss' ? 'on' : ''} onClick={() => { onMode('nearMiss'); setStatus(''); }}>Near miss</button>
         <button className={mode === 'sound' ? 'on' : ''} onClick={() => { onMode('sound'); setStatus(''); }}>Sound</button>
+        <button className={mode === 'warm' ? 'on' : ''} onClick={() => { onMode('warm'); setStatus(''); }}>Warm light</button>
       </div>
       <button aria-label="Close" onClick={onClose}><X size={14} /></button>
     </div>
@@ -338,6 +341,8 @@ export default function App() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
   const RAILS = useRails();
+  // Phones: the run starts in whichever time of day was picked on the start screen; going home resets to daylight.
+  useEffect(() => { if (!started && RAILS) resetToDay(); }, [started, RAILS]);
   // Phones: the day and night come round a little faster, and every run starts in daylight (below).
   useEffect(() => { cycle.speed = RAILS ? 1.3 : 1; }, [RAILS]);
   // Map view: mid-drive, the camera pulls back to the globe (which can be turned by dragging) and the game holds
@@ -365,6 +370,8 @@ export default function App() {
   const changeBoost = (next: BoostTuning) => { applyBoostTuning(next); setBoostValues(next); };
   const [nearMissValues, setNearMissValues] = useState<NearMissLook>({ ...nearMissLook });
   const changeNearMiss = (next: NearMissLook) => { Object.assign(nearMissLook, next); setNearMissValues(next); };
+  const [warmValues, setWarmValues] = useState<WarmLight>({ ...warmLight });
+  const changeWarm = (next: WarmLight) => { Object.assign(warmLight, next); setWarmValues(next); };
   const [soundValues, setSoundValues] = useState<SoundTuning>({ ...soundTuning });
   const changeSound = (next: SoundTuning) => { applySoundTuning(next); setSoundValues(next); };
   // While the Near miss tab is open its grade stays on screen, so it can be tuned without chasing near misses.
@@ -734,7 +741,9 @@ export default function App() {
     stageRef.current = 1; setDifficultyLevel(1); breakWeave();
     if (touchQuery?.matches) resetToDay();
   }, [breakWeave]);
-  const start = () => { startAudio(); playEngineStart(); controls.current = emptyControls(); if (RAILS) resetToDay(); morph(() => { setStarted(true); setPaused(false); setMapView(false); }); };
+  // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.
+  const [introExit, setIntroExit] = useState(false);
+  const start = () => { setIntroExit(true); window.setTimeout(() => setIntroExit(false), 1200); startAudio(); playEngineStart(); controls.current = emptyControls(); morph(() => { setStarted(true); setPaused(false); setMapView(false); }); };
   const onReady = useCallback(() => setReady(true), []);
 
   useEffect(() => {
@@ -771,11 +780,11 @@ export default function App() {
     {showLook && <LookPanel
       mode={lookMode}
       onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
-      look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues }[lookMode]}
-      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS }[lookMode]}
-      colours={lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : undefined}
-      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED }[lookMode]}
-      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning' }[lookMode]}
+      look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
+      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
+      colours={lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
+      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
+      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
       onChange={values => {
         if (lookMode === 'day') changeLook(values as DayLook);
         else if (lookMode === 'night') changeNightLook(values as NightLook);
@@ -783,11 +792,12 @@ export default function App() {
         else if (lookMode === 'camera') changeCamera(values as unknown as CameraTuning);
         else if (lookMode === 'boost') changeBoost(values as unknown as BoostTuning);
         else if (lookMode === 'nearMiss') changeNearMiss(values as unknown as NearMissLook);
+        else if (lookMode === 'warm') changeWarm(values as unknown as WarmLight);
         else changeSound(values as unknown as SoundTuning);
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><DaySky /><NightSky /><SceneBoundary><Scene started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver} mapView={mapView} finale={finale} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><DaySky /><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className="topbar">
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -803,7 +813,7 @@ export default function App() {
         </div>
         : <a href="#" className="brand" aria-label="Wander, home" onClick={e => e.preventDefault()}>
           <span className="brand-mark"><LogoMark size={34} /></span>
-          <div><strong dir="ltr">Wander<span>.</span></strong><small>Drive · Discover</small></div>
+          <div><strong dir="ltr">Wander<span>.</span></strong><small>Just drive</small></div>
         </a>}
       {/* Score and hearts side by side in the middle of the header. The score counts up smoothly (distance adds
           to it all the time); a bonus makes it react in proportion to its size, with the amount floating off. */}
@@ -823,7 +833,10 @@ export default function App() {
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
         : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
       <nav className="toolbar" aria-label="Game settings">
+        {/* Phones, on the start screen: pick day or night, and the run starts there. */}
+        {!started && <button className="mode-toggle" aria-label={night ? 'Start in daylight' : 'Start at night'} title={night ? 'Day' : 'Night'} onClick={() => goTo(night ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
         <button className="desktop-only" aria-label={night ? 'Switch to evening' : 'Switch to night'} style={{ viewTransitionName: 'tool-night' } as CSSProperties} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>
+        {!started && <button className="mobile-home-theme" aria-label={night ? 'Switch to light mode' : 'Switch to dark mode'} title={night ? 'Light mode' : 'Dark mode'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
         {import.meta.env.DEV && <button aria-label="Day look" style={{ viewTransitionName: 'tool-look' } as CSSProperties} title="Day look" className={`desktop-only${showLook ? ' active' : ''}`} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         <button className={`desktop-only${cameraMode ? ' active' : ''}`} aria-label="Change camera view" style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
@@ -834,20 +847,19 @@ export default function App() {
       </nav>
     </header>
 
-    {!started && <section className="intro-card">
+    {(!started || introExit) && <section className={`intro-card${started ? ' exiting' : ''}`}>
       {/* The driver's level, like the badge in the game's header; a welcome back for returning players. */}
       <div className="intro-level rise" style={{ '--d': '800ms' } as CSSProperties}>
         <span className="level-number">{level.level}</span><strong>{level.title}</strong>{best > 0 ? <span className="intro-welcome">Best {formatNumber(best)}</span> : xp > 0 && <span className="intro-welcome">Welcome back</span>}
       </div>
       <h1 aria-label={TITLE}>{[...TITLE].map((c, i) => <span key={i} aria-hidden="true" className={`ch${c === '.' ? ' dot' : ''}`} style={{ '--d': `${1000 + i * 60}ms` } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</h1>
       <p className="intro-copy rise" style={{ '--d': '1700ms' } as CSSProperties}>
-        <span>Explore a little world behind the wheel.</span>
-        <span>Play in your browser. No download needed.</span>
+        <span>A small world, a long road.</span>
+        <span>Drive in your browser. Nothing to install.</span>
       </p>
       <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={start}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button></div>
       <div className="intro-hints rise" style={{ '--d': '2500ms' } as CSSProperties}>
-        <div className="intro-controls"><span className="key-cluster"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>or arrow keys</span></div>
-        <div className="intro-caption">Drag to rotate · Shift-drag to move</div>
+        <div className="intro-controls"><span className="key-cluster"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span className="keys-word">or arrow keys</span></div>
       </div>
     </section>}
 
@@ -896,18 +908,18 @@ export default function App() {
       {RAILS ? <SteerPads controls={controls} /> : <div className="touch-controls" aria-label="Touch controls"><SteeringWheel controls={controls} /><div className="pedals"><button className="reverse-touch" aria-label="Reverse" {...touch('back')}><ArrowDown /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button><button className="gas-touch" aria-label="Accelerate" {...touch('forward')}>Gas</button></div></div>}
     </>}
 
-    {!started && <footer className="page-footer"><span>WANDER · TAKE THE LONG WAY</span></footer>}
+    {!started && <footer className="page-footer"><span>WANDER · THE LONG WAY ROUND</span></footer>}
     {started && paused && !help && !boardOpen && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-      <span className="eyebrow">PAUSED</span><h2 id="pause-title">The road will be here.</h2>
+      <span className="eyebrow">PAUSED</span><h2 id="pause-title">Take a breath.</h2>
       <div className="pause-stats">
         <div><small>Score · best {formatNumber(best)}</small><b>{formatNumber(score)}</b></div>
         <div><small>Level {level.level}</small><b>{level.title}</b><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i></div>
         <div><small>Driven</small><b>{formatNumber(data.distance)} m</b></div>
       </div>
-      <button autoFocus className="primary" onClick={() => setPaused(false)}>Resume drive <Play size={18} /></button>
+      <button autoFocus className="primary" onClick={() => setPaused(false)}>Keep going <Play size={18} /></button>
       <div className="modal-row">
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
-        <button className="secondary" onClick={() => morph(() => { setStarted(false); setPaused(false); setMapView(false); })}><ChevronLeft size={15} /> Back to globe</button>
+        <button className="secondary" onClick={() => morph(() => { setStarted(false); setPaused(false); setMapView(false); })}><ChevronLeft size={15} /> Back to the globe</button>
       </div>
     </section></div>}
     {help && <Help close={() => setHelp(false)} />}

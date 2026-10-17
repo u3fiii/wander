@@ -22,6 +22,7 @@ import { nightState } from './nightState';
 import { advanceCycle, nightAmount, twilight } from './dayCycle';
 import { difficulty, trafficActive, trafficSwerves } from './difficulty';
 import { dayLook } from './dayLook';
+import { warmLight } from './warmLight';
 import { nightLook } from './nightLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
@@ -68,7 +69,9 @@ function readGamepad() {
 export type SceneProps = {
   started: boolean; paused: boolean; mapView?: boolean;
   // The run's last heart is gone: the finale (see FINALE).
-  finale?: boolean; cameraMode: number; resetKey: number;
+  finale?: boolean;
+  // Only one heart is left: the warning and its heartbeat (see cinematicState.danger / pulse).
+  danger?: boolean; cameraMode: number; resetKey: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
   onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void; onDriftCinematic?: () => void;
 };
@@ -208,7 +211,7 @@ function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
 
 // Head and tail lamps that glow at night (additive cores + soft halos), faded by the night blend.
 // Night lights are warm and soft everywhere: amber headlamps and beams, like the street lamps and windows.
-const WARM_LIGHT = { headlamp: '#ffd9a0', headlampHalo: '#ffb870', beam: '#ffcf8f' };
+const WARM_LIGHT = { headlamp: '#ffa888', headlampHalo: '#ff7a5a', beam: '#ff9a78' };
 
 function CarLamps({ blend, halfWidth, front, rear, height }: {
   blend: React.RefObject<number>; halfWidth: number; front: number; rear: number; height: number;
@@ -366,12 +369,17 @@ const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, rel
 // it round the car on the way, off by default) while time slows to `slowScale` (gentler than a crash, so the slide
 // still moves), holds a moment, then comes back down more slowly to land behind the car again. All on real time. `rise` and `hold` are when it is fully up and when it starts back
 // down; `rest` keeps it rare.
-const DRIFT_CINE = { trigger: 0.75, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5 };
+// `pullOut` lifts the shot further by the same distance the boost camera backs away and rises (× BOOST_FEEL's
+// pullBack + rise), so the overhead view opens out about as wide as a boost's.
+const DRIFT_CINE = { trigger: 0.75, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5, pullOut: 0.136 };
 // The finale, when the last heart goes: time all but stops (`slowScale`), the camera goes straight up over the car,
 // climbing from `startHeight` to `height` m while looking down on it and turning a full `turn` round it, over
 // `duration` s (eased at both ends), and the frame takes the steel-blue end grade. It does not come back: the
 // run-over card follows.
-const FINALE = { duration: 3.4, rise: 0.7, slowScale: 0.12, startHeight: 8, height: 34, turn: Math.PI * 2 };
+// The shot's turn and climb ease out exponentially: quick at first, then slower and slower, never quite stopping, so
+// the last frame (behind the run-over card) is still creeping round by a hair. `spinEase`/`climbEase` are their time
+// constants (s): most of `turn` is done in about three of them.
+const FINALE = { duration: 3.4, rise: 0.7, slowScale: 0.12, startHeight: 8, height: 34, turn: Math.PI * 0.55, spinEase: 1.1, climbEase: 1.3 };
 const driftCutEnvelope = (time: number) => {
   if (time < 0 || time > DRIFT_CINE.duration) return 0;
   if (time < DRIFT_CINE.rise) return 1 - Math.pow(1 - time / DRIFT_CINE.rise, 3);
@@ -761,6 +769,12 @@ function DrivingScene(props: SceneProps) {
   const hemisphereLight = useRef<THREE.HemisphereLight>(null!);
   const rimLight = useRef<THREE.DirectionalLight>(null!);
   const bounceLight = useRef<THREE.DirectionalLight>(null!);
+  const cornerLight = useRef<THREE.PointLight>(null!);
+  const cornerDir = useMemo(() => new THREE.Vector3(), []);
+  const cornerSide = useMemo(() => new THREE.Vector3(), []);
+  const cornerUp = useMemo(() => new THREE.Vector3(), []);
+  const cornerHsl = useMemo(() => ({ h: 0, s: 0, l: 0 }), []);
+  const cornerClock = useRef(0);
   const [neutralSun, amberSun, daySunColour, hazeColour, dayFogColour] = useMemo(() => [
     new THREE.Color('#fffaf2'), new THREE.Color('#ffb25e'), new THREE.Color(), new THREE.Color('#ebeee2'), new THREE.Color(),
   ], []);
@@ -795,12 +809,19 @@ function DrivingScene(props: SceneProps) {
   const nearMissRest = useRef(0);
   const seaCheck = useRef(0);
   const driftCutTime = useRef(-1);
+  // Rails mode cruising: a clock for its rhythm and the eased cruise level it gives.
+  const cruiseClock = useRef(0);
+  const cruise = useRef(0.8);
   const driftCutRest = useRef(0);
   const driftCutLevel = useRef(0);
   const driftOrbit = useRef(0);
   const driftApplied = useMemo(() => new THREE.Vector3(), []);
   const driftTop = useMemo(() => new THREE.Vector3(), []);
   const finaleTime = useRef(-1);
+  // The last-heart warning: eases in and out with `danger`, and its heartbeat is a double beat ("lub-dub") every
+  // 0.9 s on real time, so it is the same on every device.
+  const dangerLevel = useRef(0);
+  const dangerClock = useRef(0);
   const finaleLevel = useRef(0);
   const finaleApplied = useMemo(() => new THREE.Vector3(), []);
   const finaleSpot = useMemo(() => new THREE.Vector3(), []);
@@ -959,6 +980,13 @@ function DrivingScene(props: SceneProps) {
     driftCutLevel.current = driftCutEnvelope(driftCutTime.current);
     cinematicState.driftCut = driftCutLevel.current;
     if (finaleTime.current >= 0) finaleTime.current += realDt;
+    dangerLevel.current = THREE.MathUtils.damp(dangerLevel.current, props.danger && props.started && !props.paused ? 1 : 0, 3, realDt);
+    dangerClock.current += realDt;
+    const beat = (dangerClock.current % 0.9) / 0.9;
+    const lub = Math.exp(-Math.pow((beat - 0.05) / 0.045, 2));
+    const dub = 0.7 * Math.exp(-Math.pow((beat - 0.24) / 0.05, 2));
+    cinematicState.danger = dangerLevel.current;
+    cinematicState.pulse = Math.min(1, lub + dub) * dangerLevel.current;
     finaleLevel.current = finaleTime.current < 0 ? 0 : easeInOutCubic(Math.min(1, finaleTime.current / FINALE.rise));
     cinematicState.finale = finaleLevel.current;
     // No slow motion while boosting, even if a cut-in started just before: the boost never pauses.
@@ -1061,7 +1089,16 @@ function DrivingScene(props: SceneProps) {
     padRecoverHeld.current = pad.recover;
     let throttle = Math.max(pedals.current.throttle, pad.throttle);
     // Rails mode (touch screens): the car drives itself; the player only steers.
-    if (DRIVE_MODE.rails && props.started && !props.finale) throttle = Math.max(throttle, RAILS.autoThrottle);
+    // Rails mode: the car cruises on its own, but never flat out. A slow, uneven rhythm (a few overlapping waves)
+    // keeps it between about 55% and 100% of top speed, easing off in the bends and as the wheel turns hard.
+    if (DRIVE_MODE.rails && props.started && !props.finale) {
+      cruiseClock.current += realDt;
+      const t = cruiseClock.current;
+      const waves = 0.8 + 0.14 * Math.sin(t * 0.11) + 0.08 * Math.sin(t * 0.29 + 1.3) + 0.04 * Math.sin(t * 0.63 + 0.4);
+      const bend = 1 - 0.3 * Math.min(1, Math.abs(car.steering));
+      cruise.current = THREE.MathUtils.damp(cruise.current, THREE.MathUtils.clamp(waves * bend, 0.55, 1), 1.5, realDt);
+      throttle = Math.max(throttle, RAILS.autoThrottle * cruise.current);
+    }
     if (keys.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
     const keySteer = Number(keys.left) - Number(keys.right);
     const driveControls = {
@@ -1226,6 +1263,27 @@ function DrivingScene(props: SceneProps) {
     rimLight.current.color.lerpColors(lightColors.dayRim, lightColors.nightRim, n).lerp(lightColors.boostRim, boostAtmosphere.current * 0.32);
     bounceLight.current.intensity = THREE.MathUtils.lerp(0.24, 0.12, n);
     bounceLight.current.color.lerpColors(lightColors.dayBounce, lightColors.nightBounce, n);
+    // The warm corner light (warmLight.ts): placed round the globe relative to the view, so it always comes from the
+    // same corner of the screen, `front` of the way toward the camera. Its strength is the brightness at the nearest
+    // point of the globe, whatever the distance; `reach` sets how far across the globe it fades out.
+    cornerSide.setFromMatrixColumn(camera.matrixWorld, 0);
+    cornerUp.setFromMatrixColumn(camera.matrixWorld, 1);
+    const cornerAngle = THREE.MathUtils.degToRad(warmLight.angle);
+    cornerDir.copy(cornerSide).multiplyScalar(Math.cos(cornerAngle)).addScaledVector(cornerUp, Math.sin(cornerAngle));
+    cornerSide.copy(camera.position).sub(globeCenter).normalize();
+    cornerDir.lerp(cornerSide, THREE.MathUtils.clamp(warmLight.front, -1, 1)).normalize();
+    cornerLight.current.position.copy(globeCenter).addScaledVector(cornerDir, GLOBE_RADIUS * warmLight.distance);
+    const cornerGap = GLOBE_RADIUS * (warmLight.distance - 1);
+    cornerLight.current.distance = cornerGap + GLOBE_RADIUS * warmLight.reach;
+    cornerLight.current.intensity = THREE.MathUtils.lerp(warmLight.strength, warmLight.nightStrength, n) * Math.max(1, cornerGap * cornerGap);
+    cornerLight.current.color.set(warmLight.colour);
+    // While driving, its colour wanders slowly round its neighbours on the colour wheel (two slow swings laid over each
+    // other, so it never quite repeats), easing in with the zoom so the start screen keeps the picked colour.
+    if (props.started && !props.paused) cornerClock.current += realDt;
+    const wander = (2 * Math.PI * cornerClock.current) / Math.max(1, warmLight.driftPeriod);
+    const hueShift = (Math.sin(wander) * 0.7 + Math.sin(wander * 0.43 + 1.3) * 0.3) * warmLight.hueDrift * zoomProgress.current;
+    cornerLight.current.color.getHSL(cornerHsl);
+    cornerLight.current.color.setHSL((cornerHsl.h + hueShift / 360 + 1) % 1, cornerHsl.s, cornerHsl.l);
     fog.color.lerpColors(dayFogColour, nightFogColour, n).lerp(sunsetFog, golden * 0.35);
     gl.toneMappingExposure = THREE.MathUtils.lerp(dayLook.exposure, nightLook.exposure, n);
     const cameraDistance = camera.position.distanceTo(globeCenter);
@@ -1336,15 +1394,16 @@ function DrivingScene(props: SceneProps) {
         : cutTime < DRIFT_CINE.hold ? 1 : 1 - easeInOutCubic(Math.min(1, (cutTime - DRIFT_CINE.hold) / (DRIFT_CINE.duration - DRIFT_CINE.hold))));
     }
     driftOffset.copy(vehicleTangent).negate().applyAxisAngle(surfaceUp, driftOrbit.current).multiplyScalar(DRIFT_CINE.back);
-    driftTop.copy(groundVehiclePosition).addScaledVector(surfaceUp, DRIFT_CINE.height).add(driftOffset);
+    driftTop.copy(groundVehiclePosition).addScaledVector(surfaceUp, DRIFT_CINE.height + DRIFT_CINE.pullOut * (BOOST_FEEL.pullBack + BOOST_FEEL.rise)).add(driftOffset);
     driftApplied.copy(driftTop).sub(camera.position).multiplyScalar(driftCut);
     camera.position.add(driftApplied);
     // The finale's orbit, laid over the camera the same way: lifted, at a distance, swinging slowly round the car.
     const finale = finaleLevel.current * zoom;
-    const shot = finaleTime.current < 0 ? 0 : easeInOutCubic(Math.min(1, finaleTime.current / FINALE.duration));
+    const shotTime = Math.max(0, finaleTime.current);
+    const spin = 1 - Math.exp(-shotTime / FINALE.spinEase), climb = 1 - Math.exp(-shotTime / FINALE.climbEase);
     // Straight above the car (a hair behind it, so "up" on screen stays defined), rising as the shot goes on.
-    finaleOffset.copy(vehicleTangent).applyAxisAngle(surfaceUp, shot * FINALE.turn);
-    finaleSpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, THREE.MathUtils.lerp(FINALE.startHeight, FINALE.height, shot)).addScaledVector(finaleOffset, -0.05);
+    finaleOffset.copy(vehicleTangent).applyAxisAngle(surfaceUp, spin * FINALE.turn);
+    finaleSpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, THREE.MathUtils.lerp(FINALE.startHeight, FINALE.height, climb)).addScaledVector(finaleOffset, -0.05);
     finaleApplied.copy(finaleSpot).sub(camera.position).multiplyScalar(finale);
     camera.position.add(finaleApplied);
     // Side-hit glance toward the thrown car.
@@ -1357,7 +1416,7 @@ function DrivingScene(props: SceneProps) {
     // Looking straight down, "up" on screen is the way the car is heading (turning with the orbit).
     if (driftCut > 0) camera.up.lerp(driftOffset.normalize().negate(), driftCut).normalize();
     crashLook.copy(smoothedLook).lerp(cinematicState.focus, crash * crashStrength.current * CRASH_CAM.lookPull * zoom).lerp(groundVehiclePosition, Math.max(driftCut, finale));
-    // Looking straight down, "up" on screen turns with the shot: the world spins a full turn under the camera.
+    // Looking straight down, "up" on screen turns with the shot: the world swings round under the camera, slower and slower.
     if (finale > 0) camera.up.lerp(finaleOffset, finale).normalize();
     camera.lookAt(crashLook);
     camera.rotateZ(-bodyRoll.current * JUICE_CONFIG.cameraRollFactor * zoom);
@@ -1432,6 +1491,7 @@ function DrivingScene(props: SceneProps) {
       shadow-radius={ATMOSPHERE.light.shadowRadius}
     />
     <directionalLight ref={rimLight} position={[58, 18, -48]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={ATMOSPHERE.light.rimIntensity} color={ART_DIRECTION.day.rimColor} />
+    <pointLight ref={cornerLight} decay={2} />
     <directionalLight ref={bounceLight} position={[18, -38, -62]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={0.24} color={ART_DIRECTION.day.bounceColor} />
     <primitive object={speedLines.group} />
     <Meteors />

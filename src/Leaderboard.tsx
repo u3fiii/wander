@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Crown, Trophy, X } from 'lucide-react';
+import { fetchTop, sharedBoard } from './game/globalBoard';
 import { loadBoard } from './game/leaderboard';
 import type { Entry } from './game/leaderboard';
 
@@ -33,14 +35,25 @@ export function Podium({ board, highlight = -1 }: { board: Entry[]; highlight?: 
   </div>;
 }
 
-// The leaderboard card, from the header's trophy button.
+// The leaderboard card, from the header's trophy button. With the shared board set up it shows everyone's top five
+// (and "This device" for the runs kept here); without it, or offline, just this device's.
 export default function Leaderboard({ close }: { close: () => void }) {
-  const board = loadBoard();
+  const [view, setView] = useState<'everyone' | 'device'>(sharedBoard ? 'everyone' : 'device');
+  const [everyone, setEveryone] = useState<Entry[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { if (sharedBoard) fetchTop().then(top => (top ? setEveryone(top) : setFailed(true))); }, []);
+  const local = loadBoard();
+  const board = view === 'everyone' ? everyone ?? [] : local;
   return <div className="modal-shade" onClick={close}><section className="modal leaderboard" role="dialog" aria-modal="true" aria-labelledby="board-title" onClick={event => event.stopPropagation()}>
     <button className="close-button" autoFocus aria-label="Close the leaderboard" onClick={close}><X size={18} /></button>
     <span className="eyebrow"><Trophy size={14} /> LEADERBOARD</span>
     <h2 id="board-title">Top five</h2>
-    {board.length === 0 && <p className="board-empty">No runs yet. Five hearts, one road: your first run takes the top spot.</p>}
-    <Podium board={board} />
+    {sharedBoard && <div className="board-tabs" role="tablist">
+      <button role="tab" aria-selected={view === 'everyone'} className={view === 'everyone' ? 'on' : ''} onClick={() => setView('everyone')}>Everyone</button>
+      <button role="tab" aria-selected={view === 'device'} className={view === 'device' ? 'on' : ''} onClick={() => setView('device')}>This device</button>
+    </div>}
+    {view === 'everyone' && !everyone && <p className="board-empty">{failed ? 'The shared board could not be reached. Try again in a moment.' : 'Loading the board…'}</p>}
+    {(view === 'device' || everyone) && board.length === 0 && <p className="board-empty">No runs yet. Five hearts, one road: your first run takes the top spot.</p>}
+    {(view === 'device' || everyone) && <Podium board={board} />}
   </section></div>;
 }

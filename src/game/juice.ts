@@ -138,7 +138,7 @@ export function updateSpeedLines(lines: SpeedLines, dt: number, camera: THREE.Ca
     ? THREE.MathUtils.clamp((ratio - JUICE_CONFIG.speedLinesThreshold) / (1 - JUICE_CONFIG.speedLinesThreshold), 0, 1)
     : 0;
   const hit = active ? crash : 0;
-  lines.material.opacity = THREE.MathUtils.damp(lines.material.opacity, Math.max(strength * 0.55, hit * 0.7), 10, realDt);
+  lines.material.opacity = THREE.MathUtils.damp(lines.material.opacity, Math.max(strength * 0.275, hit * 0.7), 10, realDt);
   // Squared, so the strong lines are gone a little before the cut-in has fully let go.
   lines.crashMaterial.opacity = CRASH_LINES.opacity * hit * hit;
   lines.crashGroup.visible = lines.crashMaterial.opacity > 0.01;

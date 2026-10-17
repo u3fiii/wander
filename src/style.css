@@ -284,6 +284,8 @@
 .modal kbd{background:#ffffff1f;border:1px solid #ffffff33;border-bottom-width:1px;border-radius:6px;color:#fff}
 .pause-modal{width:440px;padding:38px 32px 30px}
 .pause-modal h2{margin:12px 0 22px}
+.pause-modal>.primary{width:fit-content;padding:14px 14px 14px 22px;margin:0 auto}
+.pause-modal>.modal-row{margin-top:16px}
 .pause-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:22px;text-align:left}
 .pause-stats>div{padding:12px 13px;border-radius:16px;background:#ffffff0f;border:1px solid #ffffff14;min-width:0}
 .pause-stats small{display:block;font-size:9px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#ffffff8c}
@@ -402,7 +404,9 @@
 /* Phones and tablets: the header keeps only sound (day/night, camera, help, leaderboard, map, pause and the dev look panel are
    keyboard-and-mouse things). The cards fit the screen: the shade's single column can shrink, the card takes the
    width it is given, and the buttons stack at full height. */
-@media (pointer:coarse),(max-width:600px){.toolbar .desktop-only{display:none}}
+@media (pointer:coarse),(max-width:600px){.toolbar .desktop-only{display:none}.toolbar .mobile-home-theme{display:grid;place-items:center}}
+.toolbar .mobile-home-theme{display:none}
+.playing .toolbar .mobile-home-theme{display:none}
 .modal-shade{grid-template-columns:minmax(0,1fr)}
 .modal{justify-self:center;width:min(440px,100%)}
 @media (max-width:600px){
@@ -523,7 +527,7 @@
 .intro-hints{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:18px}
 @media (max-width:600px){
   .intro-level{margin:0 auto}
-  .app .intro-card .start-button{display:flex;width:100%;justify-content:center;padding:0 8px 0 24px}
+  .app .intro-card .start-button{display:inline-flex;width:auto;justify-content:space-between;gap:22px;padding:0 8px 0 30px}
   .intro-hints{justify-content:center}
 }
 /* Keyboard and mouse hints mean nothing on a touch screen. */
@@ -863,3 +867,86 @@
 .run-over .run-stats b{margin:0;font-size:17px;font-weight:800;font-variant-numeric:tabular-nums}
 .run-over .run-stats small{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#ffffff80}
 @media (max-width:600px){.run-over .run-stats b{font-size:15px}}
+
+/* Start screen: the keys pill's background is half as opaque as before. */
+.app .intro-card .intro-controls{background:#1a252d6f}
+
+/* Start screen: the level pill above the title, 20% smaller (text, circle, padding and gaps). */
+.intro-level{padding:4px 11px 4px 4px;gap:7px;font-size:9.6px}
+.intro-level .level-number{width:22.4px;height:22.4px;font-size:10.4px}
+.intro-welcome{padding-left:7px}
+
+/* Start screen: the level pill takes the light theme instead of the dark glass: a pale frosted pill with dark text. */
+.intro-level{background:#ffffff73;border:1px solid #ffffffb3;box-shadow:0 6px 20px #2b5a6626,inset 0 1px 0 #ffffffcc;color:#173e3c}
+.intro-level .level-number{box-shadow:inset 0 1px 0 #ffffff66}
+.intro-welcome{border-left-color:#173e3c2e;color:#173e3cb3}
+
+/* Start screen: the keys pill is a very dark glass again (near opaque, so it reads as a solid dark pill). */
+.app .intro-card .intro-controls{background:#10191fea;border-color:#ffffff1a}
+
+/* Night: the level pill on top goes dark and faint (a smoky glass with light text), and the keys pill below goes a
+   little lighter and see-through, so the top recedes and the controls read. */
+.night .intro-level{background:#1a252d73;border-color:#ffffff1f;box-shadow:0 6px 20px #0006,inset 0 1px 0 #ffffff14;color:#e9e2c9}
+.night .intro-welcome{border-left-color:#ffffff2e;color:#ffffff8c}
+.night .app .intro-card .intro-controls,.night .intro-card .intro-controls{background:#ffffff1a;border-color:#ffffff29}
+
+/* Start button: the arrow in its dark circle follows the button's move to the right with a 100 ms lag on hover in,
+   so the two read as one gesture with a little trailing motion. */
+.start-arrow{transition:transform .35s cubic-bezier(.3,1.6,.5,1)}
+.start-button:hover .start-arrow{transform:translateX(4px);transition-delay:.1s}
+
+/* Phones, start screen: a day/night toggle in the header, next to sound. Hidden on bigger screens (there the
+   toolbar has it) and during a drive (the drive starts from whatever was picked here). */
+.mode-toggle{display:none}
+@media (pointer:coarse),(max-width:600px){.mode-toggle{display:grid;width:44px;height:44px;padding:0;border-radius:50%;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;transition:transform .3s cubic-bezier(.3,1.6,.5,1)}
+  .mode-toggle:active{transform:scale(.92)}
+  .mode-toggle svg{width:20px;height:20px}
+  .intro .mode-toggle{background:#ffffff8c;border-color:#ffffffb3;color:#173e3c;box-shadow:0 6px 18px #2b5a6626}
+  .night .intro .mode-toggle{background:#1a252d8c;border-color:#ffffff1f;color:#e9e2c9;box-shadow:0 6px 18px #0006}}
+
+/* Start screen: the header buttons take the same frosted glass as the level pill above the title (the daytime pale
+   glass, and the smoky dark glass at night), on every screen. */
+.intro .toolbar button{background:#ffffff73;border-color:#ffffffb3;color:#173e3c;box-shadow:0 6px 18px #2b5a6626}
+.night.intro .toolbar button{background:#1a252d73;border-color:#ffffff1f;color:#e9e2c9;box-shadow:0 6px 18px #0006}
+.intro .toolbar button:hover{background:#ffffff8c}
+.night.intro .toolbar button:hover{background:#1a252d8c}
+
+/* Start screen: a few very faint, soft colour blooms in the sky (peach, lilac, mint, rose). Their only job is to
+   give the frosted glass buttons and pills something behind them, so the glass reads as glass. Dimmed at night. */
+.sky-glow{display:none;position:absolute;inset:0;pointer-events:none;filter:blur(18px);opacity:calc(1 - var(--night-amount,0) * .7)}
+.intro .sky-glow{display:block}
+.sky-glow{background:
+  radial-gradient(ellipse 22% 16% at 14% 10%,#ffc79a38 0%,#ffc79a00 100%),
+  radial-gradient(ellipse 20% 14% at 88% 8%,#b9a6ff30 0%,#b9a6ff00 100%),
+  radial-gradient(ellipse 26% 18% at 82% 90%,#9fe6c930 0%,#9fe6c900 100%),
+  radial-gradient(ellipse 18% 14% at 8% 86%,#ffa9c82a 0%,#ffa9c800 100%)}
+/* The frosted header buttons on the start screen also blur what is behind them. */
+.intro .toolbar button,.intro .mode-toggle{backdrop-filter:blur(10px) saturate(1.2)}
+
+/* Start: as the globe zooms in, the title and text fade and the keys pill folds down to just its keys (the words
+   "or arrow keys" close up), then the card is removed. */
+.intro-card.exiting .rise:not(.intro-controls),.intro-card.exiting h1{opacity:0;transition:opacity .45s ease}
+.intro-card.exiting .intro-controls{opacity:1}
+.intro-card .keys-word{display:inline-block;max-width:12em;overflow:hidden;white-space:nowrap;vertical-align:middle}
+.intro-card.exiting .keys-word{max-width:0;opacity:0;margin-left:-10px;transition:max-width .6s cubic-bezier(.4,0,.2,1),opacity .35s ease,margin .6s cubic-bezier(.4,0,.2,1)}
+.intro-card.exiting .intro-controls{transition:padding .6s cubic-bezier(.4,0,.2,1),gap .6s cubic-bezier(.4,0,.2,1)}
+.intro-card.exiting .intro-controls{gap:4px;padding-right:10px}
+
+/* Header buttons: the very dark glass again, on every screen and in both themes, for now. */
+.intro .toolbar button,.night.intro .toolbar button,.intro .mode-toggle,.night .intro .mode-toggle{background:var(--glass);border-color:var(--glass-line);color:#fff;box-shadow:var(--glass-shadow);backdrop-filter:none}
+.intro .toolbar button:hover,.night.intro .toolbar button:hover{background:#24323be6}
+/* The phone start screen's day/night toggle sits in the toolbar, whose button rule would show it everywhere: keep it
+   to phones (bigger screens have the toolbar's own day/night button). */
+.toolbar .mode-toggle{display:none}
+@media (pointer:coarse),(max-width:600px){.toolbar .mode-toggle{display:grid}}
+
+/* Leaderboard: "Everyone" / "This device" tabs, as a small glass segmented switch. */
+.board-tabs{display:inline-flex;gap:3px;margin:0 0 14px;padding:3px;border-radius:999px;background:#ffffff0f;border:1px solid #ffffff14}
+.board-tabs button{padding:6px 14px;border:0;border-radius:999px;background:none;color:#ffffffa6;font-size:12px;font-weight:700}
+.board-tabs button.on{background:var(--gold);color:#2b1d05}
+
+/* Start screen: the title 20% bigger; the level pill above it 10% smaller and lifted 8px. */
+:root{--title-size:clamp(43px,6.97vw,110px)}
+@media (max-width:600px){.intro-card h1{font-size:min(12vw,58px)}}
+.intro-level{position:relative;top:-8px;padding:3.6px 10px 3.6px 3.6px;gap:6.3px;font-size:8.6px}
+.intro-level .level-number{width:20px;height:20px;font-size:9.4px}
