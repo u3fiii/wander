@@ -253,12 +253,13 @@
 .score-pill{position:absolute;left:50%;translate:-50% 0;display:flex;align-items:center;gap:9px;height:44px;padding:0 20px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;animation:note-pop .45s cubic-bezier(.3,1.6,.5,1) both}
 .score-pill span{font-size:10px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;opacity:.7}
 .score-pill b{display:inline-block;min-width:2ch;color:var(--gold);font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;animation:points-pop .4s cubic-bezier(.3,1.6,.5,1) both}
-.playing .toolbar button{width:44px;height:44px}
+/* The header buttons are the same size on the start screen and while driving, so the morph only moves them. */
+.topbar .toolbar button{width:44px;height:44px}
 .road-warning{top:calc(100% - 8px)}
 @media (max-width:600px){
   .level-badge{padding:4px 10px 4px 4px;gap:7px}.level-number{width:28px;height:28px;font-size:13px}
   .level-badge strong{font-size:11px}.level-badge i{width:64px}.level-badge small{display:none}
-  .playing .toolbar button{width:34px;height:34px}
+  .topbar .toolbar button{width:34px;height:34px}
   .score-pill{top:calc(100% - 6px);height:36px;padding:0 15px}.score-pill b{font-size:16px}
   .road-warning{top:calc(100% + 38px)}
 }
@@ -547,3 +548,32 @@
 .topbar .brand strong span{color:#e07a3c}
 .topbar .brand small{margin:0;padding-left:10px;border-left:1px solid #ffffff33;font-size:11px;font-weight:600;letter-spacing:.3px;color:#ffffffa6}
 @media (max-width:600px){.topbar .brand>div{display:none}.topbar .brand{height:40px;padding:0 3px;width:40px;justify-content:center}.topbar .brand-mark{width:34px;height:34px}}
+
+/* Header morph (see morph() in App.tsx). Only these pieces take part: the page itself is not captured, so the 3D
+   scene keeps drawing live underneath. Shared pieces glide to their new place and size on a soft spring; a piece
+   that only exists on one side springs in or shrinks away. */
+:root{view-transition-name:none}
+/* The left side morphs shape by shape: the round logo mark becomes the round home button, and the brand pill
+   becomes the level pill. */
+.topbar .brand-mark,.home-button{view-transition-name:header-circle}
+.topbar .brand,.level-badge{view-transition-name:header-pill}
+.score-pill{view-transition-name:header-score}
+::view-transition-group(*){animation-duration:.55s;animation-timing-function:cubic-bezier(.22,1,.36,1)}
+::view-transition-old(*),::view-transition-new(*){animation-duration:.32s;animation-timing-function:ease}
+/* The circle and the pill: the moving box itself is drawn as the glass shape (so it reads as one shape that
+   stretches and slides), with each side's content kept at its own size and clipped to it; the old content fades
+   out first, then the new fades in, so they never mix. The pill trails the circle a touch. */
+::view-transition-group(header-circle),::view-transition-group(header-pill){overflow:hidden;background:var(--glass);box-shadow:var(--glass-shadow)}
+::view-transition-group(header-circle){border-radius:50%}
+::view-transition-group(header-pill){border-radius:40px;animation-delay:.04s}
+::view-transition-old(header-circle),::view-transition-new(header-circle),::view-transition-old(header-pill),::view-transition-new(header-pill){height:100%;width:auto;object-fit:none;object-position:left center}
+::view-transition-old(header-circle),::view-transition-old(header-pill){animation:header-fade-out .18s ease-out both}
+::view-transition-new(header-circle),::view-transition-new(header-pill){animation:header-fade-in .3s ease-out .14s both}
+@keyframes header-fade-out{to{opacity:0}}
+@keyframes header-fade-in{from{opacity:0}}
+::view-transition-new(*):only-child{animation:header-in .5s cubic-bezier(.3,1.5,.5,1) both}
+::view-transition-old(*):only-child{animation:header-out .28s cubic-bezier(.5,0,.75,0) both}
+@keyframes header-in{from{opacity:0;transform:scale(.5) translateY(-6px)}}
+@keyframes header-out{to{opacity:0;transform:scale(.6) translateY(-4px)}}
+/* The level badge arrives through the header morph, so it needs no pop of its own. */
+.topbar .level-badge{animation:none}

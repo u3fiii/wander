@@ -1,4 +1,5 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Map as MapIcon, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
@@ -9,6 +10,16 @@ import BoostGauge from './BoostGauge';
 import type { DriftScore, Telemetry } from './game/Scene';
 import { BOOST_EARN, DRIVE_MODE, earnBoost, emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
 import type { ControlKey } from './game/driving';
+
+// Header morph: switching between the start screen and the drive (and the map) runs through the browser's view
+// transitions, so the header's pieces glide to their new places instead of jumping: the brand pill becomes the
+// home button and level badge, shared buttons slide along, new ones spring in. Only the header is captured (see
+// style.css), so the 3D scene keeps running underneath. Without support (or with reduced motion) it just switches.
+function morph(update: () => void) {
+  const doc = document as Document & { startViewTransition?: (callback: () => void) => unknown };
+  if (!doc.startViewTransition || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { update(); return; }
+  doc.startViewTransition(() => flushSync(update));
+}
 
 // Phones and tablets play in rails mode: the car drives itself and stays on the road, and the player only steers
 // (see DRIVE_MODE in driving.ts). `?rails=off` brings back the wheel and pedals.
@@ -483,7 +494,7 @@ export default function App() {
   const controls = useRef(emptyControls());
   const car = useRef(initialLoopCar());
   const reset = useCallback(() => { controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null); }, []);
-  const start = () => { startAudio(); playEngineStart(); setStarted(true); setPaused(false); setMapView(false); controls.current = emptyControls(); };
+  const start = () => { startAudio(); playEngineStart(); controls.current = emptyControls(); morph(() => { setStarted(true); setPaused(false); setMapView(false); }); };
   const onReady = useCallback(() => setReady(true), []);
 
   useEffect(() => {
@@ -495,11 +506,11 @@ export default function App() {
       if (isButton && (e.code === 'Enter' || (e.code === 'Space' && (!started || paused || help)))) return;
       if (mapping[e.code] && !paused && !help && !mapView) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
       if (e.repeat) return;
-      if (e.code === 'KeyM' && started && !paused && !help) { clear(); setMapView(v => !v); }
+      if (e.code === 'KeyM' && started && !paused && !help) { clear(); morph(() => setMapView(v => !v)); }
       if (e.code === 'KeyR' && started && !help && !mapView) reset();
       if (e.code === 'KeyF' && started && !paused && !help && !mapView) recover();
       if (e.code === 'KeyC' && !help) setCameraMode(n => 1 - n);
-      if (e.code === 'Escape') { clear(); if (help) setHelp(false); else if (mapView) setMapView(false); else if (started) setPaused(v => !v); }
+      if (e.code === 'Escape') { clear(); if (help) setHelp(false); else if (mapView) morph(() => setMapView(false)); else if (started) setPaused(v => !v); }
     };
     const up = (e: KeyboardEvent) => { held.delete(e.code); if (mapping[e.code]) controls.current[mapping[e.code]] = [...held].some(key => mapping[key] === mapping[e.code]); };
     const blur = () => { clear(); if (started) setPaused(true); };
@@ -542,7 +553,7 @@ export default function App() {
       {started
         // A round home button (back to the start screen), then the driver's level.
         ? <div className="topbar-left">
-          <button className="home-button" aria-label="Back to the start screen" title="Home" onClick={() => { setStarted(false); setPaused(false); setMapView(false); }}><House /></button>
+          <button className="home-button" aria-label="Back to the start screen" title="Home" onClick={() => morph(() => { setStarted(false); setPaused(false); setMapView(false); })}><House /></button>
           <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
           <span className="level-number" key={level.level}>{level.level}</span>
           <div><strong>{level.title}</strong><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i><small>{level.into} / {level.need} XP</small></div>
@@ -559,13 +570,13 @@ export default function App() {
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
         : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
       <nav className="toolbar" aria-label="Game settings">
-        <button aria-label={night ? 'Switch to evening' : 'Switch to night'} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>
-        {import.meta.env.DEV && <button aria-label="Day look" title="Day look" className={`desktop-only${showLook ? ' active' : ''}`} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
-        <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
-        <button className={`desktop-only${cameraMode ? ' active' : ''}`} aria-label="Change camera view" title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
-        <button className="desktop-only" aria-label="Controls and help" title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
-        {started && <button className={mapView ? 'active' : ''} aria-label={mapView ? 'Back to the road' : 'Open the map'} title="Map · M" onClick={() => { controls.current = emptyControls(); setMapView(v => !v); }}><MapIcon /></button>}
-        {started && !mapView && <button aria-label={paused ? 'Resume driving' : 'Pause game'} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
+        <button aria-label={night ? 'Switch to evening' : 'Switch to night'} style={{ viewTransitionName: 'tool-night' } as CSSProperties} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>
+        {import.meta.env.DEV && <button aria-label="Day look" style={{ viewTransitionName: 'tool-look' } as CSSProperties} title="Day look" className={`desktop-only${showLook ? ' active' : ''}`} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
+        <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
+        <button className={`desktop-only${cameraMode ? ' active' : ''}`} aria-label="Change camera view" style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
+        <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
+        {started && <button className={mapView ? 'active' : ''} aria-label={mapView ? 'Back to the road' : 'Open the map'} style={{ viewTransitionName: 'tool-map' } as CSSProperties} title="Map · M" onClick={() => { controls.current = emptyControls(); morph(() => setMapView(v => !v)); }}><MapIcon /></button>}
+        {started && !mapView && <button aria-label={paused ? 'Resume driving' : 'Pause game'} style={{ viewTransitionName: 'tool-pause' } as CSSProperties} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
       </nav>
     </header>
 
@@ -588,7 +599,7 @@ export default function App() {
 
     {started && mapView && <div className="map-bar" role="dialog" aria-label="Map">
       <span className="map-hint">Drag to turn the world</span>
-      <button className="map-back" autoFocus onClick={() => setMapView(false)}>Back to the road <ArrowRight size={18} /></button>
+      <button className="map-back" autoFocus onClick={() => morph(() => setMapView(false))}>Back to the road <ArrowRight size={18} /></button>
       <span className="map-key"><kbd>M</kbd></span>
     </div>}
     {started && !mapView && <>
@@ -628,7 +639,7 @@ export default function App() {
       <button autoFocus className="primary" onClick={() => setPaused(false)}>Resume drive <Play size={18} /></button>
       <div className="modal-row">
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
-        <button className="secondary" onClick={() => { setStarted(false); setPaused(false); setMapView(false); }}><ChevronLeft size={15} /> Back to globe</button>
+        <button className="secondary" onClick={() => morph(() => { setStarted(false); setPaused(false); setMapView(false); })}><ChevronLeft size={15} /> Back to globe</button>
       </div>
     </section></div>}
     {help && <Help close={() => setHelp(false)} />}
