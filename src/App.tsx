@@ -1,6 +1,6 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Map as MapIcon, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
 import LoadingScreen from './LoadingScreen';
 import { LogoMark } from './Logo';
@@ -97,7 +97,7 @@ import { VISUAL_QUALITY } from './game/artDirection';
 import { levelFor, loadXp, saveXp, streakXp } from './game/progression';
 import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { goTo, headingToNight, mixHex, nightAmount, skyAt, twilight } from './game/dayCycle';
-import { AUDIO_CONFIG, AUDIO_RANGES, currentGear, playEngineStart, setMuted, startAudio } from './game/audio';
+import { AUDIO_CONFIG, AUDIO_RANGES, playEngineStart, setMuted, startAudio } from './game/audio';
 
 const TITLE = 'Just drive.';
 // Traffic note wording, kept to a word or two, and which notes win when two land close together.
@@ -111,11 +111,13 @@ const NOTE_TEXT = {
   // Shown big, in the middle of the screen, while a slow-motion cut-in plays.
   bigSmash: ['WRECKED!', 'KABOOM!', 'TOTALED!', 'BRUTAL!'],
   bigNear: ['BY A HAIR', 'TOO CLOSE', 'CLOSE CALL', 'INCHES'],
+  // Ramming cars under boost: big too, with the combo.
+  bigBoost: ['SMASH!', 'BOOM!', 'WRECKING BALL!', 'OUTTA MY WAY!', 'UNSTOPPABLE!'],
   drift: ['Nice drift!', 'Clean slide!'],
   bigDrift: ['Big drift!', 'Sideways!'],
   hugeDrift: ['Drift king!', 'Endless slide!'],
 };
-const NOTE_RANK = { bigSmash: 5, bigNear: 5, level: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
+const NOTE_RANK = { bigSmash: 5, bigNear: 5, bigBoost: 5, level: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
 // Hits slower than this (m/s) still score, but without a note.
 const QUIET_HIT_SPEED = 7;
 const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -220,6 +222,10 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onCh
 export default function App() {
   const [started, setStarted] = useState(false);
   const [paused, setPaused] = useState(false);
+  // Map view: mid-drive, the camera pulls back to the globe (which can be turned by dragging) and the game holds
+  // still until the player goes back to the road. M, the map button, or Esc to return.
+  const [mapView, setMapView] = useState(false);
+  const halted = paused || mapView;
   const [night, setNight] = useState(false);
   // Day look panel (dev): live daytime mood settings, mirrored into the shared dayLook object the scene reads.
   const [look, setLook] = useState<DayLook>({ ...dayLook });
@@ -304,7 +310,7 @@ export default function App() {
     shownNote.current = { rank, until: now + 1400 };
     setHitNote({ id: hitCount.current++, kind, points, text, badge });
     window.clearTimeout(hitTimer.current);
-    hitTimer.current = window.setTimeout(() => setHitNote(null), kind === 'level' ? 3000 : kind.startsWith('big') ? 1550 : 2200);
+    hitTimer.current = window.setTimeout(() => setHitNote(null), kind === 'level' ? 3000 : kind === 'bigBoost' ? 1200 : kind.startsWith('big') ? 1550 : 2200);
   }, []);
   // A level-up takes the caption slot over anything else, with the new title.
   useEffect(() => {
@@ -313,13 +319,34 @@ export default function App() {
     if (level.level > shownLevel.current) { showNote('level', 0, false, `${level.level} · ${level.title}`); earnBoost(car.current, BOOST_EARN.levelUp); }
     shownLevel.current = level.level;
   }, [xp, level.level, level.title, showNote]);
+  // Weave combo: near misses one after another (each within difficulty.weaveWindow seconds of the last) build a
+  // multiplier on their points, up to difficulty.weaveMax. A crash or a bump breaks it. Shown beside the score,
+  // with a bar running down the time left.
+  const weaveRef = useRef({ count: 0, last: 0 });
+  const [weave, setWeave] = useState({ count: 0, id: 0, window: 0 });
+  const breakWeave = useCallback(() => { weaveRef.current.count = 0; setWeave(w => (w.count ? { ...w, count: 0 } : w)); }, []);
+  useEffect(() => {
+    if (weave.count < 2) return;
+    const timer = window.setTimeout(() => { weaveRef.current.count = 0; setWeave(w => (w.id === weave.id ? { ...w, count: 0 } : w)); }, weave.window * 1000);
+    return () => window.clearTimeout(timer);
+  }, [weave]);
+  // Boost hits chain into a combo: each car rammed within a couple of seconds of the last adds one, and the
+  // points are multiplied by it. Each one flashes the screen.
+  const boostCombo = useRef({ count: 0, last: 0 });
+  const [boostFlash, setBoostFlash] = useState(0);
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
     const magnitude = Math.round(hit.speed * 2) + 5;
-    if (hit.boosted) showNote('boost', Math.round(magnitude * 1.5), false);
-    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) showNote(hit.cinematic ? 'bigSmash' : 'smash', -(Math.round(hit.closing * 2) + 5), false);
+    if (hit.boosted) {
+      const combo = boostCombo.current, now = performance.now();
+      combo.count = now - combo.last < 2500 ? combo.count + 1 : 1;
+      combo.last = now;
+      showNote('bigBoost', Math.round(magnitude * 1.5 * combo.count), false, combo.count > 1 ? `×${combo.count}` : undefined);
+      setBoostFlash(n => n + 1);
+    }
+    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) { breakWeave(); showNote(hit.cinematic ? 'bigSmash' : 'smash', -(Math.round(hit.closing * 2) + 5), false); }
     else if (hit.kind === 'side') { showNote('flick', magnitude, hit.speed < QUIET_HIT_SPEED); if (hit.speed >= QUIET_HIT_SPEED) earnBoost(car.current, BOOST_EARN.flick); }
-    else showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED);
-  }, [showNote]);
+    else { breakWeave(); showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED); }
+  }, [showNote, breakWeave]);
   // A drift pays for how long and how fast it slid; longer ones get bigger words.
   const handleDrift = useCallback((drift: DriftScore) => {
     showNote(drift.time >= 3.5 ? 'hugeDrift' : drift.time >= 2 ? 'bigDrift' : 'drift', Math.round(drift.time * drift.speed * 1.2), false);
@@ -327,7 +354,12 @@ export default function App() {
   }, [showNote]);
   // Near misses pay more the faster the pass and the thinner the gap.
   const handleNearMiss = useCallback((miss: NearMiss) => {
-    showNote(miss.cinematic ? 'bigNear' : 'near', Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5, false);
+    const w = weaveRef.current, now = performance.now();
+    w.count = now - w.last < difficulty.weaveWindow * 1000 ? w.count + 1 : 1;
+    w.last = now;
+    const multiplier = Math.min(w.count, difficulty.weaveMax);
+    setWeave(previous => ({ count: w.count, id: previous.id + 1, window: difficulty.weaveWindow }));
+    showNote(miss.cinematic ? 'bigNear' : 'near', (Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5) * multiplier, false, multiplier > 1 ? `×${multiplier}` : undefined);
     earnBoost(car.current, BOOST_EARN.nearMiss);
   }, [showNote]);
   useEffect(() => {
@@ -343,7 +375,7 @@ export default function App() {
     const state = streak.current;
     const dt = state.last ? Math.min((now - state.last) / 1000, 0.5) : 0;
     state.last = now;
-    if (!started || paused) return;
+    if (!started || halted) return;
     const topSpeed = CAR_CONFIG.maxSpeed * 3.6;
     if (data.offroad || data.speed < topSpeed * 0.3) state.time = 0;
     else if (data.speed > topSpeed * JUICE_CONFIG.streakSpeedRatio) state.time += dt;
@@ -421,7 +453,7 @@ export default function App() {
     return () => { disposed = true; gui?.destroy(); window.removeEventListener('keydown', toggle); };
   }, []);
   // Only warn after the car has stayed off the road for a moment, not on every brief excursion.
-  const offRoadNow = started && !paused && !!data.offroad;
+  const offRoadNow = started && !halted && !!data.offroad;
   const [roadWarning, setRoadWarning] = useState(false);
   useEffect(() => {
     if (!offRoadNow) { setRoadWarning(false); return; }
@@ -437,7 +469,7 @@ export default function App() {
     const dt = state.last ? Math.min((now - state.last) / 1000, 0.5) : 0;
     state.last = now;
     const pressing = (data.throttle ?? 0) > 0.3 || controls.current.back;
-    state.time = started && !paused && pressing && data.speed < 3 ? state.time + dt : 0;
+    state.time = started && !halted && pressing && data.speed < 3 ? state.time + dt : 0;
     if (state.time > 1.5) setStuckHint(true);
     else if (data.speed > 8 || !started) setStuckHint(false);
   }, [data, started, paused]);
@@ -451,7 +483,7 @@ export default function App() {
   const controls = useRef(emptyControls());
   const car = useRef(initialLoopCar());
   const reset = useCallback(() => { controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null); }, []);
-  const start = () => { startAudio(); playEngineStart(); setStarted(true); setPaused(false); controls.current = emptyControls(); };
+  const start = () => { startAudio(); playEngineStart(); setStarted(true); setPaused(false); setMapView(false); controls.current = emptyControls(); };
   const onReady = useCallback(() => setReady(true), []);
 
   useEffect(() => {
@@ -461,19 +493,20 @@ export default function App() {
     const down = (e: KeyboardEvent) => {
       const isButton = e.target instanceof HTMLElement && !!e.target.closest('button');
       if (isButton && (e.code === 'Enter' || (e.code === 'Space' && (!started || paused || help)))) return;
-      if (mapping[e.code] && !paused && !help) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
+      if (mapping[e.code] && !paused && !help && !mapView) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
       if (e.repeat) return;
-      if (e.code === 'KeyR' && started && !help) reset();
-      if (e.code === 'KeyF' && started && !paused && !help) recover();
+      if (e.code === 'KeyM' && started && !paused && !help) { clear(); setMapView(v => !v); }
+      if (e.code === 'KeyR' && started && !help && !mapView) reset();
+      if (e.code === 'KeyF' && started && !paused && !help && !mapView) recover();
       if (e.code === 'KeyC' && !help) setCameraMode(n => 1 - n);
-      if (e.code === 'Escape') { clear(); if (help) setHelp(false); else if (started) setPaused(v => !v); }
+      if (e.code === 'Escape') { clear(); if (help) setHelp(false); else if (mapView) setMapView(false); else if (started) setPaused(v => !v); }
     };
     const up = (e: KeyboardEvent) => { held.delete(e.code); if (mapping[e.code]) controls.current[mapping[e.code]] = [...held].some(key => mapping[key] === mapping[e.code]); };
     const blur = () => { clear(); if (started) setPaused(true); };
     const visibility = () => { if (document.hidden) blur(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility);
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
-  }, [started, paused, help, reset, recover]);
+  }, [started, paused, help, mapView, reset, recover]);
 
   const touch = (key: ControlKey) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); controls.current[key] = true; },
@@ -481,7 +514,7 @@ export default function App() {
     onPointerCancel: () => { controls.current[key] = false; },
     onLostPointerCapture: () => { controls.current[key] = false; },
   });
-  return <main ref={mainRef} className={`app scale-study q-${VISUAL_QUALITY}${RAILS ? ' rails' : ''} ${night ? 'night' : ''} ${started ? 'playing' : 'intro'} ${revealed ? 'ready' : ''}`} style={{ '--night-top': nightValues.skyTop, '--night-horizon': nightValues.skyHorizon, '--aurora': nightValues.aurora, '--boost-tint': boostValues.tintColour, '--boost-tint-opacity': boostValues.tintOpacity } as CSSProperties}>
+  return <main ref={mainRef} className={`app scale-study q-${VISUAL_QUALITY}${RAILS ? ' rails' : ''} ${night ? 'night' : ''} ${started ? 'playing' : 'intro'}${mapView ? ' map-view' : ''} ${revealed ? 'ready' : ''}`} style={{ '--night-top': nightValues.skyTop, '--night-horizon': nightValues.skyHorizon, '--aurora': nightValues.aurora, '--boost-tint': boostValues.tintColour, '--boost-tint-opacity': boostValues.tintOpacity } as CSSProperties}>
     {showLook && <LookPanel
       mode={lookMode}
       onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
@@ -501,21 +534,27 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><DaySky /><NightSky /><SceneBoundary><Scene started={started} paused={paused || help} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><DaySky /><NightSky /><SceneBoundary><Scene started={started && !mapView} paused={paused || help || mapView} mapView={mapView} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className="topbar">
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
           (centre, driving only), and the settings with pause (right). No logo while driving. */}
       {started
-        ? <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
+        // A round home button (back to the start screen), then the driver's level.
+        ? <div className="topbar-left">
+          <button className="home-button" aria-label="Back to the start screen" title="Home" onClick={() => { setStarted(false); setPaused(false); setMapView(false); }}><House /></button>
+          <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
           <span className="level-number" key={level.level}>{level.level}</span>
           <div><strong>{level.title}</strong><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i><small>{level.into} / {level.need} XP</small></div>
+          </div>
         </div>
         : <a href="#" className="brand" aria-label="Wander, home" onClick={e => e.preventDefault()}>
-          <LogoMark size={46} />
-          <div><strong dir="ltr">Wander<span>.</span></strong><small>DRIVE · DISCOVER</small></div>
+          <span className="brand-mark"><LogoMark size={34} /></span>
+          <div><strong dir="ltr">Wander<span>.</span></strong><small>Drive · Discover</small></div>
         </a>}
-      {started && <div className="score-pill" aria-label={`Score ${score}`}><span>Score</span><b key={score}>{formatNumber(score)}</b></div>}
+      {started && <div className="score-pill" aria-label={`Score ${score}`}><span>Score</span><b key={score}>{formatNumber(score)}</b>
+        {weave.count > 1 && <em key={weave.id} className="weave-chip" title="Weave combo" style={{ '--window': `${weave.window}s` } as CSSProperties}>×{Math.min(weave.count, difficulty.weaveMax)}<i /></em>}
+      </div>}
       {stuckHint
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
         : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
@@ -525,36 +564,53 @@ export default function App() {
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         <button className={`desktop-only${cameraMode ? ' active' : ''}`} aria-label="Change camera view" title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
         <button className="desktop-only" aria-label="Controls and help" title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
-        {started && <button aria-label={paused ? 'Resume driving' : 'Pause game'} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
+        {started && <button className={mapView ? 'active' : ''} aria-label={mapView ? 'Back to the road' : 'Open the map'} title="Map · M" onClick={() => { controls.current = emptyControls(); setMapView(v => !v); }}><MapIcon /></button>}
+        {started && !mapView && <button aria-label={paused ? 'Resume driving' : 'Pause game'} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
       </nav>
     </header>
 
     {!started && <section className="intro-card">
-      <h1 aria-label={TITLE}>{[...TITLE].map((c, i) => <span key={i} aria-hidden="true" className="ch" style={{ '--d': `${1000 + i * 60}ms` } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</h1>
+      {/* The driver's level, like the badge in the game's header; a welcome back for returning players. */}
+      <div className="intro-level rise" style={{ '--d': '800ms' } as CSSProperties}>
+        <span className="level-number">{level.level}</span><strong>{level.title}</strong>{xp > 0 && <span className="intro-welcome">Welcome back</span>}
+      </div>
+      <h1 aria-label={TITLE}>{[...TITLE].map((c, i) => <span key={i} aria-hidden="true" className={`ch${c === '.' ? ' dot' : ''}`} style={{ '--d': `${1000 + i * 60}ms` } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</h1>
       <p className="intro-copy rise" style={{ '--d': '1700ms' } as CSSProperties}>
         <span>Explore a little world behind the wheel.</span>
         <span>Play in your browser. No download needed.</span>
       </p>
-      <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={start}>{ready ? 'Start driving' : 'Preparing the globe...'}<ArrowRight size={22} /></button></div>
-      <div className="intro-controls rise" style={{ '--d': '2500ms' } as CSSProperties}><span className="key-cluster"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>or arrow keys</span></div>
-      <div className="intro-caption rise" style={{ '--d': '2900ms' } as CSSProperties}>Drag to rotate · Shift-drag to move</div>
+      <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={start}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button></div>
+      <div className="intro-hints rise" style={{ '--d': '2500ms' } as CSSProperties}>
+        <div className="intro-controls"><span className="key-cluster"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>or arrow keys</span></div>
+        <div className="intro-caption">Drag to rotate · Shift-drag to move</div>
+      </div>
     </section>}
 
-    {started && <>
+    {started && mapView && <div className="map-bar" role="dialog" aria-label="Map">
+      <span className="map-hint">Drag to turn the world</span>
+      <button className="map-back" autoFocus onClick={() => setMapView(false)}>Back to the road <ArrowRight size={18} /></button>
+      <span className="map-key"><kbd>M</kbd></span>
+    </div>}
+    {started && !mapView && <>
+      {boostFlash > 0 && <div key={boostFlash} className="boost-flash" aria-hidden="true" />}
       <Coach rails={!!RAILS} active={!paused && !help && !roadWarning && !stuckHint} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={(data.boost ?? 1) >= 1 && !data.boosting} />
       <div className="speedometer">
         <svg className="speed-dial" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="27" pathLength="100" fill="none" className="arc-track" /><circle cx="32" cy="32" r="27" pathLength="100" fill="none" className="arc-fill" strokeDasharray="0 100" ref={speedArc} /></svg>
         <div className="speed-readout"><strong ref={speedText}>0</strong><small>km/h</small></div>
-        <span className="speed-label"><b>{car.current.speed < -0.1 ? 'R' : data.speed < 2 ? 'N' : currentGear()}</b>{formatNumber(data.distance)} m</span>
+        <span className="speed-label"><b>{car.current.speed < -0.1 ? 'R' : 'D'}</b>{formatNumber(data.distance)} m</span>
       </div>
       <BoostGauge car={car} controls={controls} offroad={!!data.offroad} />
-      {hitNote && (hitNote.kind === 'bigSmash' || hitNote.kind === 'bigNear'
-        // During a slow-motion cut-in: big, in the middle of the screen, the word built letter by letter.
-        ? <div key={hitNote.id} className={`big-note ${hitNote.kind === 'bigSmash' ? 'smash' : 'near'}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
+      {hitNote && (hitNote.kind.startsWith('big')
+        // During a slow-motion cut-in, or ramming cars under boost: big, the word built letter by letter.
+        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}
+          style={{ '--combo': Math.min(5, boostCombo.current.count) } as CSSProperties}>
           <strong aria-hidden="true">{[...hitNote.text].map((letter, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{letter === ' ' ? '\u00a0' : letter}</span>)}</strong>
-          <b aria-hidden="true" style={{ '--i': hitNote.text.length } as CSSProperties}>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b>
+          <span className="big-scores" aria-hidden="true">
+            <b style={{ '--i': hitNote.text.length } as CSSProperties}>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b>
+            {hitNote.badge && <em className="big-combo" style={{ '--i': hitNote.text.length + 2 } as CSSProperties}>{hitNote.badge}</em>}
+          </span>
         </div>
-        : <div key={hitNote.id} className={`hit-note ${/drift/i.test(hitNote.kind) ? `drift ${hitNote.kind}` : hitNote.kind}`} role="status">{hitNote.text} <b>{hitNote.badge ?? `${hitNote.points > 0 ? '+' : ''}${hitNote.points}`}</b></div>)}
+        : <div key={hitNote.id} className={`hit-note ${/drift/i.test(hitNote.kind) ? `drift ${hitNote.kind}` : hitNote.kind}`} role="status">{hitNote.text} <b>{hitNote.kind === 'level' ? hitNote.badge : `${hitNote.points > 0 ? '+' : ''}${hitNote.points}`}</b>{hitNote.kind !== 'level' && hitNote.badge && <b className="note-combo">{hitNote.badge}</b>}</div>)}
       {/* One line of captions at a time: a traffic note takes the slot over a streak. */}
       {streakShown && !hitNote && <div key={streakLevel} className="hit-note streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
       <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="key-hint"><kbd>Space</kbd> Brake</span><span className="key-hint"><kbd>Shift</kbd> Boost</span><span className="key-hint"><kbd>F</kbd> Back to road</span><span className="key-hint"><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
@@ -572,7 +628,7 @@ export default function App() {
       <button autoFocus className="primary" onClick={() => setPaused(false)}>Resume drive <Play size={18} /></button>
       <div className="modal-row">
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
-        <button className="secondary" onClick={() => { setStarted(false); setPaused(false); }}><ChevronLeft size={15} /> Back to globe</button>
+        <button className="secondary" onClick={() => { setStarted(false); setPaused(false); setMapView(false); }}><ChevronLeft size={15} /> Back to globe</button>
       </div>
     </section></div>}
     {help && <Help close={() => setHelp(false)} />}

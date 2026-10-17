@@ -18,10 +18,8 @@ export const SOUND_TUNING_SLIDERS: Array<{ key: keyof SoundTuning; label: string
   { key: 'engineRumble', label: 'Putter', min: 0, max: 1, step: 0.01 },
   { key: 'enginePitch', label: 'Pitch', min: 0.5, max: 1.5, step: 0.01 },
   { key: 'engineGrit', label: 'Grit', min: 0, max: 1, step: 0.01 },
-  { key: 'gears', label: 'Gears', min: 1, max: 6, step: 1, group: 'Gearbox' },
-  { key: 'shiftDrop', label: 'Rpm drop on a shift', min: 0, max: 0.8, step: 0.01 },
-  { key: 'shiftDip', label: 'Volume dip on a shift', min: 0, max: 1, step: 0.01 },
   { key: 'master', label: 'Everything', min: 0, max: 1, step: 0.01, group: 'Volumes' },
   { key: 'slowMoWhooshVolume', label: 'Near-miss whoosh', min: 0, max: 1, step: 0.01 },
+  { key: 'impactVolume', label: 'Boost hit boom', min: 0, max: 1.5, step: 0.01 },
   { key: 'ambienceVolume', label: 'Wind in the background', min: 0, max: 0.4, step: 0.005 },
 ];

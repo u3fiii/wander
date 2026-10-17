@@ -1,13 +1,12 @@
 {
   "master": 0.35,
-  "synthVolume": 0.04,
-  "engineBody": 0.98,
+  "synthVolume": 0.055,
+  "engineBody": 0,
   "engineRumble": 1,
   "enginePitch": 0.5,
-  "engineGrit": 0,
+  "engineGrit": 0.27,
   "slowMoWhooshVolume": 0.2,
   "ambienceVolume": 0.045,
-  "gears": 5,
-  "shiftDrop": 0.35,
-  "shiftDip": 0.5
+  "rainVolume": 0.2,
+  "impactVolume": 0.5
 }

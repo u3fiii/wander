@@ -19,7 +19,10 @@ test('difficulty starts easy, firms up with level and levels off', async () => {
   const { difficultyAt } = await import('./difficulty.ts');
   const easy = difficultyAt(1), mid = difficultyAt(6), full = difficultyAt(12), beyond = difficultyAt(40);
   assert.equal(easy.trafficCars, 3);
-  assert.equal(full.trafficCars, 7);
+  assert.equal(full.trafficCars, 11);
+  assert.equal(easy.swervers, 0);
+  assert.ok(full.swervers >= 3);
+  assert.ok(full.weaveMax > easy.weaveMax && full.weaveWindow < easy.weaveWindow);
   assert.deepEqual(beyond, full);
   assert.ok(easy.nearMissGap > mid.nearMissGap && mid.nearMissGap > full.nearMissGap);
   assert.ok(easy.penalty < full.penalty && easy.bonus > full.bonus);

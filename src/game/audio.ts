@@ -35,6 +35,8 @@ export const AUDIO_CONFIG = {
   enginePitch: 0.85, engineGrit: 0.35,
   boostVolume: 0.2, boostPitchBump: 0.25, boostBumpTime: 0.6,
   thudVolume: 0,
+  // Ramming a car under boost.
+  impactVolume: 0.5,
   // Ambience: a soft wind over the whole map, always there and barely heard.
   ambienceVolume: 0.045,
   startVolume: 0.25, slowMoWhooshVolume: 0.2, slowMoMuffleHz: 650, slowMoPitchDrop: 0.45,
@@ -53,7 +55,7 @@ export const AUDIO_RANGES: Record<AudioKey, [number, number, number]> = {
   offroadVolume: [0, 1, 0.01], offroadHz: [80, 2000, 10],
   synthVolume: [0, 0.2, 0.005], engineBody: [0, 1, 0.01], engineRumble: [0, 1, 0.01], enginePitch: [0.5, 1.5, 0.01], engineGrit: [0, 1, 0.01],
   boostVolume: [0, 1, 0.01], boostPitchBump: [0, 1, 0.01], boostBumpTime: [0.1, 2, 0.05],
-  thudVolume: [0, 1, 0.01], ambienceVolume: [0, 0.4, 0.005],
+  thudVolume: [0, 1, 0.01], impactVolume: [0, 1.5, 0.01], ambienceVolume: [0, 0.4, 0.005],
   startVolume: [0, 1, 0.01], slowMoWhooshVolume: [0, 1, 0.01], slowMoMuffleHz: [200, 5000, 10], slowMoPitchDrop: [0, 0.9, 0.01],
   loopTrim: [0, 0.2, 0.005],
 };
@@ -300,6 +302,34 @@ export function playSlowMoWhoosh(level = 1) {
   oneShot(buffers.slowmo, AUDIO_CONFIG.slowMoWhooshVolume * level, () => playWhoosh(JUICE_CONFIG.whooshVolume * level));
 }
 
+// Ramming a car under boost: a heavy boom (a low sine dropping fast, under a short burst of noise), unmuffled.
+export function playImpact() {
+  if (!graph || muted) return;
+  const { context, master, noise } = graph;
+  const now = context.currentTime, volume = AUDIO_CONFIG.impactVolume;
+  const tone = context.createOscillator();
+  tone.type = 'sine';
+  tone.frequency.setValueAtTime(120, now);
+  tone.frequency.exponentialRampToValueAtTime(38, now + 0.28);
+  const toneGain = context.createGain();
+  toneGain.gain.setValueAtTime(0, now);
+  toneGain.gain.linearRampToValueAtTime(volume, now + 0.008);
+  toneGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+  tone.connect(toneGain).connect(master);
+  tone.start(now); tone.stop(now + 0.4);
+  const burst = context.createBufferSource();
+  burst.buffer = noise;
+  const filter = context.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(2400, now);
+  filter.frequency.exponentialRampToValueAtTime(300, now + 0.2);
+  const burstGain = context.createGain();
+  burstGain.gain.setValueAtTime(volume * 0.6, now);
+  burstGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+  burst.connect(filter).connect(burstGain).connect(master);
+  burst.start(now, Math.random()); burst.stop(now + 0.25);
+}
+
 // A landing or bump: a tiny thud (strength 0..1).
 export function playThud(strength = 1) {
   const volume = AUDIO_CONFIG.thudVolume * Math.min(1, Math.max(0, strength));
@@ -384,9 +414,9 @@ export function updateAudio(input: AudioInput) {
     glide(graph.engine.gain.gain, engineLevel, now);
     glide(graph.oscGain.gain, 0, now);
   } else {
-    // The simple engine, geared: its pitch follows the gearbox rpm (engineModel.ts), climbing through each gear,
-    // dropping at each shift (with the volume dip) and falling slowly off the throttle.
-    const pitch = (55 + engine.rpm * 160 + throttle * 15) * (1 + engine.bump) * c.enginePitch * slowRate;
+    // The simple engine, like an automatic: its pitch rises smoothly with speed (and a little with the throttle),
+    // with no gear shifts, so it always moves with the car.
+    const pitch = (55 + Math.min(speed, 1.2) * 140 + throttle * 25) * (1 + engine.bump) * c.enginePitch * slowRate;
     setGrit(graph.grit, c.engineGrit);
     glide(graph.oscA.frequency, pitch, now);
     glide(graph.oscB.frequency, pitch * 0.5, now);
@@ -395,8 +425,8 @@ export function updateAudio(input: AudioInput) {
     // Firing rate: half the pitch, a slow "trrr" at idle that speeds into a growl.
     glide(graph.putter.frequency, pitch * 0.5, now);
     glide(graph.putterDepth.gain, -c.engineRumble * 0.5, now);
-    glide(graph.oscFilter.frequency, 300 + engine.rpm * 800 + throttle * 300, now, 0.08);
-    glide(graph.oscGain.gain, on ? c.synthVolume * (0.45 + throttle * 0.55) * dip : 0, now, 0.1);
+    glide(graph.oscFilter.frequency, 300 + speed * 700 + throttle * 300, now, 0.08);
+    glide(graph.oscGain.gain, on ? c.synthVolume * (0.45 + throttle * 0.55) : 0, now, 0.1);
   }
   if (graph.load) {
     glide(graph.load.source.playbackRate, rate * c.loadRateRatio * (buffers['engine-load'] ? 1 : 1.12), now);

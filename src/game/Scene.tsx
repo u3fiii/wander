@@ -7,7 +7,7 @@ import { withDraco } from './gltf';
 import { CAR_CONFIG, JUICE_CONFIG, LOOP_DRIVE } from './config';
 import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
-import { playBoost, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
+import { playBoost, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
 import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
@@ -20,7 +20,7 @@ import IntroDepthOfField from './IntroDepthOfField';
 import { cinematicState } from './cinematic';
 import { nightState } from './nightState';
 import { advanceCycle, nightAmount, twilight } from './dayCycle';
-import { difficulty, trafficActive } from './difficulty';
+import { difficulty, trafficActive, trafficSwerves } from './difficulty';
 import { dayLook } from './dayLook';
 import { nightLook } from './nightLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
@@ -65,7 +65,7 @@ function readGamepad() {
   return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
-  started: boolean; paused: boolean; cameraMode: number; resetKey: number;
+  started: boolean; paused: boolean; mapView?: boolean; cameraMode: number; resetKey: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
   onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void;
 };
@@ -74,6 +74,8 @@ const localUp = new THREE.Vector3(0, 1, 0);
 const localGlobeCenter = new THREE.Vector3(0, -GLOBE_RADIUS, 0);
 const scenicSpawnAngles = [0.32, 0.78, 1.92, 2.55, 3.82, 4.46, 5.7] as const;
 const TRAFFIC_LANE_OFFSET = 1.22;
+// A swaying car drifts this far (m) either side of its lane line, a full sway taking 2π / rate seconds.
+const SWERVE = { width: 0.9, rate: 0.75 };
 // Just inside the road edge (half width 2.88): counts as on-road but clear of both traffic lanes.
 const PARKING_OFFSET = -3.2;
 
@@ -302,6 +304,11 @@ const traffic = [
   { modelUrl: ambulanceModelUrl, pathIndex: 0, progress: 0.27, speed: -6.7, scale: 1.16 },
   { modelUrl: truckModelUrl, pathIndex: 0, progress: 0.83, speed: 4.8, scale: 1.22 },
   { modelUrl: deliveryModelUrl, pathIndex: 0, progress: 0.92, speed: -4.6, scale: 1.18 },
+  // Extra cars for the busier roads of higher levels (see difficulty.ts).
+  { modelUrl: taxiModelUrl, pathIndex: 0, progress: 0.47, speed: -5.6, scale: 1.26 },
+  { modelUrl: suvModelUrl, pathIndex: 0, progress: 0.04, speed: -5.0, scale: 1.28 },
+  { modelUrl: policeModelUrl, pathIndex: 0, progress: 0.76, speed: -6.2, scale: 1.2 },
+  { modelUrl: vanModelUrl, pathIndex: 0, progress: 0.21, speed: 5.4, scale: 1.22 },
 ];
 const TRAFFIC_COLORS = trafficColors(traffic.length, traffic.map((_, index) => index).sort((a, b) => traffic[a].progress - traffic[b].progress));
 const TRAFFIC_JITTER = (() => { const random = seededRandom(9002); return traffic.map(() => jitterAmount(random, JITTER.cars)); })();
@@ -319,6 +326,8 @@ const SIDE_HIT = {
   fling: 1.15, hop: 0.65, roll: 0.65,
   maxLateralVelocity: 3.4, maxSpinVelocity: 1.5,
 };
+// How hard the camera reacts to ramming a car under boost.
+const BOOST_IMPACT = { shake: 0.5, fov: 9, tilt: 2.2 };
 // A car hit by a boosting player is thrown clear of the lane, whatever the angle: hard to the side, up in the
 // air with a big spin, and (hit from behind) punted forward, so it is out of the player's way at once.
 const BOOST_HIT = { fling: 2.4, minLateralVelocity: 10, maxLateralVelocity: 15, hop: 2.2, spin: 2.5, punt: 0.8 };
@@ -380,6 +389,8 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0 });
   const hit = useRef({ hop: 0, hopVelocity: 0, roll: 0, rollVelocity: 0, squash: 0, squashVelocity: 0 });
   const presence = useRef(trafficActive(progressIndex) ? 1 : 0);
+  // Swaying in the lane (higher levels): eased in and out, with this car's own phase.
+  const swerve = useRef({ amount: 0, phase: progressIndex * 1.7, time: 0 });
   const body = useRef<THREE.Group>(null!);
   const heading = useMemo(() => new THREE.Vector3(), []);
   const playerPoint = useMemo(() => new THREE.Vector3(), []);
@@ -401,7 +412,11 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     normal.set(...frame.normal);
     tangent.set(...frame.tangent).multiplyScalar(Math.sign(speed));
     right.crossVectors(tangent, normal).normalize();
-    group.current.position.set(...frame.point).addScaledVector(right, TRAFFIC_LANE_OFFSET + m.push);
+    const sway = swerve.current;
+    sway.amount = THREE.MathUtils.damp(sway.amount, trafficSwerves(progressIndex) ? 1 : 0, 0.8, Math.min(delta, 0.05));
+    if (!paused) sway.time += dt;
+    const swayOffset = sway.amount * SWERVE.width * Math.sin(sway.time * SWERVE.rate + sway.phase);
+    group.current.position.set(...frame.point).addScaledVector(right, TRAFFIC_LANE_OFFSET + m.push + swayOffset);
     const surfaceRadius = Math.hypot(frame.point[0], frame.point[1] + GLOBE_RADIUS, frame.point[2]);
     group.current.position.sub(localGlobeCenter).normalize().multiplyScalar(surfaceRadius).add(localGlobeCenter);
     back.copy(tangent).negate();
@@ -967,7 +982,8 @@ function DrivingScene(props: SceneProps) {
     }
     landingCompression.current = THREE.MathUtils.damp(landingCompression.current, 0, 6.5, dt);
     scaleGroup.current.scale.setScalar(1);
-    if (!props.started && zoomProgress.current < 0.02 && !dragging.current) rotation.current += dt * 0.11;
+    // The idle spin is for the start screen; the map holds still so the player can find their way.
+    if (!props.started && !props.mapView && zoomProgress.current < 0.02 && !dragging.current) rotation.current += dt * 0.11;
     // After a drive the globe may be tilted; ease it back upright slowly in the intro.
     if (!props.started && !dragging.current) pitch.current = THREE.MathUtils.damp(pitch.current, 0, 0.6, dt);
     if (props.started) {
@@ -1027,6 +1043,13 @@ function DrivingScene(props: SceneProps) {
         trauma.current = Math.min(1, trauma.current + CRASH_CAM.shake);
         // The red slow motion keeps the short synthesised whoosh; the recorded one is for near misses only.
         playWhoosh();
+      } else if (hit.boosted) {
+        // A boost hit: no slow motion (the boost never pauses), so the punch is all in the hit itself — a hard
+        // shake, a lens kick, a sharp tilt and a heavy boom.
+        dutchVelocity.current += -hit.side * SIDE_HIT_CAMERA.dutchKick * BOOST_IMPACT.tilt;
+        fovKick.current += BOOST_IMPACT.fov;
+        trauma.current = Math.min(1, trauma.current + BOOST_IMPACT.shake);
+        playImpact();
       } else {
         dutchVelocity.current += -hit.side * SIDE_HIT_CAMERA.dutchKick;
         lookSwing.current = hit.side * SIDE_HIT_CAMERA.swing;
@@ -1306,13 +1329,32 @@ function DrivingScene(props: SceneProps) {
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld zoom={zoomProgress} />
         <Traffic paused={props.paused} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} />
-        <group ref={vehicle}><CarModel car={props.car} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /></group>
+        <group ref={vehicle}><CarModel car={props.car} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
         <primitive object={dust.mesh} />
         <primitive object={soilClods.mesh} />
       </group>
     </group>
   </>;
+}
+
+// Map view: a gold pin bobbing above the car, so the player can find themselves on the globe. It grows in as
+// the map opens and shrinks away on the way back to the road.
+function MapPin({ show }: { show: boolean }) {
+  const pin = useRef<THREE.Group>(null!);
+  const size = useRef(0);
+  const material = useMemo(() => new THREE.MeshBasicMaterial({ color: '#f4b544', fog: false }), []);
+  useEffect(() => () => material.dispose(), [material]);
+  useFrame((state, delta) => {
+    size.current = THREE.MathUtils.damp(size.current, show ? 1 : 0, 5, Math.min(delta, 0.05));
+    pin.current.visible = size.current > 0.01;
+    pin.current.scale.setScalar(2.4 * size.current);
+    pin.current.position.y = 2.6 + Math.sin(state.clock.elapsedTime * 3) * 0.35;
+  });
+  return <group ref={pin} visible={false}>
+    <mesh material={material} position={[0, 0.55, 0]}><sphereGeometry args={[0.42, 12, 8]} /></mesh>
+    <mesh material={material} rotation={[Math.PI, 0, 0]}><coneGeometry args={[0.3, 0.9, 10]} /></mesh>
+  </group>;
 }
 
 // Frame pacing: frames are drawn on demand at most 60 times a second (30 while paused), so a 120 Hz screen
