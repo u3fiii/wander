@@ -815,7 +815,7 @@
 @media (max-width:600px){
   .playing .hud-center .score-pill{flex:0 0 auto;width:max-content;min-width:0;padding:7px 12px 7px 7px;justify-content:center}
   .hud-center .hearts-bar{flex:none;height:44px;padding:0 10px;gap:5px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow)}
-  .hud-center .hearts-bar .heart-icon{width:17px;height:17px;filter:drop-shadow(0 2px 4px #0b161a66)}
+  .hud-center .hearts-bar .heart-icon{width:20px;height:20px;filter:drop-shadow(0 2px 4px #0b161a66)}
   .hud-center .hearts-bar .full{filter:drop-shadow(0 0 5px #ff4f4588) drop-shadow(0 2px 4px #0b161a66)}
   .hud-center .hearts-bar .lost .heart-body{stroke:#ffffff99}
 }
