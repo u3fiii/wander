@@ -14,9 +14,9 @@ export function Podium({ board, highlight = -1 }: { board: Entry[]; highlight?: 
   const place = (rank: number) => {
     const entry = board[rank];
     return <div key={rank} className={`podium-place p${rank + 1}${entry ? '' : ' empty'}${rank === highlight ? ' mine' : ''}`}>
-      {rank === 0 && entry && <Crown className="podium-crown" />}
-      <span className="podium-name">{entry?.name ?? '—'}</span>
-      <b className="podium-score">{entry ? number(entry.score) : ''}</b>
+      {rank === 0 && <Crown className={`podium-crown${entry ? '' : ' waiting'}`} />}
+      <span className="podium-name">{entry?.name ?? <i className="skeleton-line skeleton-name" aria-hidden="true" />}</span>
+      <b className="podium-score">{entry ? number(entry.score) : <i className="skeleton-line skeleton-score" aria-hidden="true" />}</b>
       <div className="podium-block"><span>{rank + 1}</span></div>
     </div>;
   };
@@ -27,8 +27,8 @@ export function Podium({ board, highlight = -1 }: { board: Entry[]; highlight?: 
         const entry = board[rank];
         return <li key={rank} className={`${entry ? '' : 'empty'}${rank === highlight ? ' mine' : ''}`}>
           <span className="board-rank">{rank + 1}</span>
-          <span className="board-name">{entry?.name ?? '—'}{entry && <small>{number(entry.distance)} m · {clock(entry.seconds)}</small>}</span>
-          <span className="board-score">{entry ? number(entry.score) : ''}</span>
+          <span className="board-name">{entry?.name ?? <i className="skeleton-line skeleton-name" aria-hidden="true" />}{entry && <small>{number(entry.distance)} m · {clock(entry.seconds)}</small>}</span>
+          <span className="board-score">{entry ? number(entry.score) : <i className="skeleton-line skeleton-score" aria-hidden="true" />}</span>
         </li>;
       })}
     </ol>
@@ -44,7 +44,7 @@ export default function Leaderboard({ close }: { close: () => void }) {
   useEffect(() => { if (sharedBoard) fetchTop().then(top => (top ? setEveryone(top) : setFailed(true))); }, []);
   const local = loadBoard();
   const board = view === 'everyone' ? everyone ?? [] : local;
-  return <div className="modal-shade" onClick={close}><section className="modal leaderboard" role="dialog" aria-modal="true" aria-labelledby="board-title" onClick={event => event.stopPropagation()}>
+  return <div className="modal-shade leaderboard-shade" onClick={close}><section className="modal leaderboard" role="dialog" aria-modal="true" aria-labelledby="board-title" onClick={event => event.stopPropagation()}>
     <button className="close-button" autoFocus aria-label="Close the leaderboard" onClick={close}><X size={18} /></button>
     <span className="eyebrow"><Trophy size={14} /> LEADERBOARD</span>
     <h2 id="board-title">Top five</h2>
@@ -52,8 +52,8 @@ export default function Leaderboard({ close }: { close: () => void }) {
       <button role="tab" aria-selected={view === 'everyone'} className={view === 'everyone' ? 'on' : ''} onClick={() => setView('everyone')}>Everyone</button>
       <button role="tab" aria-selected={view === 'device'} className={view === 'device' ? 'on' : ''} onClick={() => setView('device')}>This device</button>
     </div>
-    {view === 'everyone' && !everyone && <p className="board-empty">{!sharedBoard ? 'The shared leaderboard is not connected yet. Only scores on this device are available.' : failed ? 'The shared board could not be reached. Try again in a moment.' : 'Loading the board…'}</p>}
-    {(view === 'device' || everyone) && board.length === 0 && <p className="board-empty">No runs yet. Five hearts, one road: your first run takes the top spot.</p>}
-    {(view === 'device' || everyone) && <Podium board={board} />}
+    {view === 'everyone' && !everyone && <p className="board-empty">{!sharedBoard ? 'The shared leaderboard is not connected yet. Only scores on this device are available.' : failed ? 'The shared board could not be reached. Try again in a moment.' : 'Loading shared scores…'}</p>}
+    {view === 'device' && board.length === 0 && <p className="board-empty">No runs yet. Three hearts, one road: your first run takes the top spot.</p>}
+    <Podium board={board} />
   </section></div>;
 }

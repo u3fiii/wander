@@ -419,6 +419,20 @@
   .modal .primary{min-height:52px;font-size:15px}
 }
 
+/* Controls help on phones: use the whole game viewport and make the instructions comfortable to read. */
+@media (pointer:coarse),(max-width:600px){
+  .help-shade{padding:0;place-items:stretch}
+  .help-modal{width:100%;height:100%;max-width:none;max-height:100%;justify-self:stretch;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;padding:calc(34px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));border-radius:0}
+  .help-modal .close-button{position:fixed;top:calc(18px + env(safe-area-inset-top));right:18px;width:44px;height:44px;border-radius:50%;box-shadow:0 0 0 3px #f4b544}
+  .help-modal .eyebrow{font-size:13px;letter-spacing:2px}
+  .help-modal h2{max-width:calc(100% - 48px);font-size:clamp(25px,7vw,32px);line-height:1.12;letter-spacing:-.8px;margin:20px 0 22px}
+  .help-modal .help-row{gap:12px;min-height:49px;padding:11px 0;font-size:12px;line-height:1.35}
+  .help-modal .help-row>span:last-child{flex:none;font-size:11px;white-space:nowrap}
+  .help-modal kbd{font-size:11px;padding:4px 7px;min-height:27px}
+  .help-modal p{font-size:12px;line-height:1.75;margin:20px 0 24px}
+  .help-modal>.primary{min-height:56px;margin-top:auto;font-size:17px;flex:none}
+}
+
 /* Rails mode (phones and tablets): each half of the screen below the header steers that way. A round glass
    button in each bottom corner shows it; held, it turns gold, presses in and gets a soft gold ring. The speedometer and boost meter sit together in the middle of the
    bottom edge, between the buttons, and the captions rise above them. */
@@ -582,6 +596,12 @@
 /* The level badge arrives through the header morph, so it needs no pop of its own. */
 .topbar .level-badge{animation:none}
 
+/* Starting a run swaps the whole header: fade the hero controls out together, then bring the driving HUD in. */
+.topbar.header-exiting>*{opacity:0;pointer-events:none;transition:opacity .14s ease-out}
+.topbar.header-entering>*{animation:header-controls-in .22s ease-out both}
+@keyframes header-controls-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.topbar.header-exiting>*,.topbar.header-entering>*{opacity:1;animation:none;transition:none}}
+
 
 /* Drift cut-in (overhead camera, purple grade): the word leans like the car and its letters slide in sideways,
    one after another, overshooting and settling as if they drifted into place, in a violet-to-pink gradient, with
@@ -702,6 +722,11 @@
 /* The leaderboard card: the run-over board's rows, each with its distance and time under the name, and the top
    three in gold, silver and bronze. */
 .leaderboard{width:440px}
+.leaderboard{height:min(460px,calc(100svh - 32px));display:flex;flex-direction:column;animation:leaderboard-open .42s cubic-bezier(.22,.8,.26,1) both}
+.leaderboard-shade{animation:leaderboard-shade-in .3s ease both}
+.leaderboard .podium-board{margin: auto 0 16px}
+@keyframes leaderboard-open{from{opacity:0;transform:translateY(10px);filter:blur(2px)}to{opacity:1;transform:translateY(0);filter:blur(0)}}
+@keyframes leaderboard-shade-in{from{opacity:0}to{opacity:1}}
 .leaderboard .eyebrow{display:flex;align-items:center;gap:6px}
 .leaderboard h2{margin:8px 0 16px}
 .leaderboard .board{max-height:min(420px,60vh);margin:0}
@@ -769,6 +794,16 @@
 }
 @media (max-width:600px){.hud-center .score-pill{padding:0 26px 0 8px}}
 
+/* Desktop pointer: a crisp arrow with no glow, lag, or trailing effect. */
+@media (pointer:fine){
+  .app,.app *{cursor:none!important}
+  .game-cursor{position:absolute;left:0;top:0;width:24px;height:30px;z-index:100;pointer-events:none;opacity:0;transform:translate3d(-50vw,-50vh,0);transition:transform .035s ease-out,opacity .12s ease-out;will-change:transform}
+  .game-cursor.visible{opacity:1}
+  .game-cursor svg{display:block;width:100%;height:100%;overflow:visible}
+  .game-cursor path{fill:#fff;stroke:#171717;stroke-width:1.65;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+}
+@media (prefers-reduced-motion:reduce){.game-cursor{transition:none!important}}
+
 /* Rails mode, pressing a steering button: it springs up in size, turns gold with a wide ring and a glow, its arrow
    leans the way it steers, and a gold ripple spreads out from it and fades; let go, it springs back. */
 .steer-button{transition:transform .28s cubic-bezier(.3,1.8,.5,1),background .15s,color .15s,box-shadow .25s}
@@ -786,14 +821,15 @@
 @media (prefers-reduced-motion:reduce){.steer-button,.steer-button svg{transition:none}.steer-ripple{display:none}.steer-face{animation:none}}
 .steer-button svg{width:25px;height:25px}
 
-/* Phones: the hearts stand on their own, without a pill behind them, so the score has the room; a soft shadow
-   keeps them clear on a bright sky, and the lost ones a darker outline. */
+/* Phones: keep the hearts together in a compact glass pill like the other header controls. */
 @media (max-width:600px){
-  .hud-center .hearts-bar{flex:none;height:auto;padding:0;gap:3px;background:none;border:0;box-shadow:none}
-  .hud-center .hearts-bar .heart-icon{width:19px;height:19px;filter:drop-shadow(0 2px 4px #0b161a66)}
+  .playing .hud-center .score-pill{flex:0 0 auto;width:max-content;min-width:0;padding:7px 12px 7px 7px;justify-content:center}
+  .hud-center .hearts-bar{flex:none;height:44px;padding:0 10px;gap:5px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow)}
+  .hud-center .hearts-bar .heart-icon{width:17px;height:17px;filter:drop-shadow(0 2px 4px #0b161a66)}
   .hud-center .hearts-bar .full{filter:drop-shadow(0 0 5px #ff4f4588) drop-shadow(0 2px 4px #0b161a66)}
   .hud-center .hearts-bar .lost .heart-body{stroke:#ffffff99}
 }
+.tilt-toast{z-index:30}
 
 /* Rails mode: the boost meter and the speedometer swap sides, boost on the right of the middle (nearer the right
    thumb), the speedometer on the left. */
@@ -828,6 +864,13 @@
 .p3 .podium-block span{color:#e6a273}
 .podium-place.empty .podium-name,.podium-place.empty .podium-block span{opacity:.3}
 .podium-place.empty .podium-block{border-top-color:#ffffff26;background:#ffffff08}
+.podium-crown.waiting{opacity:.14}
+.skeleton-line{display:block;overflow:hidden;border-radius:999px;background:linear-gradient(100deg,#ffffff10 20%,#ffffff24 42%,#ffffff10 64%);background-size:220% 100%;animation:skeleton-shimmer 1.5s ease-in-out infinite}
+.skeleton-name{width:52px;height:8px}
+.skeleton-score{width:26px;height:11px}
+.p1 .skeleton-score{width:34px;height:14px}
+.podium-rest .skeleton-score{width:30px;height:10px}
+@keyframes skeleton-shimmer{to{background-position-x:-220%}}
 .podium-place.mine .podium-block{background:linear-gradient(180deg,#f4b54466,#f4b5441a);box-shadow:0 0 0 2px var(--gold),0 0 26px #f4b54466;animation:mine-glow 1.6s ease-in-out infinite}
 .podium-place.mine .podium-name{color:var(--gold)}
 .podium-rest{list-style:none;margin:0;padding:0;text-align:left}
@@ -840,6 +883,7 @@
 @keyframes crown-bob{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-3px) rotate(6deg)}}
 @keyframes mine-glow{50%{box-shadow:0 0 0 2px var(--gold),0 0 40px #f4b544aa}}
 @media (prefers-reduced-motion:reduce){.podium-place,.podium-crown,.podium-place.mine .podium-block{animation:none}}
+@media (prefers-reduced-motion:reduce){.leaderboard,.leaderboard-shade,.skeleton-line{animation:none}}
 
 /* Calmer arrows: a small, soft lean while held (no overshoot), a gentle tap punch, and a lighter tremble. */
 .steer-button svg{transition:transform .38s cubic-bezier(.22,1,.36,1)}
@@ -941,7 +985,7 @@
 @media (pointer:coarse),(max-width:600px){.toolbar .mode-toggle{display:grid}}
 
 /* Leaderboard: "Everyone" / "This device" tabs, as a small glass segmented switch. */
-.board-tabs{display:inline-flex;gap:3px;margin:0 0 14px;padding:3px;border-radius:999px;background:#ffffff0f;border:1px solid #ffffff14}
+.board-tabs{display:inline-flex;align-self:flex-start;flex:none;width:max-content;gap:3px;margin:0 0 14px;padding:3px;border-radius:999px;background:#ffffff0f;border:1px solid #ffffff14}
 .board-tabs button{padding:6px 14px;border:0;border-radius:999px;background:none;color:#ffffffa6;font-size:12px;font-weight:700}
 .board-tabs button.on{background:var(--gold);color:#2b1d05}
 
@@ -954,3 +998,15 @@
 /* Header: no logo mark; the "Wander." wordmark is the logo. On phones the tagline is dropped and the name stays. */
 .topbar .brand{padding:0 20px}
 @media (max-width:600px){.topbar .brand>div{display:flex}.topbar .brand small{display:none}.topbar .brand{width:auto;padding:0 15px}.topbar .brand strong{font-size:17px}}
+
+/* On phones, the Wander wordmark opens the controls that no longer fit in the header. */
+.mobile-brand-menu{display:none;position:relative}
+.mobile-brand-trigger{appearance:none;font:inherit;text-align:left}
+.mobile-brand-actions{position:absolute;top:calc(100% + 8px);left:0;z-index:10;display:grid;min-width:194px;gap:4px;padding:7px;border:1px solid #ffffff2b;border-radius:14px;background:#18272fee;box-shadow:0 12px 32px #0c1b2380;backdrop-filter:blur(12px)}
+.mobile-brand-actions button{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:0 12px;border:0;border-radius:9px;background:transparent;color:#f5efda;font-size:13px;font-weight:600;text-align:left}
+.mobile-brand-actions button:active{background:#ffffff1c}
+.mobile-brand-actions svg{flex:none;width:17px;height:17px;color:var(--gold)}
+@media (pointer:coarse),(max-width:600px){
+  .topbar .brand-desktop{display:none}
+  .topbar .mobile-brand-menu{display:block}
+}

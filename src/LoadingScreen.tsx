@@ -72,7 +72,9 @@ export default function LoadingScreen({ ready, onLeave }: { ready: boolean; onLe
 
   if (phase === 'gone') return null;
   return <div className={`loader${done ? ' leaving' : ''}`} role="progressbar" aria-label="Loading the world" aria-busy={!ready} style={{ '--since': since.current } as CSSProperties}>
-    <strong className="loader-brand">Wander<span>.</span></strong>
+    <strong className="loader-brand" aria-label="Wander.">
+      <span className="loader-letter" aria-hidden="true">W</span><span className="loader-letter" aria-hidden="true">a</span><span className="loader-letter" aria-hidden="true">n</span><span className="loader-letter" aria-hidden="true">d</span><span className="loader-letter" aria-hidden="true">e</span><span className="loader-letter" aria-hidden="true">r</span><span className="loader-dot" aria-hidden="true">.</span>
+    </strong>
     <div className="loader-meter">
       <div className="loader-track"><span ref={bar} /></div>
       <p className="loader-text"><span key={ready ? 'ready' : tip}>{ready ? 'Ready to drive' : TIPS[tip]}</span><em ref={label}>0%</em></p>

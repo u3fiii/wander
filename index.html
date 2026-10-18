@@ -14,8 +14,14 @@
          copy sets it so every animation carries on exactly where the static one was, with no restart at hand-off. */
       .loader{--since:0ms;--ease:cubic-bezier(.22,1,.36,1);position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 16px 4vh;color:#111;font-family:'Outfit',system-ui,sans-serif;background:radial-gradient(ellipse 70% 60% at 50% 42%,#fbf8ec 0%,#f5f0db 60%,#e9e4c8 100%);transition:opacity .55s ease .25s,visibility 0s linear .8s}
       .loader *{box-sizing:border-box}
-      .loader-brand{font-size:40px;font-weight:900;letter-spacing:-1.8px;line-height:1;animation:loader-in .8s var(--ease) calc(var(--since) + 60ms) backwards;transition:transform .55s var(--ease) .05s,opacity .35s ease .05s}
-      .loader-brand span{color:#ba7f40}
+      .loader-brand{font-size:40px;font-weight:900;letter-spacing:-1.8px;line-height:1;transition:transform .55s var(--ease) .05s,opacity .35s ease .05s}
+      .loader-letter,.loader-dot{display:inline-block;animation:loader-letter-in .58s var(--ease) calc(var(--since) + 80ms) backwards}
+      .loader-letter:nth-child(2){animation-delay:calc(var(--since) + 125ms)}
+      .loader-letter:nth-child(3){animation-delay:calc(var(--since) + 170ms)}
+      .loader-letter:nth-child(4){animation-delay:calc(var(--since) + 215ms)}
+      .loader-letter:nth-child(5){animation-delay:calc(var(--since) + 260ms)}
+      .loader-letter:nth-child(6){animation-delay:calc(var(--since) + 305ms)}
+      .loader-brand .loader-dot{color:#ba7f40;transform-origin:50% 80%;animation:loader-dot-in .48s var(--ease) calc(var(--since) + 370ms) backwards}
       /* The bar, with the tip and the percentage in one row under it. */
       .loader-meter{width:min(240px,100%);margin-top:26px;animation:loader-in .8s var(--ease) calc(var(--since) + 240ms) backwards;transition:transform .45s var(--ease),opacity .3s ease}
       .loader-track{position:relative;height:4px;background:#1111180f;overflow:hidden}
@@ -29,10 +35,12 @@
       .loader.leaving .loader-meter{opacity:0;transform:translateY(8px)}
       .loader.leaving .loader-brand{opacity:0;transform:translateY(-6px)}
       @keyframes loader-in{from{opacity:0;transform:translateY(14px)}}
+      @keyframes loader-letter-in{0%{transform:translateY(14px) rotate(-5deg)}70%{transform:translateY(-2px) rotate(1deg)}100%{transform:none}}
+      @keyframes loader-dot-in{0%{transform:scale(.75) rotate(-15deg)}65%{transform:scale(1.2) rotate(7deg)}100%{transform:scale(1) rotate(0)}}
       @keyframes loader-sheen{to{transform:translateX(100%)}}
       @keyframes loader-tip{from{opacity:0;transform:translateY(9px);filter:blur(3px)}to{opacity:1;transform:none;filter:none}}
       @media (prefers-reduced-motion:reduce){.loader *,.loader *::before,.loader *::after{animation:none!important}}
     </style>
   </head>
-  <body><div id="root"><div class="loader" role="progressbar" aria-label="Loading the world" aria-busy="true"><strong class="loader-brand">Wander<span>.</span></strong><div class="loader-meter"><div class="loader-track"><span></span></div><p class="loader-text"><span>Rolling out the little world…</span><em>0%</em></p></div></div></div><script type="module" src="/src/main.tsx"></script></body>
+  <body><div id="root"><div class="loader" role="progressbar" aria-label="Loading the world" aria-busy="true"><strong class="loader-brand" aria-label="Wander."><span class="loader-letter" aria-hidden="true">W</span><span class="loader-letter" aria-hidden="true">a</span><span class="loader-letter" aria-hidden="true">n</span><span class="loader-letter" aria-hidden="true">d</span><span class="loader-letter" aria-hidden="true">e</span><span class="loader-letter" aria-hidden="true">r</span><span class="loader-dot" aria-hidden="true">.</span></strong><div class="loader-meter"><div class="loader-track"><span></span></div><p class="loader-text"><span>Rolling out the little world…</span><em>0%</em></p></div></div></div><script type="module" src="/src/main.tsx"></script></body>
 </html>

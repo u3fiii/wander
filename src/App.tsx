@@ -20,6 +20,33 @@ function morph(update: () => void) {
   doc.startViewTransition(() => flushSync(update));
 }
 
+// A crisp, custom-drawn arrow pointer that stays directly under the mouse.
+function GameCursor({ rootRef }: { rootRef: { current: HTMLElement | null } }) {
+  const cursor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = rootRef.current, node = cursor.current;
+    if (!root || !node || window.matchMedia('(pointer: coarse)').matches) return;
+    const move = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') return;
+      const rect = root.getBoundingClientRect();
+      node.style.transform = `translate3d(${event.clientX - rect.left}px,${event.clientY - rect.top}px,0)`;
+      node.classList.add('visible');
+    };
+    const leave = () => { node.classList.remove('visible'); };
+    root.addEventListener('pointermove', move);
+    root.addEventListener('pointerleave', leave);
+    return () => {
+      root.removeEventListener('pointermove', move);
+      root.removeEventListener('pointerleave', leave);
+    };
+  }, [rootRef]);
+  return <div ref={cursor} className="game-cursor" aria-hidden="true">
+    <svg viewBox="0 0 24 30" focusable="false">
+      <path d="M.8.7V25l6.8-6.7 4.8 10 4.3-2-4.7-10 9.4-1.7L.8.7Z" />
+    </svg>
+  </div>;
+}
+
 // A heart: a glossy red shape with a soft highlight (the colours come from style.css).
 const HEART_PATH = 'M12 21.2s-7.6-4.6-9.9-9.2C.5 8.7 2.5 4.5 6.4 4.1c2.1-.2 3.9.9 5.6 2.9 1.7-2 3.5-3.1 5.6-2.9 3.9.4 5.9 4.6 4.3 7.9-2.3 4.6-9.9 9.2-9.9 9.2z';
 function HeartIcon({ className }: { className?: string }) {
@@ -203,7 +230,7 @@ import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { cycle, goTo, headingToNight, mixHex, nightAmount, resetToDay, skyAt, twilight } from './game/dayCycle';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
-const TITLE = 'Take a spin.';
+const TITLE = 'take a spin.';
 // Traffic note wording, kept to a word or two, and which notes win when two land close together.
 const NOTE_TEXT = {
   smash: ['Big crash!', 'Brutal hit.', 'Total wreck.', 'Ouch.'],
@@ -243,7 +270,7 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
   render() { return this.state.error ? <div className="error-screen"><h2>The 3D scene could not load</h2><p>Enable graphics acceleration in your browser and try again.</p><button className="primary" onClick={() => location.reload()}>Try again</button></div> : this.props.children; }
 }
 function Help({ close }: { close: () => void }) {
-  return <div className="modal-shade" onClick={close}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={e => e.stopPropagation()}>
+  return <div className="modal-shade help-shade" onClick={close}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={e => e.stopPropagation()}>
     <button className="close-button" autoFocus aria-label="Close help" onClick={close}><X size={18} /></button>
     <span className="eyebrow">CONTROLS</span><h2 id="help-title">Keep the wheel and the road.</h2>
     <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>W</kbd> <kbd>S</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></span></div>
@@ -256,6 +283,7 @@ function Help({ close }: { close: () => void }) {
     <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
     <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
     <div className="help-row"><span>Pause / resume</span><kbd>Esc</kbd></div>
+    <div className="help-row"><span>Phone tilt assist</span><span>Lean into bends</span></div>
     <p>The car rolls on its own once you start; you choose the line. Lift off for corners, hold back to reverse. Weave through traffic, drift the bends, and bank your hearts for a bigger run.</p>
     <button className="primary" onClick={close}>Got it <Check size={18} /></button>
   </section></div>;
@@ -401,6 +429,18 @@ export default function App() {
   const [resetKey, setResetKey] = useState(0);
   const [help, setHelp] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [tiltAssist, setTiltAssist] = useState(false);
+  const [tiltNotice, setTiltNotice] = useState('');
+  const mobileBrandRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!mobileBrandRef.current?.contains(event.target as Node)) setMobileMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
+  }, [mobileMenuOpen]);
   useEffect(() => { holdWorld(paused || help || boardOpen || mapView); }, [paused, help, boardOpen, mapView]);
   const [ready, setReady] = useState(false);
   // The intro reveal waits until the loading screen starts fading away.
@@ -731,6 +771,54 @@ export default function App() {
     return () => { window.removeEventListener('gamepadconnected', update); window.removeEventListener('gamepaddisconnected', update); };
   }, []);
   const controls = useRef(emptyControls());
+  const tiltNoticeTimer = useRef<number | null>(null);
+  const announceTilt = (message: string) => {
+    setTiltNotice(message);
+    if (tiltNoticeTimer.current !== null) window.clearTimeout(tiltNoticeTimer.current);
+    tiltNoticeTimer.current = window.setTimeout(() => setTiltNotice(''), 2600);
+  };
+  const requestTiltAssist = async () => {
+    if (tiltAssist) return;
+    if (!window.isSecureContext) { announceTilt('Tilt assist needs a secure connection'); return; }
+    if (!('DeviceOrientationEvent' in window)) { announceTilt('This browser does not support phone tilt'); return; }
+    try {
+      const orientation = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
+      if (orientation.requestPermission && await orientation.requestPermission() !== 'granted') {
+        announceTilt('Allow motion access to use tilt assist');
+        return;
+      }
+      setTiltAssist(true);
+    } catch {
+      announceTilt('Motion access was not available');
+    }
+  };
+  useEffect(() => {
+    if (!tiltAssist || !started) { controls.current.tilt = 0; return; }
+    let neutral: number | null = null;
+    let filtered = 0;
+    const onOrientation = (event: DeviceOrientationEvent) => {
+      if (event.gamma === null) return;
+      const angle = screen.orientation?.angle ?? 0;
+      let axis = event.gamma;
+      if (angle === 90) axis = -(event.beta ?? 0);
+      else if (angle === 180) axis = -event.gamma;
+      else if (angle === 270) axis = event.beta ?? 0;
+      if (neutral === null) { neutral = axis; return; }
+      const delta = axis - neutral;
+      const amount = Math.min(1, Math.max(0, (Math.abs(delta) - 2.5) / 17));
+      const target = -Math.sign(delta) * amount;
+      filtered += (target - filtered) * 0.18;
+      controls.current.tilt = filtered;
+    };
+    const recalibrate = () => { neutral = null; filtered = 0; controls.current.tilt = 0; };
+    window.addEventListener('deviceorientation', onOrientation);
+    window.addEventListener('orientationchange', recalibrate);
+    return () => {
+      window.removeEventListener('deviceorientation', onOrientation);
+      window.removeEventListener('orientationchange', recalibrate);
+      controls.current.tilt = 0;
+    };
+  }, [tiltAssist, started]);
   const car = useRef(initialLoopCar());
   const reset = useCallback(() => {
     controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
@@ -742,7 +830,39 @@ export default function App() {
   }, [breakWeave]);
   // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.
   const [introExit, setIntroExit] = useState(false);
-  const start = () => { setIntroExit(true); window.setTimeout(() => setIntroExit(false), 1200); startAudio(); playEngineStart(); controls.current = emptyControls(); morph(() => { setStarted(true); setPaused(false); setMapView(false); }); };
+  const [headerMotion, setHeaderMotion] = useState<'exiting' | 'entering' | ''>('');
+  const headerMotionTimers = useRef<number[]>([]);
+  const clearHeaderMotionTimers = () => {
+    headerMotionTimers.current.forEach(timer => window.clearTimeout(timer));
+    headerMotionTimers.current = [];
+  };
+  const start = () => {
+    if (introExit) return;
+    clearHeaderMotionTimers();
+    void requestTiltAssist();
+    setHeaderMotion('exiting');
+    setIntroExit(true);
+    headerMotionTimers.current.push(window.setTimeout(() => {
+      setStarted(true); setPaused(false); setMapView(false);
+      setHeaderMotion('entering');
+      headerMotionTimers.current.push(window.setTimeout(() => setHeaderMotion(''), 280));
+    }, 140));
+    window.setTimeout(() => setIntroExit(false), 1200);
+    startAudio(); playEngineStart(); controls.current = emptyControls();
+  };
+  const returnToHero = () => {
+    if (headerMotion === 'exiting') return;
+    clearHeaderMotionTimers();
+    controls.current = emptyControls();
+    setMobileMenuOpen(false);
+    setHeaderMotion('exiting');
+    setPaused(true);
+    headerMotionTimers.current.push(window.setTimeout(() => {
+      setStarted(false); setPaused(false); setMapView(false);
+      setHeaderMotion('entering');
+      headerMotionTimers.current.push(window.setTimeout(() => setHeaderMotion(''), 280));
+    }, 140));
+  };
   const onReady = useCallback(() => setReady(true), []);
 
   useEffect(() => {
@@ -750,15 +870,19 @@ export default function App() {
     const held = new Set<string>();
     const clear = () => { held.clear(); controls.current = emptyControls(); };
     const down = (e: KeyboardEvent) => {
-      const isButton = e.target instanceof HTMLElement && !!e.target.closest('button');
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const isTextEntry = !!target && (target.matches('input,textarea,select') || target.isContentEditable || !!target.closest('[contenteditable="true"]'));
+      if (isTextEntry) return;
+      const isButton = !!target && !!target.closest('button');
       if (isButton && (e.code === 'Enter' || (e.code === 'Space' && (!started || paused || help)))) return;
       if (mapping[e.code] && !paused && !help && !boardOpen && !mapView && !runOver && !finale) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
       if (e.repeat) return;
       if (e.code === 'KeyM' && started && !paused && !help && !runOver && !finale) { clear(); morph(() => setMapView(v => !v)); }
-      if (e.code === 'KeyR' && started && !help && !mapView) reset();
-      if (e.code === 'KeyF' && started && !paused && !help && !mapView) recover();
-      if (e.code === 'KeyC' && !help) setCameraMode(n => 1 - n);
+      if (e.code === 'KeyR' && started && !help && !mapView && !runOver && !finale) reset();
+      if (e.code === 'KeyF' && started && !paused && !help && !mapView && !runOver && !finale) recover();
+      if (e.code === 'KeyC' && !help && !runOver && !finale) setCameraMode(n => 1 - n);
       if (e.code === 'Escape' && (runOver || finale)) return;
+      if (e.code === 'Escape' && mobileMenuOpen) { setMobileMenuOpen(false); return; }
       if (e.code === 'Escape' && boardOpen) { setBoardOpen(false); return; }
       if (e.code === 'Escape') { clear(); if (help) setHelp(false); else if (mapView) morph(() => setMapView(false)); else if (started) setPaused(v => !v); }
     };
@@ -767,7 +891,7 @@ export default function App() {
     const visibility = () => { if (document.hidden) blur(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility);
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
-  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover]);
+  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen]);
 
   const touch = (key: ControlKey) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); controls.current[key] = true; },
@@ -798,21 +922,33 @@ export default function App() {
     />}
     <div className="scene"><DaySky /><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
-    <header className="topbar">
+    <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
           (centre, driving only), and the settings with pause (right). No logo while driving. */}
       {started
         // A round home button (back to the start screen), then the driver's level.
         ? <div className="topbar-left">
-          <button className="home-button" aria-label="Back to the start screen" title="Home" onClick={() => morph(() => { setStarted(false); setPaused(false); setMapView(false); })}><House /></button>
+          <button className="home-button" aria-label="Back to the start screen" title="Home" onClick={returnToHero}><House /></button>
           <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
           <span className="level-number" key={level.level}>{level.level}</span>
           <div><strong>{level.title}</strong><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i><small>{level.into} / {level.need} XP</small></div>
           </div>
         </div>
-        : <a href="#" className="brand" aria-label="Wander, home" onClick={e => e.preventDefault()}>
-          <div><strong dir="ltr">Wander<span>.</span></strong><small>Take a spin</small></div>
-        </a>}
+        : <>
+          <a href="#" className="brand brand-desktop" aria-label="Wander, home" onClick={e => e.preventDefault()}>
+            <div><strong dir="ltr">Wander<span>.</span></strong><small>take a spin</small></div>
+          </a>
+          <div className="mobile-brand-menu" ref={mobileBrandRef}>
+            <button type="button" className="brand mobile-brand-trigger" aria-label="Wander menu" aria-expanded={mobileMenuOpen} aria-controls="mobile-brand-actions" onClick={() => setMobileMenuOpen(open => !open)}>
+              <div><strong dir="ltr">Wander<span>.</span></strong><small>take a spin</small></div>
+            </button>
+            {mobileMenuOpen && <div className="mobile-brand-actions" id="mobile-brand-actions" role="group" aria-label="Game options">
+              <button type="button" onClick={() => { setMobileMenuOpen(false); setCameraMode(mode => 1 - mode); }}><Maximize2 /><span>Change camera view</span></button>
+              <button type="button" onClick={() => { setMobileMenuOpen(false); setBoardOpen(true); }}><Trophy /><span>Leaderboard</span></button>
+              <button type="button" onClick={() => { setMobileMenuOpen(false); setHelp(true); }}><CircleHelp /><span>Controls and help</span></button>
+            </div>}
+          </div>
+        </>}
       {/* Score and hearts side by side in the middle of the header. The score counts up smoothly (distance adds
           to it all the time); a bonus makes it react in proportion to its size, with the amount floating off. */}
       {started && <div className="hud-center">
@@ -845,7 +981,7 @@ export default function App() {
       </nav>
     </header>
 
-    {(!started || introExit) && <section className={`intro-card${started ? ' exiting' : ''}`}>
+    {(!started || introExit) && <section className={`intro-card${introExit ? ' exiting' : ''}`}>
       {/* The driver's level, like the badge in the game's header; a welcome back for returning players. */}
       <div className="intro-level rise" style={{ '--d': '800ms' } as CSSProperties}>
         <span className="level-number">{level.level}</span><strong>{level.title}</strong>{best > 0 ? <span className="intro-welcome">Best {formatNumber(best)}</span> : xp > 0 && <span className="intro-welcome">Welcome back</span>}
@@ -907,7 +1043,7 @@ export default function App() {
     </>}
 
     {!started && <footer className="page-footer"><span>WANDER · THE LONG WAY ROUND</span></footer>}
-    {started && paused && !help && !boardOpen && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+    {started && paused && headerMotion !== 'exiting' && !help && !boardOpen && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
       <span className="eyebrow">PAUSED</span><h2 id="pause-title">Take a breath.</h2>
       <div className="pause-stats">
         <div><small>Score · best {formatNumber(best)}</small><b>{formatNumber(score)}</b></div>
@@ -917,14 +1053,16 @@ export default function App() {
       <button autoFocus className="primary" onClick={() => setPaused(false)}>Keep going <Play size={18} /></button>
       <div className="modal-row">
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
-        <button className="secondary" onClick={() => morph(() => { setStarted(false); setPaused(false); setMapView(false); })}><ChevronLeft size={15} /> Back to the globe</button>
+        <button className="secondary" onClick={returnToHero}><ChevronLeft size={15} /> Back to the globe</button>
       </div>
     </section></div>}
+    {tiltNotice && <div className="toast tilt-toast" role="status">{tiltNotice}</div>}
     {help && <Help close={() => setHelp(false)} />}
     {boardOpen && <Leaderboard close={() => setBoardOpen(false)} />}
     {finale && <div className="letterbox" aria-hidden="true"><i /><i /></div>}
     {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={reset}
-      onHome={() => { reset(); morph(() => { setStarted(false); setPaused(false); setMapView(false); }); }} />}
+      onHome={() => { reset(); returnToHero(); }} />}
     <LoadingScreen ready={ready} onLeave={() => setRevealed(true)} />
+    <GameCursor rootRef={mainRef} />
   </main>;
 }

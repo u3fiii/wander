@@ -19,7 +19,7 @@ export type CarState = {
 // Booleans come from keys/touch. Optional analog values (0..1, steer -1..1) override them when present.
 export type Controls = {
   forward: boolean; back: boolean; left: boolean; right: boolean; brake: boolean; gentle?: boolean; boost?: boolean;
-  throttle?: number; reverse?: number; steer?: number;
+  throttle?: number; reverse?: number; steer?: number; tilt?: number;
 };
 export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost';
 const steerInput = (controls: Controls) => controls.steer ?? (Number(controls.left) - Number(controls.right));
@@ -119,7 +119,20 @@ export function updateSpeed(car: CarState, controls: Controls, dt: number, offro
 
 // Steering is normalised to -1 (right) .. 1 (left) and eased toward the input.
 export function updateSteering(car: CarState, controls: Controls, dt: number): void {
-  const steerTarget = steerInput(controls);
+  const primary = steerInput(controls);
+  const tilt = controls.tilt ?? 0;
+  // Tilting is a light helper, not a replacement for the steering buttons. It adds a little steering on
+  // straights and more through a bend, where a small phone movement can help the car follow the road.
+  let bend = 0;
+  if (tilt) {
+    const sample = 0.008;
+    const before = loopFrame(car.x - sample, 0);
+    const after = loopFrame(car.x + sample, 0);
+    const frame = loopFrame(car.x, 0);
+    const turn = Math.atan2(dot(cross(before.tangent, after.tangent), frame.normal), dot(before.tangent, after.tangent));
+    bend = Math.min(1, Math.abs(turn) / 0.055);
+  }
+  const steerTarget = Math.max(-1.3, Math.min(1.3, primary + tilt * (0.12 + 0.36 * bend)));
   const response = steerTarget ? CAR_CONFIG.steerResponse : CAR_CONFIG.steerReturn;
   car.steering += (steerTarget - car.steering) * (1 - Math.exp(-response * dt));
 }

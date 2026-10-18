@@ -627,10 +627,8 @@ function AtmosphereGlow({ amount, night }: { amount: React.RefObject<number>; ni
   </mesh>;
 }
 
-// Meteors: a few faint streaks that cross the sky behind the globe every so often. Placed far away in world
-// space, so they never cross the globe or move with the camera. Each one is a glowing tail that
-// flares in, flies across and fades out.
-const METEORS = { count: 4, distance: 300, gapMin: 7, gapMax: 16, lifeMin: 0.7, lifeMax: 1.1, travel: 130, width: 1.6, brightness: 1.3 };
+// Meteors: bright streaks crossing the upper sky in camera space, so the globe cannot occlude them.
+const METEORS = { count: 4, distance: 220, gapMin: 3, gapMax: 7, lifeMin: 1.1, lifeMax: 1.6, travel: 150, width: 2.4, brightness: 1.8 };
 
 function buildMeteorTexture() {
   const canvas = document.createElement('canvas');
@@ -646,7 +644,7 @@ function buildMeteorTexture() {
 }
 
 function Meteors() {
-  const { scene } = useThree();
+  const { camera, size } = useThree();
   const texture = useMemo(buildMeteorTexture, []);
   const meshes = useMemo(() => Array.from({ length: METEORS.count }, () => {
     const material = new THREE.MeshBasicMaterial({ map: texture, color: new THREE.Color(1, 1, 1).multiplyScalar(METEORS.brightness), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
@@ -658,9 +656,9 @@ function Meteors() {
   const state = useMemo(() => meshes.map(() => ({ time: -1, life: 1, start: new THREE.Vector3(), direction: new THREE.Vector3(), length: 1 })), [meshes]);
   const next = useRef(3);
   useEffect(() => {
-    meshes.forEach(mesh => scene.add(mesh));
-    return () => { meshes.forEach(mesh => { scene.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); }); texture.dispose(); };
-  }, [meshes, scene, texture]);
+    meshes.forEach(mesh => camera.add(mesh));
+    return () => { meshes.forEach(mesh => { camera.remove(mesh); mesh.geometry.dispose(); (mesh.material as THREE.Material).dispose(); }); texture.dispose(); };
+  }, [camera, meshes, texture]);
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
     next.current -= dt;
@@ -668,9 +666,11 @@ function Meteors() {
       next.current = METEORS.gapMin + Math.random() * (METEORS.gapMax - METEORS.gapMin);
       const free = state.findIndex(item => item.time < 0);
       if (free >= 0) {
-        // A spot high and behind the globe (far, in the sky), and a shallow downward diagonal across it.
-        const centre = new THREE.Vector3((Math.random() * 2 - 1) * 0.8, 0.25 + Math.random() * 0.55, -(0.5 + Math.random() * 0.5)).normalize().multiplyScalar(METEORS.distance);
-        const direction = new THREE.Vector3((0.7 + Math.random() * 0.4) * (Math.random() < 0.5 ? 1 : -1), -(0.25 + Math.random() * 0.35), (Math.random() - 0.5) * 0.2).normalize();
+        // Keep each streak in the upper part of the view, outside the globe's silhouette.
+        const halfHeight = METEORS.distance * Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov / 2));
+        const halfWidth = halfHeight * size.width / size.height;
+        const centre = new THREE.Vector3((Math.random() * 2 - 1) * halfWidth * 0.58, halfHeight * (0.48 + Math.random() * 0.28), -METEORS.distance);
+        const direction = new THREE.Vector3((0.7 + Math.random() * 0.4) * (Math.random() < 0.5 ? 1 : -1), -(0.25 + Math.random() * 0.35), 0).normalize();
         const item = state[free];
         item.time = 0;
         item.life = METEORS.lifeMin + Math.random() * (METEORS.lifeMax - METEORS.lifeMin);
@@ -691,7 +691,6 @@ function Meteors() {
       mesh.visible = true;
       mesh.position.copy(item.start).addScaledVector(item.direction, progress * METEORS.travel);
       mesh.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), item.direction);
-      mesh.position.add(new THREE.Vector3(0, 0, 0));
       mesh.scale.set(item.length, METEORS.width, 1);
       (mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, fade) * 0.9;
     });

@@ -1,7 +1,7 @@
 // Runs and the leaderboard. A run starts with `HEARTS` hearts; each hard crash costs one, and the last one ends the
 // run. Its stats are kept for the run-over card, and the best ten runs (with the driver's name) are kept in the
 // browser (the best five). The game also gets harder through a run: every `STAGE_SECONDS` it moves up a stage (difficulty.ts).
-export const HEARTS = 5;
+export const HEARTS = 3;
 export const STAGE_SECONDS = 35;
 // After losing a heart, this long (ms) before another can be lost, so one tussle can't take several.
 export const HEART_GRACE_MS = 2000;
