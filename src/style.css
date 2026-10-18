@@ -286,6 +286,7 @@
 .pause-modal h2{margin:12px 0 22px}
 .pause-modal>.primary{width:fit-content;padding:14px 14px 14px 22px;margin:0 auto}
 .pause-modal>.modal-row{margin-top:16px}
+.pause-modal .secondary{height:50px;font-size:14px}
 .pause-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:22px;text-align:left}
 .pause-stats>div{padding:12px 13px;border-radius:16px;background:#ffffff0f;border:1px solid #ffffff14;min-width:0}
 .pause-stats small{display:block;font-size:9px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#ffffff8c}
