@@ -35,10 +35,10 @@ export function Podium({ board, highlight = -1 }: { board: Entry[]; highlight?: 
   </div>;
 }
 
-// The leaderboard card, from the header's trophy button. With the shared board set up it shows everyone's top five
-// (and "This device" for the runs kept here); without it, or offline, just this device's.
+// The leaderboard card, from the header's trophy button. Always open on the shared board so a missing
+// connection cannot be mistaken for a leaderboard shared between players.
 export default function Leaderboard({ close }: { close: () => void }) {
-  const [view, setView] = useState<'everyone' | 'device'>(sharedBoard ? 'everyone' : 'device');
+  const [view, setView] = useState<'everyone' | 'device'>('everyone');
   const [everyone, setEveryone] = useState<Entry[] | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => { if (sharedBoard) fetchTop().then(top => (top ? setEveryone(top) : setFailed(true))); }, []);
@@ -48,11 +48,11 @@ export default function Leaderboard({ close }: { close: () => void }) {
     <button className="close-button" autoFocus aria-label="Close the leaderboard" onClick={close}><X size={18} /></button>
     <span className="eyebrow"><Trophy size={14} /> LEADERBOARD</span>
     <h2 id="board-title">Top five</h2>
-    {sharedBoard && <div className="board-tabs" role="tablist">
+    <div className="board-tabs" role="tablist">
       <button role="tab" aria-selected={view === 'everyone'} className={view === 'everyone' ? 'on' : ''} onClick={() => setView('everyone')}>Everyone</button>
       <button role="tab" aria-selected={view === 'device'} className={view === 'device' ? 'on' : ''} onClick={() => setView('device')}>This device</button>
-    </div>}
-    {view === 'everyone' && !everyone && <p className="board-empty">{failed ? 'The shared board could not be reached. Try again in a moment.' : 'Loading the board…'}</p>}
+    </div>
+    {view === 'everyone' && !everyone && <p className="board-empty">{!sharedBoard ? 'The shared leaderboard is not connected yet. Only scores on this device are available.' : failed ? 'The shared board could not be reached. Try again in a moment.' : 'Loading the board…'}</p>}
     {(view === 'device' || everyone) && board.length === 0 && <p className="board-empty">No runs yet. Five hearts, one road: your first run takes the top spot.</p>}
     {(view === 'device' || everyone) && <Podium board={board} />}
   </section></div>;

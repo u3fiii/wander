@@ -203,7 +203,7 @@ import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { cycle, goTo, headingToNight, mixHex, nightAmount, resetToDay, skyAt, twilight } from './game/dayCycle';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
-const TITLE = 'Just drive.';
+const TITLE = 'Take a spin.';
 // Traffic note wording, kept to a word or two, and which notes win when two land close together.
 const NOTE_TEXT = {
   smash: ['Big crash!', 'Brutal hit.', 'Total wreck.', 'Ouch.'],
@@ -811,7 +811,7 @@ export default function App() {
           </div>
         </div>
         : <a href="#" className="brand" aria-label="Wander, home" onClick={e => e.preventDefault()}>
-          <div><strong dir="ltr">Wander<span>.</span></strong><small>Just drive</small></div>
+          <div><strong dir="ltr">Wander<span>.</span></strong><small>Take a spin</small></div>
         </a>}
       {/* Score and hearts side by side in the middle of the header. The score counts up smoothly (distance adds
           to it all the time); a bonus makes it react in proportion to its size, with the amount floating off. */}

@@ -428,7 +428,7 @@
 .steer-zone.left .steer-button{left:20px}
 .steer-zone.right .steer-button{right:20px}
 .steer-button svg{width:36px;height:36px;stroke-width:2.6}
-.steer-zone.held .steer-button{background:var(--gold);border-color:var(--gold);color:#2b1d05;transform:scale(.9);box-shadow:0 0 0 7px #f4b5442e,var(--glass-shadow)}
+.steer-zone.held .steer-button{background:linear-gradient(135deg,#f4b544,color-mix(in srgb,#ff3b30 calc(var(--strain) * 100%),#f4b544));border-color:color-mix(in srgb,#ff3b30 calc(var(--strain) * 100%),#f4b544);color:#2b1d05;transform:scale(.9);box-shadow:0 0 0 7px color-mix(in srgb,#ff3b3033 calc(var(--strain) * 100%),#f4b5442e),var(--glass-shadow)}
 .rails.playing .speedometer{right:auto;left:calc(50% + 7px);bottom:calc(52px + env(safe-area-inset-bottom));width:84px;height:84px;z-index:3}
 .rails .boost-gauge{left:auto;right:calc(50% + 7px);bottom:calc(63px + env(safe-area-inset-bottom));width:62px;height:62px;z-index:3}
 .rails .speed-readout strong{font-size:26px}
@@ -803,7 +803,7 @@
 /* Holding a turn strains (--strain 0..1, set by the steering pads): the button trembles harder and its gold ring
    and glow swell, while ever faster, ever wider pulses ripple out of it. */
 .steer-zone{--strain:0}
-.steer-zone.held .steer-button{box-shadow:0 0 0 calc(9px + var(--strain) * 12px) #f4b54433,0 10px calc(30px + var(--strain) * 34px) #f4b544aa,var(--glass-shadow);animation:steer-strain .08s linear infinite}
+.steer-zone.held .steer-button{box-shadow:0 0 0 calc(9px + var(--strain) * 12px) color-mix(in srgb,#ff3b3033 calc(var(--strain) * 100%),#f4b54433),0 10px calc(30px + var(--strain) * 34px) color-mix(in srgb,#ff3b30aa calc(var(--strain) * 100%),#f4b544aa),var(--glass-shadow);animation:steer-strain .08s linear infinite}
 @keyframes steer-strain{0%,100%{translate:0 0}25%{translate:calc(var(--strain) * -2.6px) calc(var(--strain) * 1px)}50%{translate:calc(var(--strain) * 2px) calc(var(--strain) * -1.4px)}75%{translate:calc(var(--strain) * -1.4px) calc(var(--strain) * -.6px)}}
 @media (prefers-reduced-motion:reduce){.steer-zone.held .steer-button{animation:none}}
 
@@ -946,8 +946,8 @@
 .board-tabs button.on{background:var(--gold);color:#2b1d05}
 
 /* Start screen: the title 20% bigger; the level pill above it 10% smaller and lifted 8px. */
-:root{--title-size:clamp(43px,6.97vw,110px)}
-@media (max-width:600px){.intro-card h1{font-size:min(12vw,58px)}}
+:root{--title-size:clamp(39px,6.27vw,99px)}
+@media (max-width:600px){.intro-card h1{font-size:min(10.8vw,52px)}}
 .intro-level{position:relative;top:-8px;padding:3.6px 10px 3.6px 3.6px;gap:6.3px;font-size:8.6px}
 .intro-level .level-number{width:20px;height:20px;font-size:9.4px}
 

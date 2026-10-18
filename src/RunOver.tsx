@@ -14,10 +14,10 @@ const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.fl
 export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: {
   score: number; newBest: boolean; stats: RunStats; onPlayAgain: () => void; onHome: () => void;
 }) {
-  // The board shown is everyone's when the shared board is set up and reachable, else this device's. A run is asked
-  // for a name if it makes either; it is always kept on this device, and sent to the shared board too.
-  const [board, setBoard] = useState<Entry[]>(loadBoard);
-  const [step, setStep] = useState<'name' | 'board' | 'saving'>(() => (qualifies(loadBoard(), score) ? 'name' : 'board'));
+  // Wait for the shared board before deciding whether this run belongs in its top five.
+  const [board, setBoard] = useState<Entry[]>(() => sharedBoard ? [] : loadBoard());
+  const [step, setStep] = useState<'loading' | 'name' | 'board' | 'saving'>(() => sharedBoard ? 'loading' : qualifies(loadBoard(), score) ? 'name' : 'board');
+  const [boardScope, setBoardScope] = useState<'everyone' | 'device'>(sharedBoard ? 'everyone' : 'device');
   const [name, setName] = useState(loadName);
   const [rank, setRank] = useState(-1);
   const saved = useRef(false);
@@ -25,9 +25,11 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     if (!sharedBoard) return;
     fetchTop().then(top => {
       // Once the run is saved, its own result (with its rank) is what shows.
-      if (!top || saved.current) return;
-      if (qualifies(top, score)) setStep(s => (s === 'board' ? 'name' : s));
-      setBoard(top);
+      if (saved.current) return;
+      const current = top ?? loadBoard();
+      setBoardScope(top ? 'everyone' : 'device');
+      setBoard(current);
+      setStep(qualifies(current, score) ? 'name' : 'board');
     });
   }, [score]);
   const save = async (event: FormEvent) => {
@@ -40,6 +42,7 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     setStep('saving');
     const shared = sharedBoard ? await submitRun({ name: driver, score, distance: stats.distance, seconds: stats.seconds }) : null;
     setBoard(shared ? shared.board : local.board);
+    setBoardScope(shared ? 'everyone' : 'device');
     setRank(shared ? shared.rank : local.rank);
     setStep('board');
   };
@@ -54,16 +57,19 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     <h2 id="run-over-title" className="run-score">{number(score)}</h2>
     {newBest && <span className="run-best">New best!</span>}
     <div className="run-stats">{tiles.map(tile => <div key={tile.label}>{tile.icon}<b>{tile.value}</b><small>{tile.label}</small></div>)}</div>
+    {step === 'loading' && <p className="board-empty">Loading the shared board…</p>}
     {step === 'saving' && <p className="board-empty">Putting you on the board…</p>}
     {step === 'name'
       ? <form className="run-name" onSubmit={save}>
-        <label htmlFor="run-name-input"><Trophy size={15} /> You made the leaderboard</label>
+        {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. This score can be saved on this device.' : 'The shared leaderboard is not connected yet. This score can be saved on this device.'}</p>}
+        <label htmlFor="run-name-input"><Trophy size={15} /> You made the {boardScope === 'everyone' ? 'shared leaderboard' : 'board on this device'}</label>
         <div className="run-name-row">
           <input id="run-name-input" autoFocus maxLength={16} placeholder="Your name" value={name} onChange={event => setName(event.target.value)} />
           <button type="submit" className="primary">Save</button>
         </div>
       </form>
       : step === 'board' && <>
+        {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. Showing scores saved on this device.' : 'The shared leaderboard is not connected yet. Showing scores saved on this device.'}</p>}
         <Podium board={board} highlight={rank} />
         <button autoFocus className="primary" onClick={onPlayAgain}>Play again <RotateCcw size={18} /></button>
         <div className="modal-row"><button className="secondary" onClick={onHome}><ChevronLeft size={15} /> Home</button></div>
