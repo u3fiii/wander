@@ -167,7 +167,7 @@
 /* Phone layout for the intro: the globe stays whole at the top, and the copy and start button sit in a panel at the
    bottom, on a soft cream fade, so nothing sits on top of the planet. */
 @media (max-width:600px){
-  .intro .intro-card{left:22px;right:22px;top:auto;bottom:42px;width:auto;translate:none;text-align:center}
+  .intro .intro-card{left:22px;right:22px;top:auto;bottom:72px;width:auto;translate:none;text-align:center}
   .intro .intro-card h1{font-size:min(10vw,45px);line-height:1.02;margin:10px 0 8px;white-space:nowrap}
   .intro .intro-card p{font-size:15px;line-height:1.55;margin:0 0 14px}
   .intro .intro-card .start-button{width:100%;max-width:none;min-height:52px}
@@ -505,15 +505,13 @@
 .app .intro-card .intro-caption{display:flex;width:fit-content;margin:0;padding:6px 14px;border-radius:40px;background:#18232b8c;border:1px solid var(--glass-line);color:#ffffffd9;font-size:11px;font-weight:600;letter-spacing:.2px}
 
 /* Ramming cars under boost: no slow motion, so it is quicker but just as loud. The word slams in fast in a hot
-   orange-to-gold, shudders, an orange shockwave rings out, and it grows with the combo (--combo 1..5); the points
-   and the combo (×2, ×3…) pop in under it. The whole frame flashes orange-white on each hit. */
+   orange-to-gold, shudders, and an orange shockwave rings out. The whole frame flashes orange-white on each hit. */
 .big-scores{display:flex;align-items:center;gap:8px}
 .big-note.boost{top:32%;animation:big-note-out .25s cubic-bezier(.5,0,.75,0) .85s forwards}
-.big-note.boost strong{font-size:calc(clamp(40px,7vw,86px) * (1 + (var(--combo,1) - 1) * .1));filter:drop-shadow(0 6px 0 #7a2a0a) drop-shadow(0 12px 30px #ff7a2e88);animation:big-shudder .4s linear .25s}
+.big-note.boost strong{filter:drop-shadow(0 6px 0 #7a2a0a) drop-shadow(0 12px 30px #ff7a2e88);animation:big-shudder .4s linear .25s}
 .big-note.boost strong span{background:linear-gradient(180deg,#fff6c8 0%,#ffc34a 45%,#ff7a2e 100%);-webkit-background-clip:text;background-clip:text;color:transparent;animation:letter-slam .38s cubic-bezier(.2,1.5,.4,1) both;animation-delay:calc(var(--i) * 30ms)}
 .big-note.boost::before{content:'';position:absolute;left:50%;top:40%;width:260px;height:260px;margin:-130px 0 0 -130px;border-radius:50%;border:7px solid #ffb347;opacity:0;animation:shockwave .55s cubic-bezier(.2,.8,.3,1) .05s both}
 .big-note.boost b{background:#e07a3c;color:#fff;box-shadow:0 8px 28px #e07a3c88;animation-delay:calc(var(--i) * 30ms + 80ms)}
-.big-combo{padding:6px 14px;border-radius:40px;background:#fff;color:#c2410c;font-style:normal;font-size:clamp(20px,2.6vw,30px);font-weight:900;box-shadow:0 8px 28px #ff7a2e66;animation:big-points .5s cubic-bezier(.3,1.9,.5,1) both;animation-delay:calc(var(--i) * 30ms + 120ms)}
 .boost-flash{position:absolute;inset:0;z-index:5;pointer-events:none;background:radial-gradient(ellipse at 50% 55%,#fff8e0 0%,#ffb34766 40%,#ff7a2e00 75%);mix-blend-mode:screen;animation:boost-flash .32s ease-out forwards}
 @keyframes boost-flash{0%{opacity:.85}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.boost-flash{display:none}}
@@ -546,14 +544,6 @@
 }
 /* Keyboard and mouse hints mean nothing on a touch screen. */
 @media (pointer:coarse),(max-width:600px){.app .intro-card .intro-hints{display:none}}
-
-/* Weave combo, beside the score: a gold chip with the multiplier, popping in at each step, and a thin bar under
-   it running down the time left to the next near miss. */
-.weave-chip{position:relative;overflow:hidden;margin-left:2px;padding:3px 10px 5px;border-radius:20px;background:var(--gold);color:#2b1d05;font-style:normal;font-size:14px;font-weight:900;font-variant-numeric:tabular-nums;box-shadow:0 0 0 4px #f4b5442e;animation:points-pop .4s cubic-bezier(.3,1.9,.5,1) both}
-.weave-chip i{position:absolute;left:0;right:0;bottom:0;height:3px;background:#2b1d0580;transform-origin:left;animation:weave-time var(--window,4s) linear forwards}
-@keyframes weave-time{from{transform:scaleX(1)}to{transform:scaleX(0)}}
-@media (prefers-reduced-motion:reduce){.weave-chip,.weave-chip i{animation:none}}
-.hit-note .note-combo{margin-left:-2px;background:var(--gold);color:#2b1d05}
 
 /* The brand at the top left of the start screen, in the header's glass: the planet mark in a round well, the name
    in white with the same orange full stop as the title, then a divider and the tagline (like the level pill

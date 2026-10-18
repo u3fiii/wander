@@ -24,7 +24,7 @@ export default function LoadingScreen({ ready, onLeave }: { ready: boolean; onLe
   const bar = useRef<HTMLSpanElement>(null);
   const label = useRef<HTMLElement>(null);
   const mounted = useRef(performance.now());
-  // Carry the static loader's animations on from where they were (see .loader in index.html).
+  // Carry the static loader's timing on from where it was (see .loader in index.html).
   const since = useRef(`${-Math.round(mounted.current)}ms`);
   const done = ready && phase !== 'loading';
 
@@ -72,9 +72,7 @@ export default function LoadingScreen({ ready, onLeave }: { ready: boolean; onLe
 
   if (phase === 'gone') return null;
   return <div className={`loader${done ? ' leaving' : ''}`} role="progressbar" aria-label="Loading the world" aria-busy={!ready} style={{ '--since': since.current } as CSSProperties}>
-    <strong className="loader-brand" aria-label="Wander.">
-      <span className="loader-letter" aria-hidden="true">W</span><span className="loader-letter" aria-hidden="true">a</span><span className="loader-letter" aria-hidden="true">n</span><span className="loader-letter" aria-hidden="true">d</span><span className="loader-letter" aria-hidden="true">e</span><span className="loader-letter" aria-hidden="true">r</span><span className="loader-dot" aria-hidden="true">.</span>
-    </strong>
+    <strong className="loader-brand" aria-label="Wander.">Wander<span className="loader-dot" aria-hidden="true">.</span></strong>
     <div className="loader-meter">
       <div className="loader-track"><span ref={bar} /></div>
       <p className="loader-text"><span key={ready ? 'ready' : tip}>{ready ? 'Ready to drive' : TIPS[tip]}</span><em ref={label}>0%</em></p>

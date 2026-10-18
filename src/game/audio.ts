@@ -130,7 +130,7 @@ type Graph = {
   engine?: Loop; load?: Loop; offroad?: Loop; ambience?: Loop; sea?: Loop; plane?: Loop;
 };
 let graph: Graph | null = null;
-let muted = false;
+let muted = true;
 const engine = createEngineState();
 // Frames can stop without warning (tab hidden, window minimised, scene unmounted). If updates stop arriving,
 // the continuous layers fade out instead of droning on at their last level.

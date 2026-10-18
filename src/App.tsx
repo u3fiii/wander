@@ -447,7 +447,7 @@ export default function App() {
   const [revealed, setRevealed] = useState(false);
   const [data, setData] = useState<Telemetry>(initialLoopCar);
   const [gamepad, setGamepad] = useState(false);
-  const [muted, setMutedState] = useState(false);
+  const [muted, setMutedState] = useState(true);
   // Smooth-driving streak: grows while staying on the road at speed, resets off-road or when slowing right down.
   const streak = useRef({ time: 0, last: 0 });
   const [streakLevel, setStreakLevel] = useState(0);
@@ -582,35 +582,19 @@ export default function App() {
     }, 1000);
     return () => window.clearInterval(timer);
   }, [started, halted, showNote]);
-  // Weave combo: near misses one after another (each within difficulty.weaveWindow seconds of the last) build a
-  // multiplier on their points, up to difficulty.weaveMax. A crash or a bump breaks it. Shown beside the score,
-  // with a bar running down the time left.
-  const weaveRef = useRef({ count: 0, last: 0 });
-  const [weave, setWeave] = useState({ count: 0, id: 0, window: 0 });
-  const breakWeave = useCallback(() => { weaveRef.current.count = 0; setWeave(w => (w.count ? { ...w, count: 0 } : w)); }, []);
-  useEffect(() => {
-    if (weave.count < 2) return;
-    const timer = window.setTimeout(() => { weaveRef.current.count = 0; setWeave(w => (w.id === weave.id ? { ...w, count: 0 } : w)); }, weave.window * 1000);
-    return () => window.clearTimeout(timer);
-  }, [weave]);
-  // Boost hits chain into a combo: each car rammed within a couple of seconds of the last adds one, and the
-  // points are multiplied by it. Each one flashes the screen.
-  const boostCombo = useRef({ count: 0, last: 0 });
+  // Boost hits still award a fixed bonus and flash, but no longer chain into a timed score multiplier.
   const [boostFlash, setBoostFlash] = useState(0);
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
     const magnitude = Math.round(hit.speed * 2) + 5;
     if (hit.boosted) {
-      const combo = boostCombo.current, now = performance.now();
-      combo.count = now - combo.last < 2500 ? combo.count + 1 : 1;
-      combo.last = now;
-      showNote('bigBoost', Math.round(magnitude * 1.5 * combo.count), false, combo.count > 1 ? `×${combo.count}` : undefined);
+      showNote('bigBoost', Math.round(magnitude * 1.5), false);
       runStats.current.smashes++;
       setBoostFlash(n => n + 1);
     }
-    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) { breakWeave(); if (hit.cinematic) loseHeart(); showNote(hit.cinematic ? 'bigSmash' : 'smash', -(Math.round(hit.closing * 2) + 5), false); }
+    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) { if (hit.cinematic) loseHeart(); showNote(hit.cinematic ? 'bigSmash' : 'smash', -(Math.round(hit.closing * 2) + 5), false); }
     else if (hit.kind === 'side') { showNote('flick', magnitude, hit.speed < QUIET_HIT_SPEED); if (hit.speed >= QUIET_HIT_SPEED) { earnBoost(car.current, BOOST_EARN.flick); } }
-    else { breakWeave(); showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED); }
-  }, [showNote, breakWeave, loseHeart]);
+    else { showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED); }
+  }, [showNote, loseHeart]);
   // A drift held long enough gets the overhead slow-motion cut-in, with its word (the points come when it ends).
   const handleDriftCinematic = useCallback(() => showNote('cineDrift', 0, false), [showNote]);
   // A drift pays for how long and how fast it slid; longer ones get bigger words.
@@ -633,14 +617,8 @@ export default function App() {
   }, [showNote]);
   // Near misses pay more the faster the pass and the thinner the gap.
   const handleNearMiss = useCallback((miss: NearMiss) => {
-    const w = weaveRef.current, now = performance.now();
-    w.count = now - w.last < difficulty.weaveWindow * 1000 ? w.count + 1 : 1;
-    w.last = now;
-    const multiplier = Math.min(w.count, difficulty.weaveMax);
-    setWeave(previous => ({ count: w.count, id: previous.id + 1, window: difficulty.weaveWindow }));
     runStats.current.nearMisses++;
-    runStats.current.bestWeave = Math.max(runStats.current.bestWeave, multiplier);
-    showNote(miss.cinematic ? 'bigNear' : 'near', (Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5) * multiplier, false, multiplier > 1 ? `×${multiplier}` : undefined);
+    showNote(miss.cinematic ? 'bigNear' : 'near', Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5, false);
     earnBoost(car.current, BOOST_EARN.nearMiss);
   }, [showNote]);
   useEffect(() => {
@@ -825,9 +803,9 @@ export default function App() {
     // A new run: hearts, stage, stats, stars, clean driving and the best-score note start over.
     beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
     setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats();
-    stageRef.current = 1; setDifficultyLevel(1); breakWeave();
+    stageRef.current = 1; setDifficultyLevel(1);
     if (touchQuery?.matches) resetToDay();
-  }, [breakWeave]);
+  }, []);
   // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.
   const [introExit, setIntroExit] = useState(false);
   const [headerMotion, setHeaderMotion] = useState<'exiting' | 'entering' | ''>('');
@@ -957,7 +935,6 @@ export default function App() {
           <span className="level-number score-level" aria-hidden="true">{level.level}</span>
           <span>Score</span><b key={`score-${bonus?.id ?? 0}`} ref={scoreText} className={`score-value ${bonusTier(bonus?.amount ?? 0)}`}>{formatNumber(shownScore.current)}</b>
           {bonus && <span key={`float-${bonus.id}`} className={`score-float ${bonusTier(bonus.amount)}`} aria-hidden="true">{bonus.amount > 0 ? '+' : ''}{formatNumber(bonus.amount)}</span>}
-        {weave.count > 1 && <em key={weave.id} className="weave-chip" title="Weave combo" style={{ '--window': `${weave.window}s` } as CSSProperties}>×{Math.min(weave.count, difficulty.weaveMax)}<i /></em>}
         </div>
         <div key={`hearts-${heartBreak?.id ?? 0}`} className={`hearts-bar${hearts === 1 ? ' last' : ''}${heartBreak ? ' hit' : ''}`} aria-label={`${hearts} of ${HEARTS} hearts left`}>
           {Array.from({ length: HEARTS }, (_, i) => <HeartIcon key={i} className={i < hearts ? 'full' : i === hearts && heartBreak ? 'breaking' : 'lost'} />)}
@@ -1027,12 +1004,10 @@ export default function App() {
       <BoostGauge car={car} controls={controls} offroad={!!data.offroad} />
       {hitNote && (hitNote.kind.startsWith('big') || hitNote.kind === 'cineDrift'
         // During a slow-motion cut-in, or ramming cars under boost: big, the word built letter by letter.
-        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineDrift: 'drift-cine' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}
-          style={{ '--combo': Math.min(5, boostCombo.current.count) } as CSSProperties}>
+        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineDrift: 'drift-cine' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
           <strong aria-hidden="true">{[...hitNote.text].map((letter, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{letter === ' ' ? '\u00a0' : letter}</span>)}</strong>
           <span className="big-scores" aria-hidden="true">
             {hitNote.points !== 0 && <b style={{ '--i': hitNote.text.length } as CSSProperties}>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b>}
-            {hitNote.badge && <em className="big-combo" style={{ '--i': hitNote.text.length + 2 } as CSSProperties}>{hitNote.badge}</em>}
           </span>
         </div>
         : <div key={hitNote.id} className={`hit-note ${/drift/i.test(hitNote.kind) ? `drift ${hitNote.kind}` : hitNote.kind}`} role="status">{hitNote.text} <b>{BADGE_NOTES.includes(hitNote.kind) ? hitNote.badge : `${hitNote.points > 0 ? '+' : ''}${hitNote.points}`}</b>{!BADGE_NOTES.includes(hitNote.kind) && hitNote.badge && <b className="note-combo">{hitNote.badge}</b>}</div>)}
