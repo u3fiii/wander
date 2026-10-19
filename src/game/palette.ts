@@ -39,6 +39,12 @@ export const PALETTE = {
   carBlue: '#5b86b8',
   carMint: '#8cc7a5',
   carCream: '#efe4cc',
+  compactBody: '#218a8c',
+  compactRoof: '#f1dfb8',
+  compactTrim: '#193c40',
+  compactWindows: '#203b49',
+  compactAccent: '#e8ad48',
+  compactChrome: '#bdc9bd',
   tires: '#2f3338',
   // Details
   clouds: '#ffffff',

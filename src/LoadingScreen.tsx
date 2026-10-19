@@ -7,8 +7,9 @@ const TIPS = ['Rolling out the little world…', 'Planting the trees…', 'Polis
 const MAX_BEFORE_READY = 0.94;
 // Kept on screen at least this long so it never flashes, then fades out.
 const MIN_SHOW_MS = 1400;
-// The exit is staggered (bar, then name, then the background; see index.html): this long in all.
-const FADE_MS = 800;
+// The loader copy fades first, the sky is exposed next, then the overlay is removed.
+const CONTENT_FADE_MS = 300;
+const SKY_REVEAL_MS = 450;
 // The bar's pace: how long (s) it takes to settle on new progress, its top speed (whole bar per second), and how fast
 // it creeps on its own while waiting; the `Finish` values are for the last stretch once everything is ready.
 const BAR = { settle: 0.7, maxSpeed: 0.55, creep: 0.006, settleFinish: 0.35, maxSpeedFinish: 1.6 };
@@ -64,14 +65,16 @@ export default function LoadingScreen({ ready, onLeave }: { ready: boolean; onLe
   useEffect(() => {
     if (!ready) return;
     const wait = Math.max(550, MIN_SHOW_MS - (performance.now() - mounted.current));
-    const leave = window.setTimeout(() => { setPhase('leaving'); onLeave(); }, wait);
-    const gone = window.setTimeout(() => setPhase('gone'), wait + FADE_MS);
-    return () => { window.clearTimeout(leave); window.clearTimeout(gone); };
+    const leave = window.setTimeout(() => setPhase('leaving'), wait);
+    const reveal = window.setTimeout(onLeave, wait + CONTENT_FADE_MS);
+    const gone = window.setTimeout(() => setPhase('gone'), wait + CONTENT_FADE_MS + SKY_REVEAL_MS);
+    return () => { window.clearTimeout(leave); window.clearTimeout(reveal); window.clearTimeout(gone); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
   if (phase === 'gone') return null;
   return <div className={`loader${done ? ' leaving' : ''}`} role="progressbar" aria-label="Loading the world" aria-busy={!ready} style={{ '--since': since.current } as CSSProperties}>
+    <span className="loader-backdrop" aria-hidden="true" />
     <strong className="loader-brand" aria-label="Wander.">Wander<span className="loader-dot" aria-hidden="true">.</span></strong>
     <div className="loader-meter">
       <div className="loader-track"><span ref={bar} /></div>

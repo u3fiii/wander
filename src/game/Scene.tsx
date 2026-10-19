@@ -2,13 +2,12 @@ import { Suspense, memo, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { withDraco } from './gltf';
-import { CAR_CONFIG, JUICE_CONFIG, LOOP_DRIVE } from './config';
+import { JUICE_CONFIG, LOOP_DRIVE } from './config';
+import { DRIVING_CONFIG as CAR_CONFIG } from './vehicleHandling';
 import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
 import { playBoost, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
-import { buildCarRig, createBodySpring, logModelNodes, updateBodySpring, updateCamera, updateWheels } from './carRig';
+import { createBodySpring, updateBodySpring, updateCamera } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
 import { DRIVE_MODE, RAILS, initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
@@ -28,9 +27,11 @@ import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
-import { bakeRoles, jitterAmount, kenneyCarKey, logMaterials, playerCarRole, resolveKenneyCar, roleMaterials, textureSampler } from './recolor';
+import { bakeRoles, jitterAmount, kenneyCarKey, logMaterials, resolveKenneyCar, roleMaterials, textureSampler } from './recolor';
 import carTextureUrl from '../assets/kenny cars/Textures/colormap.png?url';
-import playerModelUrl from '../assets/low_poly_car/low-poly-car.glb?url';
+import PlayerVehicle from './PlayerVehicle';
+import type { VehicleId } from './vehicles';
+import { vehicleEffects } from './vehicleVisuals';
 import taxiModelUrl from '../assets/kenny cars/taxi.obj?url';
 import policeModelUrl from '../assets/kenny cars/police.obj?url';
 import suvModelUrl from '../assets/kenny cars/suv.obj?url';
@@ -42,7 +43,7 @@ import deliveryModelUrl from '../assets/kenny cars/delivery.obj?url';
 // Atmosphere tunables. Distances are in world units; colors come from PALETTE.
 const ATMOSPHERE = {
   fog: { nearFactor: 0.04, farFactor: 1.0, damping: 4 },
-  glow: { radius: 1.3, intensity: 0.48, power: 1.35, drivingFade: 0.45, nightIntensity: 0.1, nightPower: 3 },
+  glow: { radius: 1.3, intensity: 0.48, power: 1.35, drivingFade: 0.45, nightIntensity: 0.1, nightPower: 3, darkFade: 0.7 },
   light: { hemisphereIntensity: 1.1, sunIntensity: 2.0, sunColor: PALETTE.sunWarm, shadowRadius: 4, rimIntensity: 0.2 },
   post: {
     exposure: 1.05,
@@ -67,7 +68,7 @@ function readGamepad() {
   return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
-  started: boolean; paused: boolean; mapView?: boolean;
+  started: boolean; paused: boolean; mapView?: boolean; vehicleId: VehicleId;
   // The run's last heart is gone: the finale (see FINALE).
   finale?: boolean;
   // Only one heart is left: the warning and its heartbeat (see cinematicState.danger / pulse).
@@ -89,7 +90,6 @@ const circularAngleDistance = (a: number, b: number) => Math.abs(Math.atan2(Math
 
 // Fixed start spot so the globe turn and camera move are the same every time.
 const SPAWN_INDEX = 0;
-const PLAYER_COLOR: PaletteKey = 'carRed';
 
 const carRoleColor = (body: PaletteKey) => (role: string): { key: PaletteKey; roughness?: number } => {
   switch (role) {
@@ -130,60 +130,13 @@ function KenneyCar({ modelUrl, scale = 1.35, color, jitter }: { modelUrl: string
   return <primitive object={model} scale={scale * 0.729} rotation={[0, Math.PI, 0]} />;
 }
 
-const PLAYER_CAR_LENGTH = 2.4;
-
 function surfaceAt(car: CarState) {
   const latitude = loopFrame(car.x, car.z).latitude;
   return { onRoad: distanceToRoadNetwork(latitude, car.x) < 0.7, onLand: landInfluence(latitude, car.x) >= 0.5 };
 }
 
-function PlayerCar({ car }: { car: React.RefObject<CarState> }) {
-  const gltf = useLoader(GLTFLoader, playerModelUrl, withDraco);
-  const model = useMemo(() => {
-    const clone = gltf.scene.clone(true);
-    if (CAR_CONFIG.logModelNodes) logModelNodes(clone);
-    logMaterials('player car', clone);
-    const jitter = jitterAmount(seededRandom(77), JITTER.cars);
-    clone.traverse(child => {
-      if (!(child instanceof THREE.Mesh)) return;
-      const map = (child.material as THREE.MeshStandardMaterial).map;
-      if (map) {
-        const baked = bakeRoles(child.geometry, textureSampler(map), playerCarRole);
-        child.geometry = baked.geometry;
-        child.material = roleMaterials(baked.roles, carRoleColor(PLAYER_COLOR), jitter);
-      }
-      child.castShadow = true;
-      child.receiveShadow = true;
-    });
-    const rawSize = new THREE.Box3().setFromObject(clone).getSize(new THREE.Vector3());
-    clone.scale.setScalar(PLAYER_CAR_LENGTH / Math.max(rawSize.x, rawSize.z));
-    clone.updateMatrixWorld(true);
-    const bounds = new THREE.Box3().setFromObject(clone);
-    const center = bounds.getCenter(new THREE.Vector3());
-    clone.position.set(-center.x, -bounds.min.y, -center.z);
-    return clone;
-  }, [gltf.scene]);
-  const rig = useMemo(() => buildCarRig(model), [model]);
-  const lastTravel = useRef<number | null>(null);
-  useFrame(() => {
-    const state = car.current;
-    const travel = lastTravel.current === null ? 0 : state.wheelTravel - lastTravel.current;
-    lastTravel.current = state.wheelTravel;
-    updateWheels(rig, state.steering, Math.abs(travel) < 1 ? travel : 0);
-  });
-  useEffect(() => () => {
-    rig.dispose();
-    model.traverse(child => {
-      if (!(child instanceof THREE.Mesh)) return;
-      if (Array.isArray(child.material)) child.material.forEach(material => material.dispose());
-      else child.material.dispose();
-    });
-  }, [model, rig]);
-  return <primitive object={rig.frame} />;
-}
-
 // Boost flame: an additive cone out of the exhaust while boost fires, flickering in length.
-function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
+function BoostFlame({ car, vehicleId }: { car: React.RefObject<CarState>; vehicleId: VehicleId }) {
   const flame = useRef<THREE.Mesh>(null!);
   const geometry = useMemo(() => new THREE.ConeGeometry(0.16, 1, 8, 1, true).rotateX(Math.PI / 2).translate(0, 0, 0.5), []);
   const material = useMemo(() => new THREE.MeshBasicMaterial({
@@ -202,7 +155,7 @@ function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
     ref={flame}
     geometry={geometry}
     material={material}
-    position={[0.22 * CAR_CONFIG.bodyScale, 0.42, -CAR_CONFIG.wheelRearZ * CAR_CONFIG.bodyScale + 0.2]}
+    position={vehicleEffects(vehicleId).exhaust}
     visible={false}
   />;
 }
@@ -213,8 +166,8 @@ function BoostFlame({ car }: { car: React.RefObject<CarState> }) {
 // Night lights are warm and soft everywhere: amber headlamps and beams, like the street lamps and windows.
 const WARM_LIGHT = { headlamp: '#ffa888', headlampHalo: '#ff7a5a', beam: '#ff9a78' };
 
-function CarLamps({ blend, halfWidth, front, rear, height }: {
-  blend: React.RefObject<number>; halfWidth: number; front: number; rear: number; height: number;
+function CarLamps({ blend, halfWidth, front, rear, height, rearHeight = height }: {
+  blend: React.RefObject<number>; halfWidth: number; front: number; rear: number; height: number; rearHeight?: number;
 }) {
   const geometry = useMemo(() => new THREE.SphereGeometry(1, 10, 8), []);
   const materials = useMemo(() => {
@@ -233,8 +186,8 @@ function CarLamps({ blend, halfWidth, front, rear, height }: {
     {[-1, 1].map(side => <group key={side}>
       <mesh geometry={geometry} material={materials.head} position={[side * halfWidth, height, front]} scale={0.09} />
       <mesh geometry={geometry} material={materials.headHalo} position={[side * halfWidth, height, front]} scale={0.26} />
-      <mesh geometry={geometry} material={materials.tail} position={[side * halfWidth, height, rear]} scale={0.07} />
-      <mesh geometry={geometry} material={materials.tailHalo} position={[side * halfWidth, height, rear]} scale={0.18} />
+      <mesh geometry={geometry} material={materials.tail} position={[side * halfWidth, rearHeight, rear]} scale={0.07} />
+      <mesh geometry={geometry} material={materials.tailHalo} position={[side * halfWidth, rearHeight, rear]} scale={0.18} />
     </group>)}
   </group>;
 }
@@ -251,8 +204,9 @@ function HeadlightBeam({ blend }: { blend: React.RefObject<number> }) {
   </>;
 }
 
-function CarModel({ car, active, landingCompression, landingActive, bodyRoll, nightBlend }: {
+function CarModel({ car, vehicleId, active, landingCompression, landingActive, bodyRoll, nightBlend }: {
   car: React.RefObject<CarState>;
+  vehicleId: VehicleId;
   active: boolean;
   landingCompression: React.RefObject<number>;
   landingActive: React.RefObject<boolean>;
@@ -262,6 +216,7 @@ function CarModel({ car, active, landingCompression, landingActive, bodyRoll, ni
   const body = useRef<THREE.Group>(null!);
   const spring = useMemo(createBodySpring, []);
   const landing = useRef(0);
+  const effects = vehicleEffects(vehicleId);
   useFrame((_, delta) => {
     const state = car.current;
     const dt = Math.min(delta, LOOP_DRIVE.maxFrameDelta);
@@ -276,14 +231,15 @@ function CarModel({ car, active, landingCompression, landingActive, bodyRoll, ni
     bodyRoll.current = spring.roll;
   });
   return <group ref={body} name="carBody">
-    <PlayerCar car={car} />
-    <BoostFlame car={car} />
+    <PlayerVehicle vehicleId={vehicleId} car={car} />
+    <BoostFlame car={car} vehicleId={vehicleId} />
     <CarLamps
       blend={nightBlend}
-      halfWidth={0.36 * CAR_CONFIG.bodyScale}
-      front={-(CAR_CONFIG.wheelFrontZ * CAR_CONFIG.bodyScale + 0.35)}
-      rear={-CAR_CONFIG.wheelRearZ * CAR_CONFIG.bodyScale + 0.4}
-      height={0.5}
+      halfWidth={effects.lampWidth}
+      front={effects.front}
+      rear={effects.rear}
+      height={effects.headHeight}
+      rearHeight={effects.tailHeight}
     />
     <HeadlightBeam blend={nightBlend} />
   </group>;
@@ -488,6 +444,7 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     m.cooldown = Math.max(0, m.cooldown - dt);
     obstacle.ramCooldown = Math.max(0, (obstacle.ramCooldown ?? 0) - dt);
     if (obstacle.impact && m.cooldown === 0) {
+      const power = obstacle.impactPower ?? 1;
       const boosted = !!obstacle.boostHit;
       const side = obstacle.hitKind === 'side' && !boosted;
       const front = obstacle.hitKind === 'front' && !boosted;
@@ -500,17 +457,17 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
       m.spinVelocity += away * obstacle.impact * NPC.spinTransfer * fling;
       if (side) {
         // Cap the initial shove so high-speed overlaps read as a firm nudge, not a launch.
-        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -SIDE_HIT.maxLateralVelocity, SIDE_HIT.maxLateralVelocity);
-        m.spinVelocity = THREE.MathUtils.clamp(m.spinVelocity, -SIDE_HIT.maxSpinVelocity, SIDE_HIT.maxSpinVelocity);
+        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -SIDE_HIT.maxLateralVelocity * power, SIDE_HIT.maxLateralVelocity * power);
+        m.spinVelocity = THREE.MathUtils.clamp(m.spinVelocity, -SIDE_HIT.maxSpinVelocity * power, SIDE_HIT.maxSpinVelocity * power);
       }
       if (front) {
         // A frontal hit should clear the lane without stopping either car abruptly.
-        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -4.4, 4.4);
+        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -4.4 * power, 4.4 * power);
       }
       if (boosted) {
         const direction = m.pushVelocity === 0 ? away : Math.sign(m.pushVelocity);
-        m.pushVelocity = direction * THREE.MathUtils.clamp(Math.abs(m.pushVelocity), BOOST_HIT.minLateralVelocity, BOOST_HIT.maxLateralVelocity);
-        m.spinVelocity += direction * BOOST_HIT.spin;
+        m.pushVelocity = direction * THREE.MathUtils.clamp(Math.abs(m.pushVelocity), BOOST_HIT.minLateralVelocity * power, BOOST_HIT.maxLateralVelocity * power);
+        m.spinVelocity += direction * BOOST_HIT.spin * power;
       }
       // A rear hit shoves the car forward (punted hard under boost); a frontal hit slows it while steering it clear.
       m.speed = ahead < 0 ? m.speed + obstacle.impact * (boosted ? BOOST_HIT.punt : NPC.shoveForward * (1 - sideways)) : m.speed * (front ? 0.72 : 0.3);
@@ -596,7 +553,8 @@ function AtmosphereGlow({ amount, night }: { amount: React.RefObject<number>; ni
   }), [dayColor]);
   useFrame(() => {
     const n = night.current;
-    uniforms.uFade.value = amount.current;
+    // The sky turns purple before the night lighting blend is complete, so taper the halo's opacity as dusk deepens.
+    uniforms.uFade.value = amount.current * (1 - n * ATMOSPHERE.glow.darkFade);
     uniforms.uColor.value.copy(dayColor).lerp(nightColor, n);
     uniforms.uIntensity.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.intensity * dayLook.glow, ATMOSPHERE.glow.nightIntensity * nightLook.glow, n);
     uniforms.uPower.value = THREE.MathUtils.lerp(ATMOSPHERE.glow.power, ATMOSPHERE.glow.nightPower, n);
@@ -848,6 +806,8 @@ function DrivingScene(props: SceneProps) {
   const lookSwing = useRef(0);
   const boostAtmosphere = useRef(0);
   const tireMarks = useMemo(createTireMarks, []);
+  const rearAxle = useMemo(() => ({ halfTrack: 0, rearZ: 0 }), []);
+  const wheelEffects = useMemo(() => vehicleEffects(props.vehicleId), [props.vehicleId]);
   const speedLines = useMemo(createSpeedLines, []);
   const dust = useMemo(createDust, []);
   const soilClods = useMemo(createSoilClods, []);
@@ -1441,9 +1401,11 @@ function DrivingScene(props: SceneProps) {
       camera.updateProjectionMatrix();
     }
 
-    updateTireMarks(tireMarks, dt, vehicle.current, car, driving);
-    updateDust(dust, dt, vehicle.current, car, throttle, driving);
-    updateSoilClods(soilClods, dt, vehicle.current, car, offRoadDriving);
+    rearAxle.halfTrack = wheelEffects.halfTrack;
+    rearAxle.rearZ = wheelEffects.rearAxle;
+    updateTireMarks(tireMarks, dt, vehicle.current, car, driving, rearAxle);
+    updateDust(dust, dt, vehicle.current, car, throttle, driving, rearAxle);
+    updateSoilClods(soilClods, dt, vehicle.current, car, offRoadDriving, rearAxle);
     // The red crash cut-in gets the strong focus lines; the near-miss one doesn't.
     updateSpeedLines(speedLines, dt, camera, car.speed, driving && zoom > 0.9, crashLevel.current * (1 - coolBlend.current), realDt);
     // How near the sea the car is: the share of water in rings around it (checked a few times a second). On the
@@ -1499,7 +1461,7 @@ function DrivingScene(props: SceneProps) {
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld zoom={zoomProgress} />
         <Traffic paused={props.paused} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} />
-        <group ref={vehicle}><CarModel car={props.car} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /><MapPin show={!!props.mapView} /></group>
+        <group ref={vehicle}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
         <primitive object={dust.mesh} />
         <primitive object={soilClods.mesh} />

@@ -1,0 +1,6 @@
+Range Rover by IvOfficial
+Source: https://poly.pizza/m/8zk4o6nALW
+Source lists the license as Creative Commons Attribution (CC BY).
+Adapted for Wander: normalized model and wheel transforms, animated wheels,
+vehicle lighting/effects placement and game handling profile.
+Original supplied GLB is preserved as Range Rover by IvOfficial - 8zk4o6nALW.glb.

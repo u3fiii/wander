@@ -86,6 +86,10 @@ The fishing boat uses [Fishing Boat](https://sketchfab.com/3d-models/fishing-boa
 
 The player vehicle uses [Low Poly Car](https://sketchfab.com/3d-models/low-poly-car-ffcf987149df4e528ebf1e2dec6a9f8a) by [ion_omat](https://sketchfab.com/ion_omat), licensed under [CC BY 4.0](http://creativecommons.org/licenses/by/4.0/). The supplied source files, self-contained runtime GLB conversion and original license are kept in `src/assets/low_poly_car`.
 
+The optional Compact vehicle uses [Low Poly Small car](https://sketchfab.com/3d-models/low-poly-small-car-ebe7c5e98a7448b5abb2eaf0cb22b766) by [scailman](https://sketchfab.com/scailman), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Its source files, license and self-contained runtime GLB are in `src/assets/low_poly_small_car`. Adaptations include scale, wheel pivots, game lighting and effects. Vehicle handling profiles live in `src/game/vehicleHandling.ts`: Classic is a heavier cruiser with a higher top speed and stronger traffic impacts; Compact launches faster, turns more responsively and brakes sooner, but has a lower top speed and less impact resistance. Profiles multiply the live tuning baseline without overwriting it. Hitboxes and hearts remain shared; the garage saves the selected ride on the device. Adding a ride requires a model entry in `vehicles.ts` and a balanced profile in `vehicleHandling.ts`.
+
+The Range Rover vehicle uses [Range Rover](https://poly.pizza/m/8zk4o6nALW) by IvOfficial, listed by its source as Creative Commons Attribution (CC BY). The original GLB and attribution note are in `src/assets`. Import transforms are normalized for animated wheels; the spare tyre remains fixed. Its all-terrain profile has stronger traffic impacts and less off-road slowdown, balanced by slower steering, acceleration and braking.
+
 ## Shared leaderboard (Supabase)
 
 Without setup, each browser keeps its own top five. To share one board between every player:

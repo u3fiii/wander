@@ -71,8 +71,10 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
       : step === 'board' && <>
         {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. Showing scores saved on this device.' : 'The shared leaderboard is not connected yet. Showing scores saved on this device.'}</p>}
         <Podium board={board} highlight={rank} />
-        <button autoFocus className="primary" onClick={onPlayAgain}>Play again <RotateCcw size={18} /></button>
-        <div className="modal-row"><button className="secondary" onClick={onHome}><ChevronLeft size={15} /> Home</button></div>
+        <div className="run-over-actions">
+          <button autoFocus className="primary" onClick={onPlayAgain}>Play again <RotateCcw size={18} /></button>
+          <button className="secondary" onClick={onHome}><ChevronLeft size={15} /> Home</button>
+        </div>
       </>}
   </section></div>;
 }

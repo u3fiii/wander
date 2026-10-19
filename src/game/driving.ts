@@ -1,4 +1,5 @@
-import { BLOCKS, CAR_CONFIG, DRIVE, JUICE_CONFIG, LOOP_DRIVE } from './config.ts';
+import { BLOCKS, DRIVE, JUICE_CONFIG, LOOP_DRIVE } from './config.ts';
+import { DRIVING_CONFIG as CAR_CONFIG, impactPower } from './vehicleHandling.ts';
 import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
@@ -297,7 +298,8 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   }
   if (contact && contact.gap < 0) {
     const hit = contact.obstacle;
-    hit.impact = Math.max(hit.impact ?? 0, Math.abs(car.speed));
+    hit.impact = Math.max(hit.impact ?? 0, Math.abs(car.speed) * impactPower());
+    hit.impactPower = impactPower();
     const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
     // Reversing, the tail leads: backing into a car is scored like driving into it.
     const kind = classifyTrafficHit(contact, car.speed < -0.5 ? [-facing[0], -facing[1]] : facing);
@@ -312,7 +314,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
       // struck car is thrown clear (see boostHit).
       hit.boostHit = car.boosting > 0;
       car.speed *= car.boosting > 0 ? CAR_CONFIG.boostRamSpeedKeep
-        : kind === 'front' ? 0.92 : kind === 'side' ? CAR_CONFIG.sideRamSpeedKeep : CAR_CONFIG.ramSpeedKeep;
+        : kind === 'front' ? CAR_CONFIG.frontRamSpeedKeep : kind === 'side' ? CAR_CONFIG.sideRamSpeedKeep : CAR_CONFIG.ramSpeedKeep;
       // The struck car pushes back a little: the heading tips away from it (more when boosting into it).
       // A head-on hit gets no nudge and starts a short, stronger road assist instead, so the car usually
       // stays on the road rather than ending up facing the verge.

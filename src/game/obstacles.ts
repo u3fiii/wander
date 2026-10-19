@@ -7,6 +7,7 @@ import { difficulty } from './difficulty.ts';
 // Movable obstacles are capsules: `forward` is their facing as a unit (east, north) vector and `halfLength`
 // the half distance between the end caps' centres, so long cars collide along their whole body.
 export type Obstacle = {
+  impactPower?: number;
   latitude: number; longitude: number; radius: number; impact?: number; movable?: boolean; ramCooldown?: number;
   forward?: [number, number]; halfLength?: number;
   // Movable obstacles: how fast (m/s) the car is driving along `forward`, so hits and near misses can use the

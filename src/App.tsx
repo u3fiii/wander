@@ -1,8 +1,12 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Trophy, Map as MapIcon, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, Maximize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Trophy, Map as MapIcon, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
+import Garage from './Garage';
+import { loadVehicle, saveVehicle } from './game/vehicles';
+import type { VehicleId } from './game/vehicles';
+import { setActiveVehicle, DRIVING_CONFIG } from './game/vehicleHandling';
 import LoadingScreen from './LoadingScreen';
 import Coach from './Coach';
 import BoostGauge from './BoostGauge';
@@ -408,6 +412,16 @@ export default function App() {
   // The time of day runs as one slow clock (dayCycle.ts, advanced by the scene). Each frame the sky gradient
   // takes its colours from it, the stars fade with it, and the page switches to its night styling halfway.
   const mainRef = useRef<HTMLElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setFullscreen(document.fullscreenElement === mainRef.current);
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    else if (mainRef.current?.requestFullscreen) void mainRef.current.requestFullscreen().catch(() => {});
+  };
   useEffect(() => {
     let frame = 0;
     const written: Record<string, string> = {};
@@ -429,6 +443,19 @@ export default function App() {
   const [resetKey, setResetKey] = useState(0);
   const [help, setHelp] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [vehicleId, setVehicleId] = useState<VehicleId>(() => {
+    const id = loadVehicle();
+    setActiveVehicle(id);
+    return id;
+  });
+  useEffect(() => { setActiveVehicle(vehicleId); }, [vehicleId]);
+  const [garageOpen, setGarageOpen] = useState(false);
+  const openGarage = () => {
+    controls.current = emptyControls();
+    setMobileMenuOpen(false);
+    if (started) setPaused(true);
+    setGarageOpen(true);
+  };
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [tiltAssist, setTiltAssist] = useState(false);
   const [tiltNotice, setTiltNotice] = useState('');
@@ -441,7 +468,7 @@ export default function App() {
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
   }, [mobileMenuOpen]);
-  useEffect(() => { holdWorld(paused || help || boardOpen || mapView); }, [paused, help, boardOpen, mapView]);
+  useEffect(() => { holdWorld(paused || help || boardOpen || mapView || garageOpen); }, [paused, help, boardOpen, mapView, garageOpen]);
   const [ready, setReady] = useState(false);
   // The intro reveal waits until the loading screen starts fading away.
   const [revealed, setRevealed] = useState(false);
@@ -635,7 +662,7 @@ export default function App() {
     const dt = state.last ? Math.min((now - state.last) / 1000, 0.5) : 0;
     state.last = now;
     if (!started || halted) return;
-    const topSpeed = CAR_CONFIG.maxSpeed * 3.6;
+    const topSpeed = DRIVING_CONFIG.maxSpeed * 3.6;
     if (data.offroad || data.speed < topSpeed * 0.3) state.time = 0;
     else if (data.speed > topSpeed * JUICE_CONFIG.streakSpeedRatio) state.time += dt;
     setStreakLevel(state.time > 0 ? Math.floor(state.time / JUICE_CONFIG.streakStep) + 1 : 0);
@@ -665,7 +692,7 @@ export default function App() {
       const text = formatNumber(shown);
       if (speedText.current && speedText.current.textContent !== text) speedText.current.textContent = text;
       if (speedometer.current) {
-        const ratio = shown / Math.max(1, CAR_CONFIG.maxSpeed * 3.6);
+        const ratio = shown / Math.max(1, DRIVING_CONFIG.maxSpeed * 3.6);
         // Begin warming at 40% of normal top speed; the full boost palette
         // arrives just above it, leaving a little headroom for overspeed.
         const warm = Math.max(0, Math.min(1, (ratio - 0.4) / 0.65));
@@ -848,6 +875,7 @@ export default function App() {
     const held = new Set<string>();
     const clear = () => { held.clear(); controls.current = emptyControls(); };
     const down = (e: KeyboardEvent) => {
+      if (garageOpen) { if (e.code === 'Escape') { e.preventDefault(); setGarageOpen(false); } return; }
       const target = e.target instanceof HTMLElement ? e.target : null;
       const isTextEntry = !!target && (target.matches('input,textarea,select') || target.isContentEditable || !!target.closest('[contenteditable="true"]'));
       if (isTextEntry) return;
@@ -869,7 +897,7 @@ export default function App() {
     const visibility = () => { if (document.hidden) blur(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility);
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
-  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen]);
+  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen, garageOpen]);
 
   const touch = (key: ControlKey) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); controls.current[key] = true; },
@@ -898,7 +926,7 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><DaySky /><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><DaySky /><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -921,6 +949,7 @@ export default function App() {
               <div><strong dir="ltr">Wander<span>.</span></strong><small>take a spin</small></div>
             </button>
             {mobileMenuOpen && <div className="mobile-brand-actions" id="mobile-brand-actions" role="group" aria-label="Game options">
+              <button type="button" onClick={openGarage}><CarFront /><span>Choose your car</span></button>
               <button type="button" onClick={() => { setMobileMenuOpen(false); setCameraMode(mode => 1 - mode); }}><Maximize2 /><span>Change camera view</span></button>
               <button type="button" onClick={() => { setMobileMenuOpen(false); setBoardOpen(true); }}><Trophy /><span>Leaderboard</span></button>
               <button type="button" onClick={() => { setMobileMenuOpen(false); setHelp(true); }}><CircleHelp /><span>Controls and help</span></button>
@@ -950,7 +979,8 @@ export default function App() {
         {!started && <button className="mobile-home-theme" aria-label={night ? 'Switch to light mode' : 'Switch to dark mode'} title={night ? 'Light mode' : 'Dark mode'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
         {import.meta.env.DEV && <button aria-label="Day look" style={{ viewTransitionName: 'tool-look' } as CSSProperties} title="Day look" className={`desktop-only${showLook ? ' active' : ''}`} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
-        <button className={`desktop-only${cameraMode ? ' active' : ''}`} aria-label="Change camera view" style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title="Change camera · C" onClick={() => setCameraMode(n => 1 - n)}><Maximize2 /></button>
+        <button className={`desktop-only${fullscreen ? ' active' : ''}`} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>
+        {!runOver && !finale && <button className="desktop-only" aria-label="Choose your car" title="Garage" onClick={openGarage}><CarFront /></button>}
         <button className="desktop-only" aria-label="Leaderboard" title="Leaderboard" style={{ viewTransitionName: 'tool-board' } as CSSProperties} onClick={() => setBoardOpen(true)}><Trophy /></button>
         <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
         {started && <button className={`desktop-only${mapView ? ' active' : ''}`} aria-label={mapView ? 'Back to the road' : 'Open the map'} style={{ viewTransitionName: 'tool-map' } as CSSProperties} title="Map · M" onClick={() => { controls.current = emptyControls(); morph(() => setMapView(v => !v)); }}><MapIcon /></button>}
@@ -1018,7 +1048,7 @@ export default function App() {
     </>}
 
     {!started && <footer className="page-footer"><span>WANDER · THE LONG WAY ROUND</span></footer>}
-    {started && paused && headerMotion !== 'exiting' && !help && !boardOpen && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+    {started && paused && headerMotion !== 'exiting' && !help && !boardOpen && !garageOpen && <div className="modal-shade"><section className="modal pause-modal" role="dialog" aria-modal="true" aria-labelledby="pause-title">
       <span className="eyebrow">PAUSED</span><h2 id="pause-title">Take a breath.</h2>
       <div className="pause-stats">
         <div><small>Score · best {formatNumber(best)}</small><b>{formatNumber(score)}</b></div>
@@ -1026,12 +1056,19 @@ export default function App() {
         <div><small>Driven</small><b>{formatNumber(data.distance)} m</b></div>
       </div>
       <button autoFocus className="primary" onClick={() => setPaused(false)}>Keep going <Play size={18} /></button>
+      <button className="secondary pause-garage" onClick={openGarage}><CarFront size={16} /> Choose your car</button>
       <div className="modal-row">
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
         <button className="secondary" onClick={returnToHero}><ChevronLeft size={15} /> Back to the globe</button>
       </div>
     </section></div>}
     {tiltNotice && <div className="toast tilt-toast" role="status">{tiltNotice}</div>}
+    {garageOpen && <Garage selected={vehicleId} close={() => setGarageOpen(false)} onSelect={id => {
+      setActiveVehicle(id);
+      setVehicleId(id);
+      saveVehicle(id);
+      setGarageOpen(false);
+    }} />}
     {help && <Help close={() => setHelp(false)} />}
     {boardOpen && <Leaderboard close={() => setBoardOpen(false)} />}
     {finale && <div className="letterbox" aria-hidden="true"><i /><i /></div>}

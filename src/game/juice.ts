@@ -8,10 +8,11 @@ const local = new THREE.Vector3();
 const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
 // Rear wheel contact points in the vehicle's own space (forward is -z, so the rear is +z).
-const rearWheel = (side: number, out: THREE.Vector3) => out.set(
-  side * CAR_CONFIG.wheelHalfTrack * CAR_CONFIG.bodyScale,
+type RearAxle = { halfTrack: number; rearZ: number };
+const rearWheel = (side: number, out: THREE.Vector3, axle?: RearAxle) => out.set(
+  side * (axle?.halfTrack ?? CAR_CONFIG.wheelHalfTrack * CAR_CONFIG.bodyScale),
   0.03,
-  -CAR_CONFIG.wheelRearZ * CAR_CONFIG.bodyScale,
+  axle?.rearZ ?? -CAR_CONFIG.wheelRearZ * CAR_CONFIG.bodyScale,
 );
 
 // Tire marks: two continuous trails under the rear wheels while sliding. Each piece joins the wheel's last
@@ -52,14 +53,14 @@ export function createTireMarks() {
 }
 export type TireMarks = ReturnType<typeof createTireMarks>;
 
-export function updateTireMarks(marks: TireMarks, dt: number, vehicle: THREE.Object3D, car: CarState, active: boolean) {
+export function updateTireMarks(marks: TireMarks, dt: number, vehicle: THREE.Object3D, car: CarState, active: boolean, axle?: RearAxle) {
   const sliding = active && JUICE_CONFIG.tireMarksEnabled && !!car.drift && Math.abs(car.speed) > 3;
   if (!sliding) marks.last = [null, null];
   else {
     vehicle.updateMatrix();
     up.set(0, 1, 0).applyQuaternion(vehicle.quaternion);
     [-1, 1].forEach((side, wheel) => {
-      const point = rearWheel(side, local).applyMatrix4(vehicle.matrix);
+      const point = rearWheel(side, local, axle).applyMatrix4(vehicle.matrix);
       const last = marks.last[wheel];
       if (!last) { marks.last[wheel] = point.clone(); return; }
       const length = point.distanceTo(last);
@@ -182,7 +183,7 @@ export function createDust() {
 }
 export type Dust = ReturnType<typeof createDust>;
 
-export function updateDust(dust: Dust, dt: number, vehicle: THREE.Object3D, car: CarState, throttle: number, active: boolean) {
+export function updateDust(dust: Dust, dt: number, vehicle: THREE.Object3D, car: CarState, throttle: number, active: boolean, axle?: RearAxle) {
   const speed = Math.abs(car.speed);
   let spawn = 0;
   if (active && JUICE_CONFIG.dustEnabled) {
@@ -202,7 +203,7 @@ export function updateDust(dust: Dust, dt: number, vehicle: THREE.Object3D, car:
   for (let n = 0; n < spawn; n++) {
     const i = dust.next;
     dust.next = (dust.next + 1) % dust.age.length;
-    dust.positions[i].copy(rearWheel(n % 2 ? 1 : -1, local)).applyMatrix4(vehicle.matrix);
+    dust.positions[i].copy(rearWheel(n % 2 ? 1 : -1, local, axle)).applyMatrix4(vehicle.matrix);
     dust.velocities[i].set((Math.random() - 0.5) * 1.2, 0.6 + Math.random() * 0.8, (Math.random() - 0.5) * 1.2).applyQuaternion(vehicle.quaternion);
     dust.age[i] = 0;
     dust.life[i] = JUICE_CONFIG.dustLife * (0.7 + Math.random() * 0.6);
@@ -247,7 +248,7 @@ export function createSoilClods() {
 export type SoilClods = ReturnType<typeof createSoilClods>;
 
 const GRAVITY = 11;
-export function updateSoilClods(clods: SoilClods, dt: number, vehicle: THREE.Object3D, car: CarState, offroad: boolean) {
+export function updateSoilClods(clods: SoilClods, dt: number, vehicle: THREE.Object3D, car: CarState, offroad: boolean, axle?: RearAxle) {
   const speedRatio = Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1);
   if (offroad && Math.abs(car.speed) > 3) {
     clods.budget += JUICE_CONFIG.clodRate * speedRatio * dt;
@@ -261,7 +262,7 @@ export function updateSoilClods(clods: SoilClods, dt: number, vehicle: THREE.Obj
   for (let n = 0; n < spawn; n++) {
     const i = clods.next;
     clods.next = (clods.next + 1) % clods.age.length;
-    clods.positions[i].copy(rearWheel(n % 2 ? 1 : -1, local)).applyMatrix4(vehicle.matrix);
+    clods.positions[i].copy(rearWheel(n % 2 ? 1 : -1, local, axle)).applyMatrix4(vehicle.matrix);
     clods.velocities[i].set((Math.random() - 0.5) * 1.6, 1.2 + Math.random() * 1.6, 1.8 + Math.random() * 1.4)
       .multiplyScalar(0.6 + speedRatio * 0.9).applyQuaternion(vehicle.quaternion);
     clods.age[i] = 0;

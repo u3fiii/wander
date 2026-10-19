@@ -89,6 +89,7 @@ export const CAR_CONFIG = {
   trafficRadius: 0.65,
   // Share of speed kept when ramming traffic; the player car is much heavier than NPCs.
   ramSpeedKeep: 0.85,
+  frontRamSpeedKeep: 0.92,
   // A side clip barely slows the player (it's the fun kind of hit).
   sideRamSpeedKeep: 0.95,
   // Ramming while boosting: the car bulldozes traffic aside, front or side alike, and only feels a little of

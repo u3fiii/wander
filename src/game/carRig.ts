@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { CAR_CONFIG, JUICE_CONFIG } from './config.ts';
+import { JUICE_CONFIG } from './config.ts';
+import { DRIVING_CONFIG as CAR_CONFIG } from './vehicleHandling.ts';
 import { PALETTE } from './palette.ts';
 import type { CarState } from './driving.ts';
 
@@ -15,6 +16,7 @@ export type CarRig = {
   frame: THREE.Group;
   steer: Record<'FL' | 'FR', THREE.Group>;
   spin: Record<WheelKey, THREE.Group>;
+  wheelRadius?: number;
   dispose: () => void;
 };
 
@@ -50,7 +52,9 @@ function placeholderWheelFactory() {
 
 // carBody > frame > chassis + wheel{FL,FR}_steer > _spin, wheel{RL,RR}_spin.
 // Wheels named in CAR_CONFIG.wheelNodeNames are moved out of the chassis; otherwise placeholders are used.
-export function buildCarRig(chassis: THREE.Object3D): CarRig {
+export function buildCarRig(chassis: THREE.Object3D, options: {
+  wheelNodeNames?: Record<WheelKey, string>; wheelRadius?: number;
+} = {}): CarRig {
   const frame = new THREE.Group();
   frame.name = 'carFrame';
   frame.rotation.y = Math.PI;
@@ -63,7 +67,8 @@ export function buildCarRig(chassis: THREE.Object3D): CarRig {
   const spin = {} as CarRig['spin'];
   for (const key of WHEELS) {
     const [side, axle] = WHEEL_LAYOUT[key];
-    const realWheel = CAR_CONFIG.wheelNodeNames[key] ? chassis.getObjectByName(CAR_CONFIG.wheelNodeNames[key]) : undefined;
+    const wheelName = (options.wheelNodeNames ?? CAR_CONFIG.wheelNodeNames)[key];
+    const realWheel = wheelName ? chassis.getObjectByName(wheelName) : undefined;
     const center = realWheel
       ? frame.worldToLocal(new THREE.Box3().setFromObject(realWheel).getCenter(new THREE.Vector3()))
       : new THREE.Vector3(side * CAR_CONFIG.wheelHalfTrack, CAR_CONFIG.wheelRadius, axle > 0 ? CAR_CONFIG.wheelFrontZ : CAR_CONFIG.wheelRearZ);
@@ -85,11 +90,11 @@ export function buildCarRig(chassis: THREE.Object3D): CarRig {
     else spinPivot.add(placeholders.create());
     spin[key] = spinPivot;
   }
-  return { frame, steer, spin, dispose: placeholders.dispose };
+  return { frame, steer, spin, wheelRadius: options.wheelRadius, dispose: placeholders.dispose };
 }
 
 export function updateWheels(rig: CarRig, steer: number, travel: number) {
-  const roll = travel / CAR_CONFIG.wheelRadius;
+  const roll = travel / (rig.wheelRadius ?? CAR_CONFIG.wheelRadius);
   for (const key of WHEELS) rig.spin[key].rotation.x = (rig.spin[key].rotation.x + roll) % TURN;
   rig.steer.FL.rotation.y = steer * CAR_CONFIG.maxWheelSteerAngle;
   rig.steer.FR.rotation.y = steer * CAR_CONFIG.maxWheelSteerAngle;
