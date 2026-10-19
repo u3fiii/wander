@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchTop, sharedBoard, submitRun } from './game/globalBoard';
+import { fetchDeviceEntry, fetchTop, sharedBoard, submitRun } from './game/globalBoard';
 import type { FormEvent } from 'react';
 import { ChevronLeft, RotateCcw, Route, Timer, Trophy, Wind } from 'lucide-react';
-import { addEntry, cleanName, loadBoard, loadName, qualifies, saveBoard, saveName } from './game/leaderboard';
+import { addEntry, cleanName, loadBoard, loadDeviceId, loadName, qualifies, sanitizeName, saveBoard, saveName } from './game/leaderboard';
 import type { Entry, RunStats } from './game/leaderboard';
 import { Podium } from './Leaderboard';
 
@@ -10,11 +10,12 @@ const number = (n: number) => Math.round(n).toLocaleString('en-US');
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
 // The end of a run (all hearts gone): the score, big; a "new best" chip when it is one; the run's dashboard; then,
-// if the score makes the top five, a name to put on the board, and the board itself with this run highlighted.
+// if the score makes the top ten, a name to put on the board, and the board itself with this run highlighted.
 export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: {
   score: number; newBest: boolean; stats: RunStats; onPlayAgain: () => void; onHome: () => void;
 }) {
-  // Wait for the shared board before deciding whether this run belongs in its top five.
+  // Wait for the shared board before deciding whether this run belongs in its top ten.
+  const deviceId = loadDeviceId();
   const [board, setBoard] = useState<Entry[]>(() => sharedBoard ? [] : loadBoard());
   const [step, setStep] = useState<'loading' | 'name' | 'board' | 'saving'>(() => sharedBoard ? 'loading' : qualifies(loadBoard(), score) ? 'name' : 'board');
   const [boardScope, setBoardScope] = useState<'everyone' | 'device'>(sharedBoard ? 'everyone' : 'device');
@@ -23,24 +24,26 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
   const saved = useRef(false);
   useEffect(() => {
     if (!sharedBoard) return;
-    fetchTop().then(top => {
+    Promise.all([fetchTop(), fetchDeviceEntry(deviceId)]).then(([top, personal]) => {
       // Once the run is saved, its own result (with its rank) is what shows.
       if (saved.current) return;
       const current = top ?? loadBoard();
+      const comparison = personal && !current.some(entry => entry.deviceId === deviceId) ? [...current, personal] : current;
       setBoardScope(top ? 'everyone' : 'device');
       setBoard(current);
-      setStep(qualifies(current, score) ? 'name' : 'board');
+      // Store a first device record even when it falls outside the visible top ten, so later runs can update it.
+      setStep(qualifies(comparison, score, deviceId) || (!personal && score > 0) ? 'name' : 'board');
     });
-  }, [score]);
+  }, [score, deviceId]);
   const save = async (event: FormEvent) => {
     event.preventDefault();
     const driver = cleanName(name);
-    const local = addEntry(loadBoard(), { name: driver, score, distance: stats.distance, seconds: stats.seconds, date: Date.now() });
+    const local = addEntry(loadBoard(), { name: driver, score, distance: stats.distance, seconds: stats.seconds, date: Date.now(), deviceId });
     saveBoard(local.board);
     saveName(driver);
     saved.current = true;
     setStep('saving');
-    const shared = sharedBoard ? await submitRun({ name: driver, score, distance: stats.distance, seconds: stats.seconds }) : null;
+    const shared = sharedBoard ? await submitRun({ name: driver, score, distance: stats.distance, seconds: stats.seconds, deviceId }) : null;
     setBoard(shared ? shared.board : local.board);
     setBoardScope(shared ? 'everyone' : 'device');
     setRank(shared ? shared.rank : local.rank);
@@ -62,9 +65,9 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     {step === 'name'
       ? <form className="run-name" onSubmit={save}>
         {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. This score can be saved on this device.' : 'The shared leaderboard is not connected yet. This score can be saved on this device.'}</p>}
-        <label htmlFor="run-name-input"><Trophy size={15} /> You made the {boardScope === 'everyone' ? 'shared leaderboard' : 'board on this device'}</label>
+        <label htmlFor="run-name-input"><Trophy size={15} /> Save this device's high score</label>
         <div className="run-name-row">
-          <input id="run-name-input" autoFocus maxLength={16} placeholder="Your name" value={name} onChange={event => setName(event.target.value)} />
+          <input id="run-name-input" autoFocus maxLength={8} pattern="[A-Za-z ]{1,8}" autoComplete="nickname" autoCapitalize="words" spellCheck={false} placeholder="Your name" value={name} onChange={event => setName(sanitizeName(event.target.value))} />
           <button type="submit" className="primary">Save</button>
         </div>
       </form>

@@ -37,7 +37,7 @@ export const AUDIO_CONFIG = {
   // How low the engine sits (× its pitch) and how much grit (soft saturation) it has.
   enginePitch: 1, engineGrit: 0.15,
   boostVolume: 0.2, boostPitchBump: 0.25, boostBumpTime: 0.6,
-  thudVolume: 0,
+  thudVolume: 0.16,
   // Ramming a car under boost.
   impactVolume: 0.08,
   // The far-off birds by day. Kept very quiet: the site is meant to be calm.
@@ -370,9 +370,9 @@ export function playImpact() {
   burst.start(now, Math.random()); burst.stop(now + 0.25);
 }
 
-// A landing or bump: a tiny thud (strength 0..1).
+// A landing or bump: a short thud (strength 0..1.5).
 export function playThud(strength = 1) {
-  const volume = AUDIO_CONFIG.thudVolume * Math.min(1, Math.max(0, strength));
+  const volume = AUDIO_CONFIG.thudVolume * Math.min(1.5, Math.max(0, strength));
   oneShot(buffers.thud, volume, () => {
     const { context, world } = graph!;
     const now = context.currentTime;

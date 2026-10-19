@@ -1,7 +1,7 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
@@ -57,9 +57,10 @@ function useRails() {
 // Ripples from the steering buttons: how far a tap's spreads (px); holding builds up over `build` s, sending pulses
 // every `pulseEvery` s (from slow to fast) that spread up to (1 + `grow`) times as far.
 const STEER_STRAIN = { reach: 94, build: 1.2, pulseEvery: [0.42, 0.2], grow: 0.9 } as const;
-function SteerPads({ controls }: { controls: React.RefObject<{ left: boolean; right: boolean }> }) {
+function SteerPads({ controls, tutorial = false }: { controls: React.RefObject<{ left: boolean; right: boolean }>; tutorial?: boolean }) {
   type Side = 'left' | 'right';
   const [held, setHeld] = useState({ left: false, right: false });
+  const [practiced, setPracticed] = useState({ left: false, right: false });
   // Every press is a "tap" with its own short animation (a ripple and a punch of the button's face) that plays in
   // full however briefly the finger stays down, so quick little taps to ease round a bend look as alive as a hold.
   // A ripple is a tap's, or a pulse sent out while a button is held; `reach` is how far it spreads (px).
@@ -98,6 +99,7 @@ function SteerPads({ controls }: { controls: React.RefObject<{ left: boolean; ri
     const was = { left: false, right: false };
     const tick = () => {
       const { left, right } = controls.current;
+      if (tutorial && (left || right)) setPracticed(p => (p.left === (p.left || left) && p.right === (p.right || right) ? p : { left: p.left || left, right: p.right || right }));
       if (left && !was.left) tap('left');
       if (right && !was.right) tap('right');
       was.left = left; was.right = right;
@@ -119,12 +121,13 @@ function SteerPads({ controls }: { controls: React.RefObject<{ left: boolean; ri
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [controls, tap, ripple]);
+  }, [controls, tap, ripple, tutorial]);
+  const lessonActive = tutorial && !(practiced.left && practiced.right);
   return <div className="steer-pads" aria-label="Steering">
     {(['left', 'right'] as const).map(side => <div
       key={side}
       ref={element => { zones.current[side] = element; }}
-      className={`steer-zone ${side}${held[side] ? ' held' : ''}`}
+      className={`steer-zone ${side}${held[side] ? ' held' : ''}${lessonActive ? ' tutorial' : ''}${practiced[side] ? ' practiced' : ''}`}
       role="button"
       aria-label={side === 'left' ? 'Steer left' : 'Steer right'}
       onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); set(side, true); }}
@@ -132,6 +135,7 @@ function SteerPads({ controls }: { controls: React.RefObject<{ left: boolean; ri
       onPointerCancel={() => set(side, false)}
       onLostPointerCapture={() => set(side, false)}
     >
+      {lessonActive && <span className="steer-lesson" aria-hidden="true">{practiced[side] ? '✓ NICE!' : side === 'left' ? 'HOLD LEFT' : 'HOLD RIGHT'}</span>}
       <span className="steer-button" aria-hidden="true">
         {taps[side].map(({ id, reach }) => <i key={id} className="steer-ripple" style={{ '--reach': `${reach}px` } as CSSProperties} />)}
         <span key={taps[side].at(-1)?.id ?? 0} className="steer-face">{side === 'left' ? <ChevronLeft /> : <ChevronRight />}</span>
@@ -246,22 +250,27 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
   static getDerivedStateFromError() { return { error: true }; }
   render() { return this.state.error ? <div className="error-screen"><h2>The 3D scene could not load</h2><p>Enable graphics acceleration in your browser and try again.</p><button className="primary" onClick={() => location.reload()}>Try again</button></div> : this.props.children; }
 }
-function Help({ close }: { close: () => void }) {
+function Help({ close, rails }: { close: () => void; rails: boolean }) {
   return <div className="modal-shade help-shade" onClick={close}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={e => e.stopPropagation()}>
     <button className="close-button" autoFocus aria-label="Close help" onClick={close}><X size={18} /></button>
     <span className="eyebrow">CONTROLS</span><h2 id="help-title">Keep the wheel and the road.</h2>
-    <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>W</kbd> <kbd>S</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></span></div>
-    <div className="help-row"><span>Steer left / right</span><span><kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd></span></div>
-    <div className="help-row"><span>Brake / handbrake drift</span><kbd>Space</kbd></div>
-    <div className="help-row"><span>Boost</span><kbd>Shift</kbd></div>
-    <div className="help-row"><span>Gentle throttle</span><kbd>Alt</kbd></div>
-    <div className="help-row"><span>Back to road when stuck</span><kbd>F</kbd></div>
-    <div className="help-row"><span>Tuning panel</span><kbd>`</kbd></div>
-    <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
-    <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
-    <div className="help-row"><span>Pause / resume</span><kbd>Esc</kbd></div>
-    <div className="help-row"><span>Phone tilt assist</span><span>Lean into bends</span></div>
-    <p>The car rolls on its own once you start; you choose the line. Lift off for corners, hold back to reverse. Weave through traffic, drift the bends, and bank your hearts for a bigger run.</p>
+    {rails ? <>
+      <div className="help-row"><span>Steer left</span><span>Hold bottom-left <kbd>←</kbd></span></div>
+      <div className="help-row"><span>Steer right</span><span>Hold bottom-right <kbd>→</kbd></span></div>
+      <p>The car drives forward on its own. Hold either arrow to turn, then lift your finger to go straight.</p>
+    </> : <>
+      <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>W</kbd> <kbd>S</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></span></div>
+      <div className="help-row"><span>Steer left / right</span><span><kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd></span></div>
+      <div className="help-row"><span>Brake / handbrake drift</span><kbd>Space</kbd></div>
+      <div className="help-row"><span>Boost</span><kbd>Shift</kbd></div>
+      <div className="help-row"><span>Gentle throttle</span><kbd>Alt</kbd></div>
+      <div className="help-row"><span>Back to road when stuck</span><kbd>F</kbd></div>
+      <div className="help-row"><span>Tuning panel</span><kbd>`</kbd></div>
+      <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
+      <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
+      <div className="help-row"><span>Pause / resume</span><kbd>Esc</kbd></div>
+      <p>The car rolls on its own once you start; you choose the line. Lift off for corners, hold back to reverse. Weave through traffic, drift the bends, and bank your hearts for a bigger run.</p>
+    </>}
     <button className="primary" onClick={close}>Got it <Check size={18} /></button>
   </section></div>;
 }
@@ -336,8 +345,34 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onCh
 
 export default function App() {
   const [started, setStarted] = useState(false);
-  const [paused, setPaused] = useState(false);
+  const [boostUnlocked, setBoostUnlocked] = useState(false);
+  const boostElapsed = useRef(0);
+  const [firstDrive, setFirstDrive] = useState(() => localStorage.getItem('wander:first-drive-complete') !== 'yes');
+  const [coachThisRun, setCoachThisRun] = useState(false);
+  const [coachTransitioning, setCoachTransitioning] = useState(false);
   const RAILS = useRails();
+  const coachTimers = useRef<number[]>([]);
+  const clearCoachTimers = useCallback(() => {
+    coachTimers.current.forEach(timer => window.clearTimeout(timer));
+    coachTimers.current = [];
+  }, []);
+  const completeFirstDrive = useCallback(() => {
+    localStorage.setItem('wander:first-drive-complete', 'yes');
+    setFirstDrive(false);
+  }, []);
+  const finishRailsLesson = useCallback(() => {
+    clearCoachTimers();
+    setCoachThisRun(false);
+    setCoachTransitioning(true);
+    coachTimers.current.push(window.setTimeout(() => {
+      setCoachTransitioning(false);
+      coachTimers.current.push(window.setTimeout(() => {
+        localStorage.setItem('wander:first-drive-complete', 'yes');
+        setFirstDrive(false);
+      }, 3000));
+    }, 5000));
+  }, [clearCoachTimers]);
+  const [paused, setPaused] = useState(false);
   // Phones: the run starts in whichever time of day was picked on the start screen; going home resets to daylight.
   useEffect(() => { if (!started && RAILS) resetToDay(); }, [started, RAILS]);
   // Phones: the day and night come round a little faster, and every run starts in daylight (below).
@@ -351,6 +386,19 @@ export default function App() {
   // The finale: the end-of-run shot (slow motion, an orbit round the car, the end grade, letterbox bars) that plays
   // before the run-over card.
   const [finale, setFinale] = useState(false);
+  useEffect(() => {
+    if (!started || paused || mapView || runOver || finale || boostUnlocked || (RAILS && firstDrive)) return;
+    let frame = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      boostElapsed.current += (now - last) / 1000;
+      last = now;
+      if (boostElapsed.current >= 15) setBoostUnlocked(true);
+      else frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [started, paused, mapView, runOver, finale, boostUnlocked, RAILS, firstDrive]);
   const runStats = useRef(emptyRunStats());
   const halted = paused || mapView || runOver;
   const [night, setNight] = useState(false);
@@ -423,8 +471,6 @@ export default function App() {
     setGarageOpen(true);
   };
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [tiltAssist, setTiltAssist] = useState(false);
-  const [tiltNotice, setTiltNotice] = useState('');
   const mobileBrandRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -735,6 +781,7 @@ export default function App() {
     else if (data.speed > 8 || !started) setStuckHint(false);
   }, [data, started, paused]);
   const recover = useCallback(() => { recoverToRoad(car.current); stuck.current.time = 0; setStuckHint(false); }, []);
+  const openPauseMenu = () => { controls.current = emptyControls(); setMobileMenuOpen(false); setPaused(true); };
   useEffect(() => {
     const update = () => setGamepad((navigator.getGamepads?.() ?? []).some(Boolean));
     window.addEventListener('gamepadconnected', update);
@@ -742,56 +789,9 @@ export default function App() {
     return () => { window.removeEventListener('gamepadconnected', update); window.removeEventListener('gamepaddisconnected', update); };
   }, []);
   const controls = useRef(emptyControls());
-  const tiltNoticeTimer = useRef<number | null>(null);
-  const announceTilt = (message: string) => {
-    setTiltNotice(message);
-    if (tiltNoticeTimer.current !== null) window.clearTimeout(tiltNoticeTimer.current);
-    tiltNoticeTimer.current = window.setTimeout(() => setTiltNotice(''), 2600);
-  };
-  const requestTiltAssist = async () => {
-    if (tiltAssist) return;
-    if (!window.isSecureContext) { announceTilt('Tilt assist needs a secure connection'); return; }
-    if (!('DeviceOrientationEvent' in window)) { announceTilt('This browser does not support phone tilt'); return; }
-    try {
-      const orientation = window.DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> };
-      if (orientation.requestPermission && await orientation.requestPermission() !== 'granted') {
-        announceTilt('Allow motion access to use tilt assist');
-        return;
-      }
-      setTiltAssist(true);
-    } catch {
-      announceTilt('Motion access was not available');
-    }
-  };
-  useEffect(() => {
-    if (!tiltAssist || !started) { controls.current.tilt = 0; return; }
-    let neutral: number | null = null;
-    let filtered = 0;
-    const onOrientation = (event: DeviceOrientationEvent) => {
-      if (event.gamma === null) return;
-      const angle = screen.orientation?.angle ?? 0;
-      let axis = event.gamma;
-      if (angle === 90) axis = -(event.beta ?? 0);
-      else if (angle === 180) axis = -event.gamma;
-      else if (angle === 270) axis = event.beta ?? 0;
-      if (neutral === null) { neutral = axis; return; }
-      const delta = axis - neutral;
-      const amount = Math.min(1, Math.max(0, (Math.abs(delta) - 2.5) / 17));
-      const target = -Math.sign(delta) * amount;
-      filtered += (target - filtered) * 0.18;
-      controls.current.tilt = filtered;
-    };
-    const recalibrate = () => { neutral = null; filtered = 0; controls.current.tilt = 0; };
-    window.addEventListener('deviceorientation', onOrientation);
-    window.addEventListener('orientationchange', recalibrate);
-    return () => {
-      window.removeEventListener('deviceorientation', onOrientation);
-      window.removeEventListener('orientationchange', recalibrate);
-      controls.current.tilt = 0;
-    };
-  }, [tiltAssist, started]);
   const car = useRef(initialLoopCar());
   const reset = useCallback(() => {
+    boostElapsed.current = 0; setBoostUnlocked(false);
     controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
     // A new run: hearts, stage, stats, stars, clean driving and the best-score note start over.
     beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
@@ -809,8 +809,11 @@ export default function App() {
   };
   const start = () => {
     if (introExit) return;
+    clearCoachTimers();
+    boostElapsed.current = 0; setBoostUnlocked(false);
+    setCoachTransitioning(false);
+    setCoachThisRun(firstDrive);
     clearHeaderMotionTimers();
-    void requestTiltAssist();
     setHeaderMotion('exiting');
     setIntroExit(true);
     headerMotionTimers.current.push(window.setTimeout(() => {
@@ -821,10 +824,13 @@ export default function App() {
     window.setTimeout(() => setIntroExit(false), 1200);
     startAudio(); playEngineStart(); controls.current = emptyControls();
   };
+  const startRef = useRef(start);
+  startRef.current = start;
   const returnToHero = () => {
     if (headerMotion === 'exiting') return;
     clearHeaderMotionTimers();
     controls.current = emptyControls();
+    boostElapsed.current = 0; setBoostUnlocked(false);
     setMobileMenuOpen(false);
     setHeaderMotion('exiting');
     setPaused(true);
@@ -847,6 +853,10 @@ export default function App() {
       if (isTextEntry) return;
       const isButton = !!target && !!target.closest('button');
       if (isButton && (e.code === 'Enter' || (e.code === 'Space' && (!started || paused || help)))) return;
+      if (!started && ready && !e.repeat && (e.code === 'KeyW' || e.code === 'ArrowUp')) {
+        e.preventDefault();
+        startRef.current();
+      }
       if (mapping[e.code] && !paused && !help && !boardOpen && !mapView && !runOver && !finale) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
       if (e.repeat) return;
       if (e.code === 'KeyM' && started && !paused && !help && !runOver && !finale) { clear(); morph(() => setMapView(v => !v)); }
@@ -863,7 +873,7 @@ export default function App() {
     const visibility = () => { if (document.hidden) blur(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility);
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
-  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen, garageOpen]);
+  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen, garageOpen, ready]);
 
   const touch = (key: ControlKey) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); controls.current[key] = true; },
@@ -892,15 +902,15 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
           (centre, driving only), and the settings with pause (right). No logo while driving. */}
       {started
-        // A round home button (back to the start screen), then the driver's level.
+        // A round menu button, then the driver's level.
         ? <div className="topbar-left">
-          <button className="home-button" aria-label="Back to the start screen" title="Home" onClick={returnToHero}><House /></button>
+          <button className="home-button" aria-label="Open menu" title="Menu" onClick={openPauseMenu}><Menu /></button>
           <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
           <span className="level-number" key={level.level}>{level.level}</span>
           <div><strong>{level.title}</strong><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i><small>{level.into} / {level.need} XP</small></div>
@@ -947,7 +957,7 @@ export default function App() {
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         <button className={`desktop-only${fullscreen ? ' active' : ''}`} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>
         {!runOver && !finale && <button className="desktop-only" aria-label="Choose your car" title="Garage" onClick={openGarage}><CarFront /></button>}
-        {!started && <button className="desktop-only" aria-label="Leaderboard" title="Leaderboard" style={{ viewTransitionName: 'tool-board' } as CSSProperties} onClick={() => setBoardOpen(true)}><Trophy /></button>}
+        {!started && <button aria-label="Leaderboard" title="Leaderboard" style={{ viewTransitionName: 'tool-board' } as CSSProperties} onClick={() => setBoardOpen(true)}><Trophy /></button>}
         <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
         {started && !mapView && <button className="desktop-only" aria-label={paused ? 'Resume driving' : 'Pause game'} style={{ viewTransitionName: 'tool-pause' } as CSSProperties} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
       </nav>
@@ -981,7 +991,7 @@ export default function App() {
         <div className="heart-break-heart" aria-hidden="true"><HeartIcon className="half left" /><HeartIcon className="half right" /></div>
         <strong>{heartBreak.left === 0 ? 'OUT OF HEARTS' : heartBreak.left === 1 ? 'LAST HEART' : `${heartBreak.left} LEFT`}</strong>
       </div>}
-      <Coach rails={!!RAILS} active={!paused && !help && !roadWarning && !stuckHint} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={(data.boost ?? 1) >= 1 && !data.boosting} />
+      {coachThisRun && <Coach key={`coach-${resetKey}`} rails={!!RAILS} active={!paused && !help && !roadWarning && !stuckHint} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={(data.boost ?? 1) >= 1 && !data.boosting} onComplete={RAILS ? finishRailsLesson : completeFirstDrive} />}
       <div className="speedometer" ref={speedometer}>
         <svg className="speed-dial" viewBox="0 0 64 64" aria-hidden="true">
           <defs>
@@ -996,8 +1006,8 @@ export default function App() {
         <div className="speed-readout"><strong ref={speedText}>0</strong><small>km/h</small></div>
         <span className="speed-label"><b>{car.current.speed < -0.1 ? 'R' : 'D'}</b>{formatNumber(data.distance)} m</span>
       </div>
-      <BoostGauge car={car} controls={controls} offroad={!!data.offroad} />
-      {hitNote && (hitNote.kind.startsWith('big') || hitNote.kind === 'cineDrift'
+      {boostUnlocked && <BoostGauge car={car} controls={controls} offroad={!!data.offroad} mobile={!!RAILS} />}
+      {(!RAILS || !firstDrive) && hitNote && (hitNote.kind.startsWith('big') || hitNote.kind === 'cineDrift'
         // During a slow-motion cut-in, or ramming cars under boost: big, the word built letter by letter.
         ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineDrift: 'drift-cine' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
           <strong aria-hidden="true">{[...hitNote.text].map((letter, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{letter === ' ' ? '\u00a0' : letter}</span>)}</strong>
@@ -1007,9 +1017,9 @@ export default function App() {
         </div>
         : <div key={hitNote.id} className={`hit-note ${/drift/i.test(hitNote.kind) ? `drift ${hitNote.kind}` : hitNote.kind}`} role="status">{hitNote.text} <b>{BADGE_NOTES.includes(hitNote.kind) ? hitNote.badge : `${hitNote.points > 0 ? '+' : ''}${hitNote.points}`}</b>{!BADGE_NOTES.includes(hitNote.kind) && hitNote.badge && <b className="note-combo">{hitNote.badge}</b>}</div>)}
       {/* One line of captions at a time: a traffic note takes the slot over a streak. */}
-      {streakShown && !hitNote && <div key={streakLevel} className="hit-note streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
+      {(!RAILS || !firstDrive) && streakShown && !hitNote && <div key={streakLevel} className="hit-note streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
       <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="key-hint"><kbd>Space</kbd> Brake</span><span className="key-hint"><kbd>Shift</kbd> Boost</span><span className="key-hint"><kbd>F</kbd> Back to road</span><span className="key-hint"><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
-      {RAILS ? <SteerPads controls={controls} /> : <div className="touch-controls" aria-label="Touch controls"><SteeringWheel controls={controls} /><div className="pedals"><button className="reverse-touch" aria-label="Reverse" {...touch('back')}><ArrowDown /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button><button className="gas-touch" aria-label="Accelerate" {...touch('forward')}>Gas</button></div></div>}
+      {RAILS ? <SteerPads key={`steer-${resetKey}`} controls={controls} tutorial={coachThisRun && firstDrive && !paused && !help && !roadWarning && !stuckHint} /> : <div className="touch-controls" aria-label="Touch controls"><SteeringWheel controls={controls} /><div className="pedals"><button className="reverse-touch" aria-label="Reverse" {...touch('back')}><ArrowDown /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button><button className="gas-touch" aria-label="Accelerate" {...touch('forward')}>Gas</button></div></div>}
     </>}
 
     {!started && <footer className="page-footer"><span>WANDER · THE LONG WAY ROUND</span></footer>}
@@ -1021,20 +1031,18 @@ export default function App() {
         <div><small>Driven</small><b>{formatNumber(data.distance)} m</b></div>
       </div>
       <button autoFocus className="primary" onClick={() => setPaused(false)}>Keep going <Play size={18} /></button>
-      <button className="secondary pause-garage" onClick={openGarage}><CarFront size={16} /> Choose your car</button>
       <div className="modal-row">
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
         <button className="secondary" onClick={returnToHero}><ChevronLeft size={15} /> Back to the globe</button>
       </div>
     </section></div>}
-    {tiltNotice && <div className="toast tilt-toast" role="status">{tiltNotice}</div>}
     {garageOpen && <Garage selected={vehicleId} close={() => setGarageOpen(false)} onSelect={id => {
       setActiveVehicle(id);
       setVehicleId(id);
       saveVehicle(id);
       setGarageOpen(false);
     }} />}
-    {help && <Help close={() => setHelp(false)} />}
+    {help && <Help rails={!!RAILS} close={() => setHelp(false)} />}
     {boardOpen && <Leaderboard close={() => setBoardOpen(false)} />}
     {finale && <div className="letterbox" aria-hidden="true"><i /><i /></div>}
     {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={reset}

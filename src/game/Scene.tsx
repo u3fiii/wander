@@ -68,7 +68,7 @@ function readGamepad() {
   return { throttle: 0, brake: 0, steer: 0, recover: false };
 }
 export type SceneProps = {
-  started: boolean; paused: boolean; mapView?: boolean; vehicleId: VehicleId;
+  started: boolean; paused: boolean; mapView?: boolean; trafficEnabled?: boolean; tutorialDriving?: boolean; tutorialCamera?: boolean; mobileCamera?: boolean; boostEnabled?: boolean; vehicleId: VehicleId;
   // The run's last heart is gone: the finale (see FINALE).
   finale?: boolean;
   // Only one heart is left: the warning and its heartbeat (see cinematicState.danger / pulse).
@@ -368,8 +368,9 @@ const NPC_HIT = {
   halfWidth: 0.45,
 };
 
-function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale, paused, progressIndex, progresses, obstacle, player, reactive, nightBlend }: typeof traffic[number] & {
+function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale, paused, enabled, progressIndex, progresses, obstacle, player, reactive, nightBlend }: typeof traffic[number] & {
   paused: boolean;
+  enabled: boolean;
   progressIndex: number;
   progresses: React.RefObject<number[]>;
   obstacle: Obstacle;
@@ -379,7 +380,7 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
 }) {
   const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0 });
   const hit = useRef({ hop: 0, hopVelocity: 0, roll: 0, rollVelocity: 0, squash: 0, squashVelocity: 0 });
-  const presence = useRef(trafficActive(progressIndex) ? 1 : 0);
+  const presence = useRef(enabled && trafficActive(progressIndex) ? 1 : 0);
   // Swaying in the lane (higher levels): eased in and out, with this car's own phase.
   const swerve = useRef({ amount: 0, phase: progressIndex * 1.7, time: 0 });
   const body = useRef<THREE.Group>(null!);
@@ -421,10 +422,10 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     const ahead = toPlayer.dot(tangent);
     const lateral = toPlayer.dot(right);
     // Already overlapping the player? Keep moving so the cars separate instead of locking together.
-    const blocked = reactive && ahead > 1.5 && ahead < NPC.stopDistance && Math.abs(lateral) < NPC.laneHalfWidth;
+    const blocked = reactive && enabled && ahead > 1.5 && ahead < NPC.stopDistance && Math.abs(lateral) < NPC.laneHalfWidth;
     // Fewer and calmer cars at low levels (see difficulty.ts). A car joining or leaving the road grows in or
     // shrinks away, and only collides while it is properly there.
-    const active = trafficActive(progressIndex);
+    const active = enabled && trafficActive(progressIndex);
     presence.current = THREE.MathUtils.damp(presence.current, active ? 1 : 0, 3, Math.min(delta, 0.05));
     obstacle.inactive = presence.current < 0.6;
     group.current.visible = presence.current > 0.01;
@@ -520,22 +521,23 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     obstacle.forward = [east / length, north / length];
     obstacle.velocity = paused ? 0 : m.speed;
   });
-  return <group ref={group}><group ref={body}>
+  return <group ref={group} visible={enabled}><group ref={body}>
     <KenneyCar modelUrl={modelUrl} scale={scale} color={TRAFFIC_COLORS[progressIndex]} jitter={TRAFFIC_JITTER[progressIndex]} />
     <CarLamps blend={nightBlend} halfWidth={0.4} front={-1.15} rear={1.1} height={0.45} />
   </group></group>;
 }
 
-function Traffic({ paused, progresses, player, reactive, nightBlend }: { paused: boolean; progresses: React.RefObject<number[]>; player: React.RefObject<CarState>; reactive: boolean; nightBlend: React.RefObject<number> }) {
-  const obstacles = useMemo<Obstacle[]>(() => traffic.map(() => ({ latitude: 0, longitude: 0, radius: TRAFFIC_COLLISION.radius, halfLength: TRAFFIC_COLLISION.halfLength, forward: [0, 1] as [number, number], movable: true })), []);
+function Traffic({ paused, enabled, progresses, player, reactive, nightBlend }: { paused: boolean; enabled: boolean; progresses: React.RefObject<number[]>; player: React.RefObject<CarState>; reactive: boolean; nightBlend: React.RefObject<number> }) {
+  const obstacles = useMemo<Obstacle[]>(() => traffic.map(() => ({ latitude: 0, longitude: 0, radius: TRAFFIC_COLLISION.radius, halfLength: TRAFFIC_COLLISION.halfLength, forward: [0, 1] as [number, number], movable: true, inactive: true })), []);
   useEffect(() => {
     setObstacleGroup('traffic', obstacles);
     return () => clearObstacleGroup('traffic');
   }, [obstacles]);
-  return <>{traffic.map((car, index) => <TrafficCar key={`${car.modelUrl}-${index}`} {...car} paused={paused} progressIndex={index} progresses={progresses} obstacle={obstacles[index]} player={player} reactive={reactive} nightBlend={nightBlend} />)}</>;
+  return <>{traffic.map((car, index) => <TrafficCar key={`${car.modelUrl}-${index}`} {...car} paused={paused} enabled={enabled} progressIndex={index} progresses={progresses} obstacle={obstacles[index]} player={player} reactive={reactive} nightBlend={nightBlend} />)}</>;
 }
 
 const ARRIVAL = { duration: 2.6, yaw: -1.1, pitch: 0.5, zoom: 0.62 };
+const COACH_CAMERA = { height: 23, enter: 2.2, exitDuration: 5, arcLift: 1.6 };
 const WHEEL_ZOOM = { closer: 0.23, duration: 0.55, tilt: 0.12 };
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -668,6 +670,12 @@ function DrivingScene(props: SceneProps) {
   const introLook = useMemo(() => new THREE.Vector3(0, -GLOBE_RADIUS, 0), []);
   const gameCamera = useMemo(() => new THREE.Vector3(), []);
   const gameLook = useMemo(() => new THREE.Vector3(), []);
+  const coachCamera = useMemo(() => new THREE.Vector3(), []);
+  const coachLook = useMemo(() => new THREE.Vector3(), []);
+  const coachCameraBlend = useRef(0);
+  const coachCameraWasTarget = useRef(false);
+  const coachCameraExitStart = useRef(0);
+  const coachCameraExitElapsed = useRef(0);
   const desiredCamera = useMemo(() => new THREE.Vector3(), []);
   const desiredLook = useMemo(() => new THREE.Vector3(), []);
   const globeCenter = useMemo(() => new THREE.Vector3(0, -GLOBE_RADIUS, 0), []);
@@ -843,7 +851,7 @@ function DrivingScene(props: SceneProps) {
   }, [fog, scene, sunTarget]);
   // The car waits parked at the road edge (out of the traffic lanes); no drop-in launch.
   const parkCar = () => {
-    props.car.current = { ...initialLoopCar(), x: scenicSpawnAngles[SPAWN_INDEX], z: PARKING_OFFSET };
+    props.car.current = { ...initialLoopCar(), x: scenicSpawnAngles[SPAWN_INDEX], z: props.started && props.tutorialDriving ? 0 : PARKING_OFFSET };
     smoothedElevation.current = null;
     poseInitialized.current = false;
     landingHeight.current = 0;
@@ -857,13 +865,19 @@ function DrivingScene(props: SceneProps) {
   useEffect(() => {
     // Leaving the drive: keep the car where it is and start the intro spin from the globe's current
     // angle, so the globe doesn't turn away to somewhere else before spinning.
+    if (props.started && !wasStarted.current && props.tutorialDriving) {
+      // Begin the steering lesson already aligned with the centre of the road.
+      props.car.current.z = 0;
+      props.car.current.heading = 0;
+      props.car.current.steering = 0;
+    }
     if (!props.started && wasStarted.current) {
       const euler = new THREE.Euler().setFromQuaternion(globeQuat, 'XYZ');
       rotation.current = euler.y;
       pitch.current = euler.x;
     }
     wasStarted.current = props.started;
-  }, [props.started]);
+  }, [props.started, props.tutorialDriving, props.car]);
   useEffect(() => {
     const canvas = gl.domElement;
     canvas.style.cursor = props.started ? 'default' : 'grab';
@@ -1067,7 +1081,7 @@ function DrivingScene(props: SceneProps) {
       steer: [pad.steer, keySteer, keys.steer ?? 0].reduce((best, value) => (Math.abs(value) > Math.abs(best) ? value : best), 0),
     };
     const intro = !props.started && zoomProgress.current < 0.02;
-    if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true);
+    if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true, !!props.tutorialDriving && props.started, !!props.boostEnabled);
     // Two cinematic beats share the slow-motion cut-in:
     // - the red one for a real smash: the cars come together fast (closing speed, so ramming an oncoming car
     //   counts far more than nudging one ahead, and a glancing scrape barely counts at all);
@@ -1095,6 +1109,7 @@ function DrivingScene(props: SceneProps) {
         trauma.current = Math.min(1, trauma.current + CRASH_CAM.shake);
         // The red slow motion keeps the short synthesised whoosh; the recorded one is for near misses only.
         playWhoosh();
+        playThud(Math.max(1, Math.min(1.5, hit.closing / JUICE_CONFIG.crashCinematicClosing)));
       } else if (hit.boosted) {
         // A boost hit: no slow motion (the boost never pauses), so the punch is all in the hit itself — a hard
         // shake, a lens kick, a sharp tilt and a heavy boom.
@@ -1107,6 +1122,7 @@ function DrivingScene(props: SceneProps) {
         lookSwing.current = hit.side * SIDE_HIT_CAMERA.swing;
         fovKick.current += SIDE_HIT_CAMERA.fovKick;
         trauma.current = Math.min(1, trauma.current + SIDE_HIT_CAMERA.shake);
+        playThud(Math.max(0.35, Math.min(1, hit.speed / 12)));
       }
       props.onTrafficHit?.({ ...hit, cinematic });
     }
@@ -1267,11 +1283,38 @@ function DrivingScene(props: SceneProps) {
     cameraAcceleration.current = THREE.MathUtils.damp(cameraAcceleration.current, car.acceleration, 5, dt);
     const drivingFov = updateCamera(
       gameCamera, gameLook, groundVehiclePosition, vehicleTangent, surfaceUp,
-      props.cameraMode, cameraSpeed.current, landingCameraBlend.current, landingHeight.current,
+      props.cameraMode, cameraSpeed.current, landingCameraBlend.current, landingHeight.current, !!props.mobileCamera,
     );
     // Camera falls back on hard acceleration and catches up afterwards.
     cameraLag.current = THREE.MathUtils.damp(cameraLag.current, THREE.MathUtils.clamp(cameraAcceleration.current * JUICE_CONFIG.cameraLag, -2, 2), JUICE_CONFIG.cameraLagStiffness, dt);
     gameCamera.addScaledVector(vehicleTangent, -cameraLag.current);
+    // The first steering lesson looks straight down from above the car; as the lesson ends, orbit smoothly back
+    // to the normal chase view rather than replacing the camera in a single frame.
+    const coachTarget = props.started && props.tutorialCamera ? 1 : 0;
+    if (coachTarget) {
+      coachCameraWasTarget.current = true;
+      coachCameraBlend.current = THREE.MathUtils.damp(coachCameraBlend.current, 1, COACH_CAMERA.enter, realDt);
+    } else {
+      if (coachCameraWasTarget.current) {
+        coachCameraWasTarget.current = false;
+        coachCameraExitStart.current = coachCameraBlend.current;
+        coachCameraExitElapsed.current = 0;
+      }
+      if (coachCameraExitElapsed.current < COACH_CAMERA.exitDuration && coachCameraExitStart.current > 0) {
+        coachCameraExitElapsed.current = Math.min(COACH_CAMERA.exitDuration, coachCameraExitElapsed.current + realDt);
+        const progress = coachCameraExitElapsed.current / COACH_CAMERA.exitDuration;
+        coachCameraBlend.current = coachCameraExitStart.current * (1 - THREE.MathUtils.smoothstep(progress, 0, 1));
+      }
+    }
+    const coachMix = THREE.MathUtils.smoothstep(coachCameraBlend.current, 0, 1);
+    if (coachMix > 0.001) {
+      coachCamera.copy(groundVehiclePosition)
+        .addScaledVector(surfaceUp, COACH_CAMERA.height);
+      coachLook.copy(groundVehiclePosition)
+        .addScaledVector(surfaceUp, 0.15);
+      gameCamera.lerp(coachCamera, coachMix).addScaledVector(surfaceUp, Math.sin(Math.PI * coachMix) * COACH_CAMERA.arcLift);
+      gameLook.lerp(coachLook, coachMix);
+    }
     cameraStartDirection.copy(introCamera).sub(globeCenter);
     cameraEndDirection.copy(gameCamera).sub(globeCenter);
     const startRadius = cameraStartDirection.length();
@@ -1369,7 +1412,7 @@ function DrivingScene(props: SceneProps) {
     lookSwing.current = THREE.MathUtils.damp(lookSwing.current, 0, SIDE_HIT_CAMERA.swingDecay, realDt);
     desiredLook.addScaledVector(vehicleRight, lookSwing.current * zoom);
     smoothedLook.lerp(desiredLook, ease);
-    targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).normalize();
+    targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).lerp(vehicleTangent, coachMix).normalize();
     smoothedUp.lerp(targetCameraUp, 1 - Math.exp(-6 * dt)).normalize();
     camera.up.copy(smoothedUp);
     // Looking straight down, "up" on screen is the way the car is heading (turning with the orbit).
@@ -1460,7 +1503,7 @@ function DrivingScene(props: SceneProps) {
       <AtmosphereGlow amount={glowAmount} night={nightBlend} />
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld zoom={zoomProgress} />
-        <Traffic paused={props.paused} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} />
+        <Suspense fallback={null}><Traffic paused={props.paused} enabled={props.trafficEnabled !== false} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} /></Suspense>
         <group ref={vehicle}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
         <primitive object={dust.mesh} />

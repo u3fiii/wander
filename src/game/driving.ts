@@ -25,7 +25,7 @@ export type Controls = {
 export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost';
 const steerInput = (controls: Controls) => controls.steer ?? (Number(controls.left) - Number(controls.right));
 export const emptyControls = (): Controls => ({ forward: false, back: false, left: false, right: false, brake: false });
-export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 1, boosting: 0, drift: 0, boostTime: 0, boostCharge: 1 });
+export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, boostTime: 0, boostCharge: 0 });
 export const initialLoopCar = (): CarState => ({ ...initialCar(), x: 0, z: 0, heading: 0 });
 const toward = (n: number, target: number, amount: number) => n < target ? Math.min(n + amount, target) : Math.max(n - amount, target);
 
@@ -33,11 +33,11 @@ const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const blend = (a: Vec3, b: Vec3, ca: number, cb: number): Vec3 => [a[0] * ca + b[0] * cb, a[1] * ca + b[1] * cb, a[2] * ca + b[2] * cb];
 
-export function stepLoopCar(car: CarState, controls: Controls, delta: number, respectWater = false): void {
+export function stepLoopCar(car: CarState, controls: Controls, delta: number, respectWater = false, tutorial = false, boostEnabled = true): void {
   if (!Number.isFinite(delta) || delta <= 0) return;
   const elapsed = Math.min(delta, LOOP_DRIVE.maxFrameDelta);
   const steps = Math.ceil(elapsed / LOOP_DRIVE.physicsStep);
-  for (let i = 0; i < steps; i++) integrateLoopCar(car, controls, elapsed / steps, respectWater);
+  for (let i = 0; i < steps; i++) integrateLoopCar(car, controls, elapsed / steps, respectWater, tutorial, boostEnabled);
 }
 
 const isDrifting = (car: CarState, controls: Controls) => controls.brake
@@ -45,7 +45,11 @@ const isDrifting = (car: CarState, controls: Controls) => controls.brake
 
 // Shift fires a timed boost burst (holding it does not extend it), then it needs a cooldown.
 // `boost` is what the HUD shows: burst time left while boosting, recharge progress otherwise.
-export function updateBoost(car: CarState, controls: Controls, dt: number, onRoad = true): void {
+export function updateBoost(car: CarState, controls: Controls, dt: number, onRoad = true, enabled = true): void {
+  if (!enabled) {
+    car.boostTime = 0; car.boostCharge = 0; car.boosting = 0; car.boost = 0;
+    return;
+  }
   const forwardAmount = controls.throttle ?? Number(controls.forward);
   if (car.boostTime > 0) {
     car.boostTime = Math.max(0, car.boostTime - dt);
@@ -66,7 +70,7 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
 // `halfWidth`; at the edge its heading is turned back along the road (by `edgeTurn`) so it slides along the edge
 // instead of grinding, and the road assist pulls it straight `assist` times harder when the player lets go.
 export const DRIVE_MODE = { rails: false };
-export const RAILS = { halfWidth: 2.15, edgeTurn: 14, assist: 3, autoThrottle: 1 };
+export const RAILS = { halfWidth: 2.15, edgeTurn: 14, assist: 3, autoThrottle: 1, tutorialMaxSpeed: 6, tutorialCentering: 0.08 };
 function keepOnRails(car: CarState, dt: number) {
   const limit = RAILS.halfWidth / lateralScale(car.x);
   if (Math.abs(car.z) <= limit) return;
@@ -85,7 +89,7 @@ export function earnBoost(car: CarState, amount: number) {
   if (!car.boosting) car.boost = car.boostCharge;
 }
 
-export function updateSpeed(car: CarState, controls: Controls, dt: number, offroad = false): void {
+export function updateSpeed(car: CarState, controls: Controls, dt: number, offroad = false, speedCap = Infinity): void {
   const forwardAmount = controls.throttle ?? Number(controls.forward);
   const backAmount = controls.reverse ?? Number(controls.back);
   const throttle = forwardAmount - backAmount;
@@ -99,7 +103,7 @@ export function updateSpeed(car: CarState, controls: Controls, dt: number, offro
     car.speed = toward(car.speed, 0, brakeRate * pedal * dt);
   } else if (throttle) {
     const boosting = throttle > 0 && car.boosting > 0;
-    const limit = throttle > 0 ? CAR_CONFIG.maxSpeed * (boosting ? CAR_CONFIG.boostSpeedFactor : 1) : CAR_CONFIG.reverseMaxSpeed;
+    const limit = throttle > 0 ? Math.min(CAR_CONFIG.maxSpeed * (boosting ? CAR_CONFIG.boostSpeedFactor : 1), speedCap) : CAR_CONFIG.reverseMaxSpeed;
     const engine = (throttle > 0 ? CAR_CONFIG.acceleration : CAR_CONFIG.reverseAcceleration) * (boosting ? CAR_CONFIG.boostAccelFactor : 1);
     const taper = throttle > 0 ? CAR_CONFIG.accelTaper : CAR_CONFIG.reverseTaper;
     car.speed += throttle * engine * Math.max(0, 1 - taper * Math.min(Math.abs(car.speed) / limit, 1) ** 2) * dt;
@@ -107,7 +111,7 @@ export function updateSpeed(car: CarState, controls: Controls, dt: number, offro
   } else {
     coast();
   }
-  const topSpeed = CAR_CONFIG.maxSpeed * (car.boosting > 0 ? CAR_CONFIG.boostSpeedFactor : 1);
+  const topSpeed = Math.min(CAR_CONFIG.maxSpeed * (car.boosting > 0 ? CAR_CONFIG.boostSpeedFactor : 1), speedCap);
   car.speed = Math.max(-CAR_CONFIG.reverseMaxSpeed, Math.min(topSpeed, car.speed));
   // After a boost the extra speed bleeds off instead of snapping back.
   if (car.boosting === 0 && car.speed > CAR_CONFIG.maxSpeed) car.speed = toward(car.speed, CAR_CONFIG.maxSpeed, CAR_CONFIG.boostOverspeedDecel * dt);
@@ -154,7 +158,7 @@ export function turnRate(steer: number, speed: number, drifting = false, boostin
   return Math.max(-maxYaw, Math.min(maxYaw, requested));
 }
 
-function integrateLoopCar(car: CarState, controls: Controls, dt: number, respectWater: boolean): void {
+function integrateLoopCar(car: CarState, controls: Controls, dt: number, respectWater: boolean, tutorial: boolean, boostEnabled: boolean): void {
   const previousSpeed = car.speed;
   const previousZ = car.z;
   const previousX = car.x;
@@ -164,9 +168,9 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     || onRoadSurface(frame.latitude, car.x);
   // While boosting the car drives itself: full throttle, and it stays on the road with the usual road assist.
   const drive = car.boosting > 0 ? { ...controls, forward: true, back: false, brake: false, throttle: 1, reverse: 0 } : controls;
-  updateBoost(car, drive, dt, currentOnRoad);
+  updateBoost(car, drive, dt, currentOnRoad, boostEnabled);
   // Nothing slows a boosting car: the off-road drag and the water drag below are skipped while boosting.
-  updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence);
+  updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence, tutorial ? RAILS.tutorialMaxSpeed : Infinity);
   if (respectWater && car.boosting === 0 && !currentOnRoad && currentLand < LOOP_DRIVE.waterShoreInfluence) {
     const waterAmount = Math.min(1, Math.max(0,
       (LOOP_DRIVE.waterShoreInfluence - currentLand)
@@ -377,7 +381,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   car.hitAssist = Math.max(0, (car.hitAssist ?? 0) - dt);
   // Under boost the assist also reaches a little past the road's edge, to pull a wide car back on.
   const nearRoadUnderBoost = car.boosting > 0 && distanceToRoadNetwork(movement.latitude, movement.longitude) < CAR_CONFIG.boostAssistReach;
-  if (respectWater && (nextOnRoad || car.hitAssist > 0 || nearRoadUnderBoost || car.boosting > 0)) assistRoad(car, controls, previousZ, dt);
+  if (respectWater && (nextOnRoad || car.hitAssist > 0 || nearRoadUnderBoost || car.boosting > 0)) assistRoad(car, controls, previousZ, dt, tutorial);
   keepOnBridge(car, previousX, previousZ, dt);
   if (DRIVE_MODE.rails) keepOnRails(car, dt);
   car.distance += Math.abs(effectiveTravel);
@@ -409,7 +413,7 @@ function facingEastNorth(facing: number[], latitude: number, longitude: number):
 
 // Hidden road assist: on the road the heading eases back toward the road direction when the
 // player isn't steering hard, and more firmly when drifting toward the edge. Subtle by design.
-function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: number) {
+function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: number, tutorial = false) {
   // While boosting, steering brings the car back to the road itself (see updateSteering), so the assist stays out
   // of the way; otherwise it would pull the heading straight back and stop the car getting across.
   const recovering = (car.hitAssist ?? 0) > 0;
@@ -428,7 +432,9 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   const funnel = bridgeDistance < CAR_CONFIG.bridgeFunnelReach ? CAR_CONFIG.bridgeFunnelAssist * (1 - bridgeDistance / CAR_CONFIG.bridgeFunnelReach) : 0;
   const rate = (CAR_CONFIG.roadAssist * (DRIVE_MODE.rails ? RAILS.assist : 1) * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
     + (recovering ? CAR_CONFIG.crashAssist * (1 - steering * 0.5) : 0);
-  car.heading = along + error * Math.exp(-rate * dt);
+  // In the first-drive lesson, releasing the arrows gently aims the car back toward the road's centre.
+  const centerHeading = tutorial && steering < 0.05 ? -Math.max(-0.22, Math.min(0.22, car.z * RAILS.tutorialCentering)) : 0;
+  car.heading = along + centerHeading + (error - centerHeading) * Math.exp(-rate * dt);
 }
 
 // Deflections off walls, trunks and the shore turn the car at a capped rate. If the free direction

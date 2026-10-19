@@ -157,17 +157,17 @@ export function updateBodySpring(spring: BodySpring, car: CarState, dt: number, 
 export function updateCamera(
   position: THREE.Vector3, look: THREE.Vector3,
   ground: THREE.Vector3, forward: THREE.Vector3, up: THREE.Vector3,
-  cameraMode: number, speed: number, landingBlend: number, landingHeight: number,
+  cameraMode: number, speed: number, landingBlend: number, landingHeight: number, mobile = false,
 ) {
   const top = cameraMode === 1;
-  const distance = THREE.MathUtils.lerp(top ? CAR_CONFIG.topCameraDistance : CAR_CONFIG.cameraDistance, 9.8, landingBlend);
+  const distance = THREE.MathUtils.lerp(top ? CAR_CONFIG.topCameraDistance : CAR_CONFIG.cameraDistance + (mobile ? 4 : 0), 9.8, landingBlend);
   const height = THREE.MathUtils.lerp(
-    top ? CAR_CONFIG.topCameraHeight : CAR_CONFIG.cameraHeight + Math.abs(speed) * CAR_CONFIG.cameraHeightPerSpeed,
+    top ? CAR_CONFIG.topCameraHeight : CAR_CONFIG.cameraHeight + Math.abs(speed) * CAR_CONFIG.cameraHeightPerSpeed + (mobile ? 2.4 : 0),
     11.8,
     landingBlend,
   );
-  const lookAhead = THREE.MathUtils.lerp(top ? CAR_CONFIG.topCameraLookAhead : CAR_CONFIG.cameraLookAhead, 4.2, landingBlend);
+  const lookAhead = THREE.MathUtils.lerp(top ? CAR_CONFIG.topCameraLookAhead : CAR_CONFIG.cameraLookAhead * (mobile ? 0.75 : 1), 4.2, landingBlend);
   position.copy(ground).addScaledVector(forward, -distance).addScaledVector(up, height);
-  look.copy(ground).addScaledVector(forward, lookAhead).addScaledVector(up, 1.2 + landingHeight * 0.18);
+  look.copy(ground).addScaledVector(forward, lookAhead).addScaledVector(up, (mobile && !top ? 0.8 : 1.2) + landingHeight * 0.18);
   return CAR_CONFIG.baseFov + CAR_CONFIG.speedFovBoost * Math.min(Math.abs(speed) / CAR_CONFIG.maxSpeed, 1);
 }

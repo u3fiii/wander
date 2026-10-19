@@ -14,7 +14,7 @@ import { playBoostReady } from './game/audio';
 // Off the road a ready boost can't fire, so it dims and says so. It is also a button: tapping it boosts (the only
 // way to boost on a touch screen), and on a keyboard it shows Shift.
 const RING = 2 * Math.PI * 27;
-export default function BoostGauge({ car, controls, offroad }: { car: RefObject<CarState>; controls: RefObject<Controls>; offroad: boolean }) {
+export default function BoostGauge({ car, controls, offroad, mobile = false }: { car: RefObject<CarState>; controls: RefObject<Controls>; offroad: boolean; mobile?: boolean }) {
   const ring = useRef<SVGCircleElement>(null);
   const seconds = useRef<HTMLElement>(null);
   const [state, setState] = useState<'charging' | 'ready' | 'burning'>(() => (car.current.boostCharge >= 1 ? 'ready' : 'charging'));
@@ -63,6 +63,6 @@ export default function BoostGauge({ car, controls, offroad }: { car: RefObject<
     {readyCount > 0 && <i key={readyCount} className="boost-ripple" aria-hidden="true" />}
     {gain && <b key={gain.id} className="boost-gain" aria-hidden="true">+{gain.amount}%</b>}
     <Flame className="boost-flame" fill="currentColor" strokeWidth={1.5} />
-    <span className="boost-label">{blocked ? 'Road only' : state === 'ready' ? <><kbd>Shift</kbd> Ready</> : state === 'burning' ? 'Boost!' : <>Charging <em ref={seconds} className="boost-seconds" /></>}</span>
+    <span className="boost-label">{blocked ? 'Road only' : state === 'ready' ? mobile ? 'TAP TO BOOST!' : <><kbd>Shift</kbd> Ready</> : state === 'burning' ? 'Boost!' : <><span className="boost-label-word">Charging</span> <em ref={seconds} className="boost-seconds" /></>}</span>
   </button>;
 }
