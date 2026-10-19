@@ -1,7 +1,7 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Trophy, Map as MapIcon, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, House, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
@@ -22,33 +22,6 @@ function morph(update: () => void) {
   const doc = document as Document & { startViewTransition?: (callback: () => void) => unknown };
   if (!doc.startViewTransition || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { update(); return; }
   doc.startViewTransition(() => flushSync(update));
-}
-
-// A crisp, custom-drawn arrow pointer that stays directly under the mouse.
-function GameCursor({ rootRef }: { rootRef: { current: HTMLElement | null } }) {
-  const cursor = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const root = rootRef.current, node = cursor.current;
-    if (!root || !node || window.matchMedia('(pointer: coarse)').matches) return;
-    const move = (event: PointerEvent) => {
-      if (event.pointerType === 'touch') return;
-      const rect = root.getBoundingClientRect();
-      node.style.transform = `translate3d(${event.clientX - rect.left}px,${event.clientY - rect.top}px,0)`;
-      node.classList.add('visible');
-    };
-    const leave = () => { node.classList.remove('visible'); };
-    root.addEventListener('pointermove', move);
-    root.addEventListener('pointerleave', leave);
-    return () => {
-      root.removeEventListener('pointermove', move);
-      root.removeEventListener('pointerleave', leave);
-    };
-  }, [rootRef]);
-  return <div ref={cursor} className="game-cursor" aria-hidden="true">
-    <svg viewBox="0 0 24 30" focusable="false">
-      <path d="M.8.7V25l6.8-6.7 4.8 10 4.3-2-4.7-10 9.4-1.7L.8.7Z" />
-    </svg>
-  </div>;
 }
 
 // A heart: a glossy red shape with a soft highlight (the colours come from style.css).
@@ -302,13 +275,6 @@ const STAR_LAYERS = [0, 1, 2].map(layer => {
     return `${x}vw ${y}vh 0 ${[0, 0.4, 0.8][layer]}px rgba(255,248,230,${(0.55 + random() * 0.45).toFixed(2)})`;
   }).join(',');
 });
-// Day sky behind the globe: now and then a small flock of birds crosses it (it fades out with the night).
-function DaySky() {
-  return <div className="day-sky" aria-hidden="true">
-    <div className="day-birds">{[0, 1, 2, 3, 4].map(i => <svg key={i} viewBox="0 0 20 8" style={{ '--i': i } as CSSProperties}><path d="M0 6 L6 1 L10 5 L14 1 L20 6 L14 3 L10 7 L6 3 Z" /></svg>)}</div>
-  </div>;
-}
-
 function NightSky() {
   return <div className="night-sky" aria-hidden="true">
     <div className="aurora"><span /><span /><span /></div>
@@ -926,7 +892,7 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><DaySky /><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -981,9 +947,8 @@ export default function App() {
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         <button className={`desktop-only${fullscreen ? ' active' : ''}`} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>
         {!runOver && !finale && <button className="desktop-only" aria-label="Choose your car" title="Garage" onClick={openGarage}><CarFront /></button>}
-        <button className="desktop-only" aria-label="Leaderboard" title="Leaderboard" style={{ viewTransitionName: 'tool-board' } as CSSProperties} onClick={() => setBoardOpen(true)}><Trophy /></button>
+        {!started && <button className="desktop-only" aria-label="Leaderboard" title="Leaderboard" style={{ viewTransitionName: 'tool-board' } as CSSProperties} onClick={() => setBoardOpen(true)}><Trophy /></button>}
         <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
-        {started && <button className={`desktop-only${mapView ? ' active' : ''}`} aria-label={mapView ? 'Back to the road' : 'Open the map'} style={{ viewTransitionName: 'tool-map' } as CSSProperties} title="Map · M" onClick={() => { controls.current = emptyControls(); morph(() => setMapView(v => !v)); }}><MapIcon /></button>}
         {started && !mapView && <button className="desktop-only" aria-label={paused ? 'Resume driving' : 'Pause game'} style={{ viewTransitionName: 'tool-pause' } as CSSProperties} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
       </nav>
     </header>
@@ -1075,6 +1040,5 @@ export default function App() {
     {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={reset}
       onHome={() => { reset(); returnToHero(); }} />}
     <LoadingScreen ready={ready} onLeave={() => setRevealed(true)} />
-    <GameCursor rootRef={mainRef} />
   </main>;
 }

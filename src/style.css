@@ -452,15 +452,6 @@
 @media (max-width:380px){.steer-button{width:66px;height:66px}.steer-zone.left .steer-button{left:14px}.steer-zone.right .steer-button{right:14px}}
 @media (prefers-reduced-motion:reduce){.steer-button{transition:none}}
 
-/* Day sky: the odd flock of birds behind the globe, fading out with the night. */
-.day-sky{position:absolute;inset:0;pointer-events:none;overflow:hidden;opacity:calc(1 - var(--night-amount,0))}
-.day-birds{position:absolute;top:22%;left:0;display:flex;gap:6px;animation:birds-fly 70s linear infinite;animation-delay:-20s}
-.day-birds svg{width:16px;height:7px;fill:#2f4a52;opacity:.55;translate:0 calc(var(--i) * 4px - (var(--i) - 2) * (var(--i) - 2) * 3px);animation:wing-flap .5s ease-in-out infinite alternate;animation-delay:calc(var(--i) * -.13s)}
-@keyframes birds-fly{0%{transform:translate(-12vw,0)}35%{transform:translate(112vw,-6vh)}100%{transform:translate(112vw,-6vh)}}
-@keyframes wing-flap{from{transform:scaleY(1)}to{transform:scaleY(.45)}}
-.q-low .day-birds{display:none}
-@media (prefers-reduced-motion:reduce){.day-birds,.day-birds svg{animation:none}}
-
 /* Slow-motion notes: while the cut-in plays the player can only watch, so the note takes the stage. Big, in the
    middle of the screen, built letter by letter; the points land after the word; it all pulls back and fades as
    the slow motion lets go.
@@ -820,16 +811,6 @@
   .hud-center .heart-icon{width:17px;height:17px}
 }
 @media (max-width:600px){.hud-center .score-pill{padding:0 26px 0 8px}}
-
-/* Desktop pointer: a crisp arrow with no glow, lag, or trailing effect. */
-@media (pointer:fine){
-  .app,.app *{cursor:none!important}
-  .game-cursor{position:absolute;left:0;top:0;width:24px;height:30px;z-index:100;pointer-events:none;opacity:0;transform:translate3d(-50vw,-50vh,0);transition:transform .035s ease-out,opacity .12s ease-out;will-change:transform}
-  .game-cursor.visible{opacity:1}
-  .game-cursor svg{display:block;width:100%;height:100%;overflow:visible}
-  .game-cursor path{fill:#fff;stroke:#171717;stroke-width:1.65;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-}
-@media (prefers-reduced-motion:reduce){.game-cursor{transition:none!important}}
 
 /* Rails mode, pressing a steering button: it springs up in size, turns gold with a wide ring and a glow, its arrow
    leans the way it steers, and a gold ripple spreads out from it and fades; let go, it springs back. */
