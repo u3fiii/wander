@@ -747,6 +747,8 @@ function DrivingScene(props: SceneProps) {
   const rimLight = useRef<THREE.DirectionalLight>(null!);
   const bounceLight = useRef<THREE.DirectionalLight>(null!);
   const cornerLight = useRef<THREE.PointLight>(null!);
+  const carFillLight = useRef<THREE.SpotLight>(null!);
+  const carFillTarget = useMemo(() => new THREE.Object3D(), []);
   const cornerDir = useMemo(() => new THREE.Vector3(), []);
   const cornerSide = useMemo(() => new THREE.Vector3(), []);
   const cornerUp = useMemo(() => new THREE.Vector3(), []);
@@ -1236,6 +1238,16 @@ function DrivingScene(props: SceneProps) {
     const golden = twilight();
     const n = nightBlend.current;
     nightState.blend = n;
+    // A soft overhead pool follows the player. No shadow pass is needed, and
+    // height compensation keeps the intensity control useful at every height.
+    carFillTarget.position.copy(vehiclePosition);
+    carFillLight.current.position.copy(vehiclePosition).addScaledVector(surfaceUp, nightLook.carLightHeight);
+    carFillLight.current.color.set(nightLook.carLightColour);
+    carFillLight.current.intensity = nightLook.carLightIntensity * nightLook.carLightHeight ** 2 * n;
+    carFillLight.current.angle = THREE.MathUtils.degToRad(nightLook.carLightSpread);
+    carFillLight.current.penumbra = nightLook.carLightSoftness;
+    carFillLight.current.distance = nightLook.carLightHeight * 4;
+    carFillLight.current.visible = n > 0.001;
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
     // Daytime values come from the Day look panel (dayLook); night keeps its own.
     daySunColour.copy(neutralSun).lerp(amberSun, dayLook.sunWarmth);
@@ -1512,6 +1524,8 @@ function DrivingScene(props: SceneProps) {
     />
     <directionalLight ref={rimLight} position={[58, 18, -48]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={ATMOSPHERE.light.rimIntensity} color={ART_DIRECTION.day.rimColor} />
     <pointLight ref={cornerLight} decay={2} />
+    <primitive object={carFillTarget} />
+    <spotLight ref={carFillLight} target={carFillTarget} intensity={0} decay={2} castShadow={false} />
     <directionalLight ref={bounceLight} position={[18, -38, -62]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={0.24} color={ART_DIRECTION.day.bounceColor} />
     <primitive object={speedLines.group} />
     <Meteors />
@@ -1621,7 +1635,7 @@ const SHOW_STATS = typeof window !== 'undefined' && new URLSearchParams(window.l
 export default memo(function Scene(props: SceneProps) {
   return <Canvas shadows frameloop="demand" dpr={resolution.dpr} camera={{ position: [0, 40, 94], fov: 48, near: 0.1, far: 400 }} gl={{ antialias: false, alpha: true, powerPreference: 'high-performance' }} onCreated={({ gl }) => gl.setClearAlpha(0)}>
     <FrameLimiter fps={props.paused ? 30 : 60} />
-    <AdaptiveResolution active={!props.paused} />
+    <AdaptiveResolution active={props.started && !props.paused && !props.tutorialDriving && !props.finale} />
     {SHOW_STATS && <RenderStats />}
     <Suspense fallback={null}><DrivingScene {...props} /></Suspense>
   </Canvas>;

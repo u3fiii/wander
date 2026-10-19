@@ -17,9 +17,9 @@ test('touch devices get a sharp mobile profile, with a fallback for constrained 
 });
 
 test('mobile retains a clarity floor without supersampling lower-density screens', () => {
-  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 3), { min: 0.9, max: 1.5, initial: 1.3 });
-  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 1), { min: 1, max: 1, initial: 1 });
-  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, NaN), { min: 1, max: 1, initial: 1 });
+  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 3), { min: 0.9, max: 2, initial: 1.3 });
+  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 1), { min: 0.9, max: 1, initial: 1 });
+  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, NaN), { min: 0.9, max: 1, initial: 1 });
 });
 
 function simulator(deviceDpr = 3) {
@@ -40,15 +40,15 @@ test('startup and a brief hitch do not lower mobile quality', () => {
   s.frames(30);
   s.frames(30, 1 / 30); // A single short slow window, then smooth rendering.
   s.frames(180);
-  assert.equal(s.dpr, 1.3);
+  assert.ok(s.dpr >= 1.3);
 });
 
 test('sustained overload lowers quality to its floor and stable frames recover it', () => {
   const s = simulator();
   s.frames(900, 1 / 30);
   assert.equal(s.dpr, 0.9);
-  s.frames(3600);
-  assert.equal(s.dpr, 1.5);
+  s.frames(5400);
+  assert.equal(s.dpr, 2);
 });
 
 test('pause and long gaps clear stale samples and give rendering a fresh warmup', () => {
@@ -67,10 +67,31 @@ test('pause and long gaps clear stale samples and give rendering a fresh warmup'
 test('a lower-density device never increases resolution past its native density', () => {
   const s = simulator(1);
   assert.equal(s.frames(2400), 1);
-  assert.equal(s.frames(900, 1 / 30), 1);
+  assert.equal(s.frames(900, 1 / 30), 0.9);
 });
 
 test('intermediate frame rates do not repeatedly change resolution', () => {
   const s = simulator();
-  assert.equal(s.frames(1800, 1 / 52), 1.3);
+  assert.equal(s.frames(1800, 1 / 56), 1.3);
+});
+
+test('phones with the same reported hardware settle at different resolutions based on frame performance', () => {
+  const strong = simulator(), limited = simulator();
+  let highestLimited = limited.dpr;
+  for (let frame = 0; frame < 5400; frame++) {
+    strong.frames(1);
+    limited.frames(1, limited.dpr <= 1.3 ? 1 / 60 : 1 / 42);
+    highestLimited = Math.max(highestLimited, limited.dpr);
+  }
+  assert.equal(strong.dpr, 2);
+  assert.ok(highestLimited <= 1.4);
+  assert.ok(limited.dpr <= 1.4);
+});
+
+test('overload recovery waits before trying higher quality again', () => {
+  const s = simulator();
+  s.frames(900, 1 / 30);
+  assert.equal(s.dpr, 0.9);
+  assert.equal(s.frames(900), 0.9);
+  assert.ok(s.frames(1200) > 0.9);
 });

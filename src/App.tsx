@@ -186,7 +186,7 @@ import type { NearMiss, TrafficHit } from './game/obstacles';
 import { NEAR_MISS } from './game/obstacles';
 import { DAY_LOOK_SAVED, DAY_LOOK_SLIDERS, dayLook } from './game/dayLook';
 import type { DayLook } from './game/dayLook';
-import { NIGHT_LOOK_SAVED, NIGHT_LOOK_SLIDERS, nightLook } from './game/nightLook';
+import { NIGHT_LOOK_COLOURS, NIGHT_LOOK_SAVED, NIGHT_LOOK_SLIDERS, nightLook } from './game/nightLook';
 import type { NightLook } from './game/nightLook';
 import { CAR_TUNING_SAVED, CAR_TUNING_SLIDERS } from './game/carTuning';
 import type { CarTuning } from './game/carTuning';
@@ -376,7 +376,7 @@ export default function App() {
   // Phones: the run starts in whichever time of day was picked on the start screen; going home resets to daylight.
   useEffect(() => { if (!started && RAILS) resetToDay(); }, [started, RAILS]);
   // Phones: the day and night come round a little faster, and every run starts in daylight (below).
-  useEffect(() => { cycle.speed = RAILS ? 1.3 : 1; }, [RAILS]);
+  useEffect(() => { cycle.speed = (RAILS ? 1.3 : 1) * 1.2; }, [RAILS]);
   // Map view: mid-drive, the camera pulls back to the globe (which can be turned by dragging) and the game holds
   // still until the player goes back to the road. M, the map button, or Esc to return.
   const [mapView, setMapView] = useState(false);
@@ -883,7 +883,7 @@ export default function App() {
       onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
       look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
       sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
-      colours={lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
+      colours={lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
       saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
       endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
       onChange={values => {

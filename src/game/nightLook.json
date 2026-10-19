@@ -9,5 +9,9 @@
   "skyTop": "#111118",
   "skyHorizon": "#0a0a0b",
   "glow": 0.33,
-  "aurora": 0.06
+  "aurora": 0.06,
+  "carLightIntensity": 0.9,
+  "carLightHeight": 10,
+  "carLightSpread": 29,
+  "carLightSoftness": 0.96
 }
