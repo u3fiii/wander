@@ -17,7 +17,7 @@ test('touch devices get a sharp mobile profile, with a fallback for constrained 
 });
 
 test('mobile retains a clarity floor without supersampling lower-density screens', () => {
-  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 3), { min: 1.25, max: 2, initial: 1.75 });
+  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 3), { min: 0.9, max: 1.5, initial: 1.3 });
   assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 1), { min: 1, max: 1, initial: 1 });
   assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, NaN), { min: 1, max: 1, initial: 1 });
 });
@@ -36,19 +36,19 @@ function simulator(deviceDpr = 3) {
 test('startup and a brief hitch do not lower mobile quality', () => {
   const s = simulator();
   s.frames(85, 1 / 30); // Slow startup, within the warmup.
-  assert.equal(s.dpr, 1.75);
+  assert.equal(s.dpr, 1.3);
   s.frames(30);
   s.frames(30, 1 / 30); // A single short slow window, then smooth rendering.
   s.frames(180);
-  assert.equal(s.dpr, 1.75);
+  assert.equal(s.dpr, 1.3);
 });
 
 test('sustained overload lowers quality to its floor and stable frames recover it', () => {
   const s = simulator();
   s.frames(900, 1 / 30);
-  assert.equal(s.dpr, 1.25);
+  assert.equal(s.dpr, 0.9);
   s.frames(3600);
-  assert.equal(s.dpr, 2);
+  assert.equal(s.dpr, 1.5);
 });
 
 test('pause and long gaps clear stale samples and give rendering a fresh warmup', () => {
@@ -72,5 +72,5 @@ test('a lower-density device never increases resolution past its native density'
 
 test('intermediate frame rates do not repeatedly change resolution', () => {
   const s = simulator();
-  assert.equal(s.frames(1800, 1 / 52), 1.75);
+  assert.equal(s.frames(1800, 1 / 52), 1.3);
 });

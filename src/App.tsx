@@ -2,7 +2,7 @@ import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'r
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
-import Scene from './game/Scene';
+import Scene, { scoreDrift } from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
 import type { VehicleId } from './game/vehicles';
@@ -370,7 +370,7 @@ export default function App() {
         localStorage.setItem('wander:first-drive-complete', 'yes');
         setFirstDrive(false);
       }, 3000));
-    }, 5000));
+    }, 3000));
   }, [clearCoachTimers]);
   const [paused, setPaused] = useState(false);
   // Phones: the run starts in whichever time of day was picked on the start screen; going home resets to daylight.
@@ -641,11 +641,7 @@ export default function App() {
     // A drift is scored on its quality, not just its length: how hard into the slide, how clean (on the road),
     // switching sides mid-slide (an S-drift) and threading near misses on the way all multiply its points, and
     // the note names the best thing about it.
-    const angle = 0.6 + 0.8 * Math.min(1, drift.angle);
-    const clean = 0.4 + 0.6 * Math.max(0, drift.clean);
-    const switchback = 1 + 0.6 * Math.min(drift.switches, 3);
-    const threaded = 1 + 0.5 * Math.min(drift.threaded, 3);
-    const points = Math.round(drift.time * drift.speed * 1.2 * angle * clean * switchback * threaded);
+    const points = scoreDrift(drift);
     const label = drift.threaded > 0 ? 'Threaded the needle!'
       : drift.switches > 0 ? (drift.switches > 1 ? `Switchback ×${drift.switches}!` : 'Switchback!')
       : drift.angle > 0.8 && drift.clean > 0.95 && drift.time >= 1.8 ? 'Perfect drift!'

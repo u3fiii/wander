@@ -4,12 +4,12 @@ export type VisualQuality = 'low' | 'mobile' | 'high';
 // pixels, but spend less on small decorations, their shadows and depth of field.
 export const QUALITY_PROFILES = {
   low: {
-    shadowMapSize: 1024, minDpr: 1, initialDpr: 1.25, maxDpr: 1.25,
-    depthOfField: false, msaa: 0, decorationDensity: 0.35, decorativeShadows: false, simpleSwimRings: true,
+    shadowMapSize: 512, minDpr: 0.8, initialDpr: 1, maxDpr: 1.15,
+    depthOfField: false, msaa: 0, decorationDensity: 0.2, decorativeShadows: false, simpleSwimRings: true,
   },
   mobile: {
-    shadowMapSize: 1024, minDpr: 1.25, initialDpr: 1.75, maxDpr: 2,
-    depthOfField: false, msaa: 0, decorationDensity: 0.5, decorativeShadows: false, simpleSwimRings: true,
+    shadowMapSize: 512, minDpr: 0.9, initialDpr: 1.3, maxDpr: 1.5,
+    depthOfField: false, msaa: 0, decorationDensity: 0.28, decorativeShadows: false, simpleSwimRings: true,
   },
   high: {
     shadowMapSize: 2048, minDpr: 0.9, initialDpr: 1.5, maxDpr: 1.5,

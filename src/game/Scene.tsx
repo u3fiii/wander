@@ -316,6 +316,11 @@ const PLANE_HEARD = { near: 14, far: 45 };
 // steering 0..1), how much of it stayed on the road (`clean`, 0..1), how many times it switched sides
 // (`switches`: an S-drift) and how many near misses it threaded on the way (`threaded`).
 export type DriftScore = { time: number; speed: number; angle: number; clean: number; switches: number; threaded: number };
+export const scoreDrift = (drift: DriftScore) => Math.round(drift.time * drift.speed * 1.2
+  * (0.6 + 0.8 * Math.min(1, drift.angle))
+  * (0.4 + 0.6 * Math.max(0, drift.clean))
+  * (1 + 0.6 * Math.min(drift.switches, 3))
+  * (1 + 0.5 * Math.min(drift.threaded, 3)));
 const DRIFT_SCORE = { minSpeed: 4.5, grace: 0.25, settle: 0.3 };
 // Drift camera, once a slide has settled in: it swings out to the outside of the turn to show the car's
 // angle, drops a little lower, widens the lens a touch and leans into the corner. All gentle, on smooth easing.
@@ -327,7 +332,7 @@ const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, rel
 // down; `rest` keeps it rare.
 // `pullOut` lifts the shot further by the same distance the boost camera backs away and rises (× BOOST_FEEL's
 // pullBack + rise), so the overhead view opens out about as wide as a boost's.
-const DRIFT_CINE = { trigger: 0.75, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5, pullOut: 0.136 };
+const DRIFT_CINE = { trigger: 1.2, minPoints: 70, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5, pullOut: 0.136 };
 // The finale, when the last heart goes: time all but stops (`slowScale`), the camera goes straight up over the car,
 // climbing from `startHeight` to `height` m while looking down on it and turning a full `turn` round it, over
 // `duration` s (eased at both ends), and the frame takes the steel-blue end grade. It does not come back: the
@@ -400,6 +405,14 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     const m = motion.current;
     if (!paused) progress.current = (progress.current + Math.sign(speed) * m.speed * dt / roadPathMetric(path, progress.current) + 1) % 1;
     progresses.current[progressIndex] = progress.current;
+    const active = enabled && trafficActive(progressIndex);
+    // Most traffic cars are dormant at early levels. Keep their route progress,
+    // but skip the path frame, collision and animation work while fully hidden.
+    if (!active && presence.current < 0.01) {
+      obstacle.inactive = true;
+      group.current.visible = false;
+      return;
+    }
     const frame = roadPathFrame(path, progress.current, 0.075);
     normal.set(...frame.normal);
     tangent.set(...frame.tangent).multiplyScalar(Math.sign(speed));
@@ -425,7 +438,6 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     const blocked = reactive && enabled && ahead > 1.5 && ahead < NPC.stopDistance && Math.abs(lateral) < NPC.laneHalfWidth;
     // Fewer and calmer cars at low levels (see difficulty.ts). A car joining or leaving the road grows in or
     // shrinks away, and only collides while it is properly there.
-    const active = enabled && trafficActive(progressIndex);
     presence.current = THREE.MathUtils.damp(presence.current, active ? 1 : 0, 3, Math.min(delta, 0.05));
     obstacle.inactive = presence.current < 0.6;
     group.current.visible = presence.current > 0.01;
@@ -537,7 +549,7 @@ function Traffic({ paused, enabled, progresses, player, reactive, nightBlend }: 
 }
 
 const ARRIVAL = { duration: 2.6, yaw: -1.1, pitch: 0.5, zoom: 0.62 };
-const COACH_CAMERA = { height: 23, enter: 2.2, exitDuration: 5, arcLift: 1.6 };
+const COACH_CAMERA = { height: 23, enter: 2.2, exitDuration: 3, arcLift: 1.6 };
 const WHEEL_ZOOM = { closer: 0.23, duration: 0.55, tilt: 0.12 };
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -794,7 +806,7 @@ function DrivingScene(props: SceneProps) {
   useEffect(() => { finaleTime.current = props.finale ? 0 : -1; }, [props.finale]);
   const driftOffset = useMemo(() => new THREE.Vector3(), []);
   const seaNear = useRef(0);
-  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0 });
+  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0, cinematicShown: false });
   const driftHold = useRef(0);
   const driftSide = useRef(0);
   const crashRest = useRef(0);
@@ -1163,10 +1175,14 @@ function DrivingScene(props: SceneProps) {
       if (!onRoad) run.offroad += dt;
     } else if (run.time > 0 && (run.gap += dt) > DRIFT_SCORE.grace) {
       if (!run.spoiled && run.time >= difficulty.driftMinTime && run.offroad < run.time * 0.3) props.onDrift?.({ time: run.time, speed: run.speed / run.time, angle: run.steer / run.time, clean: 1 - run.offroad / run.time, switches: run.switches, threaded: run.threaded });
-      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0 });
+      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0, cinematicShown: false });
     }
-    if (drifting && run.time > DRIFT_CINE.trigger && run.offroad < run.time * 0.7 && driftCutTime.current < 0 && driftCutRest.current <= 0
+    if (drifting && run.time >= DRIFT_CINE.trigger && !run.spoiled && !run.cinematicShown && run.offroad < run.time * 0.3
+      && scoreDrift({ time: run.time, speed: run.speed / run.time, angle: run.steer / run.time,
+        clean: 1 - run.offroad / run.time, switches: run.switches, threaded: run.threaded }) >= DRIFT_CINE.minPoints
+      && driftCutTime.current < 0 && driftCutRest.current <= 0
       && crashTime.current < 0 && car.boosting === 0) {
+      run.cinematicShown = true;
       driftCutTime.current = 0;
       driftOrbit.current = 0;
       playSlowMoWhoosh(0.7);

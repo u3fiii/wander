@@ -59,7 +59,7 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     <span className="eyebrow">RUN OVER</span>
     <h2 id="run-over-title" className="run-score">{number(score)}</h2>
     {newBest && <span className="run-best">New best!</span>}
-    <div className="run-stats">{tiles.map(tile => <div key={tile.label}>{tile.icon}<b>{tile.value}</b><small>{tile.label}</small></div>)}</div>
+    <div className="run-stats">{tiles.map(tile => <div key={tile.label} aria-label={`${tile.label}: ${tile.value}`}>{tile.icon}<b>{tile.value}</b></div>)}</div>
     {step === 'loading' && <p className="board-empty">Loading the shared board…</p>}
     {step === 'saving' && <p className="board-empty">Putting you on the board…</p>}
     {step === 'name'
