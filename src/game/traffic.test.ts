@@ -132,9 +132,9 @@ test('only a fully cleared fast traffic pass with a visible narrow gap qualifies
     assert.equal(misses.length, 1);
     const miss = misses[0];
     assert.equal(isSpecialNearMiss(miss), true);
-    assert.equal(isSpecialNearMiss({ ...miss, clearance: 0.05 }), false, 'visually grazing the car is not exceptional');
-    assert.equal(isSpecialNearMiss({ ...miss, clearance: 0.6 }), false, 'a wide pass is ordinary');
-    assert.equal(isSpecialNearMiss({ ...miss, playerSpeed: 9 }), false, 'a slow pass is ordinary');
+    assert.equal(isSpecialNearMiss({ ...miss, clearance: 0.03 }), false, 'visually grazing the car is not exceptional');
+    assert.equal(isSpecialNearMiss({ ...miss, clearance: 0.9 }), false, 'a wide pass is ordinary');
+    assert.equal(isSpecialNearMiss({ ...miss, playerSpeed: 7 }), false, 'a slow pass is ordinary');
     assert.equal(isSpecialNearMiss({ ...miss, speed: 8 }), false, 'overtaking with little relative speed is ordinary');
     assert.equal(isSpecialNearMiss({ ...miss, source: 'static' }), false, 'roadside props do not trigger the cut-in');
   } finally { resetNearMiss(); drainNearMisses(); }

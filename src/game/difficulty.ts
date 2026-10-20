@@ -9,11 +9,11 @@ const RANGES = {
   weaveMax: [3, 6], // the highest weave combo multiplier
   weaveWindow: [5, 3.5], // seconds to the next near miss before the weave combo breaks
   trafficSpeed: [0.85, 1.15], // traffic cruising speed, × its own
-  nearMissGap: [0.9, 0.55], // a pass this close (m) to a car counts as a near miss
-  nearMissStaticGap: [0.75, 0.5], // the same for trees, poles, rocks, houses
-  nearMissSpeed: [7, 10], // minimum speed of the pass (m/s)
-  nearMissRest: [8, 12], // seconds before another exceptional pass gets slow motion
-  driftMinTime: [0.5, 0.9], // a drift scores once it lasts this long (s)
+  nearMissGap: [1.3, 0.85], // a pass this close (m) to a car counts as a near miss
+  nearMissStaticGap: [1.1, 0.75], // the same for trees, poles, rocks, houses
+  nearMissSpeed: [5, 7], // minimum speed of the pass (m/s)
+  nearMissRest: [15, 20], // seconds before another exceptional pass gets slow motion
+  driftMinTime: [0.3, 0.5], // a drift scores once it lasts this long (s)
   boostCooldown: [0.7, 1.2], // boost recharge time, × the tuned one
   bonus: [1.25, 1], // positive points ×
   penalty: [0.4, 1], // crash and bump penalties ×

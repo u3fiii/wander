@@ -42,8 +42,8 @@ export function drainTrafficTouch() { const touched = trafficTouched; trafficTou
 export type NearMiss = { speed: number; gap: number; side: number; playerSpeed: number; clearance: number; source: 'traffic' | 'static'; cinematic?: boolean };
 // Only a fast, clean pass with a small but visibly real gap deserves a cut-in.
 export function isSpecialNearMiss(miss: NearMiss) {
-  return miss.source === 'traffic' && miss.playerSpeed >= 11 && miss.speed >= 14
-    && miss.clearance >= 0.08 && miss.clearance <= 0.5;
+  return miss.source === 'traffic' && miss.playerSpeed >= 9 && miss.speed >= 11
+    && miss.clearance >= 0.05 && miss.clearance <= 0.8;
 }
 const nearMisses: NearMiss[] = [];
 export function drainNearMisses(): NearMiss[] { return nearMisses.splice(0); }
@@ -53,7 +53,7 @@ export function drainNearMisses(): NearMiss[] { return nearMisses.splice(0); }
 // static things (trees, poles, rocks, houses: threading past them off the road) are tracked separately.
 // How close and how fast a pass must be come from the difficulty (generous at low levels); `gap` here is only
 // the scale the reported gap is given on, for scoring.
-export const NEAR_MISS = { watch: 1.6, gap: 0.65, minPlayerSpeed: 8 };
+export const NEAR_MISS = { watch: 1.6, gap: 0.65, minPlayerSpeed: 6 };
 type Pass = { obstacle: Obstacle; closest: number; touched: boolean; boosted: boolean; speed: number; playerSpeed: number; side: number };
 function passTracker(gapLimit: () => number, source: NearMiss['source']) {
   let pass: Pass | undefined;

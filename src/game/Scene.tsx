@@ -321,7 +321,7 @@ export const scoreDrift = (drift: DriftScore) => Math.round(drift.time * drift.s
   * (0.4 + 0.6 * Math.max(0, drift.clean))
   * (1 + 0.6 * Math.min(drift.switches, 3))
   * (1 + 0.5 * Math.min(drift.threaded, 3)));
-const DRIFT_SCORE = { minSpeed: 4.5, grace: 0.25, settle: 0.3 };
+const DRIFT_SCORE = { minSpeed: 3.5, grace: 0.4, settle: 0.3 };
 // Drift camera, once a slide has settled in: it swings out to the outside of the turn to show the car's
 // angle, drops a little lower, widens the lens a touch and leans into the corner. All gentle, on smooth easing.
 const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, release: 1.8 };
@@ -332,7 +332,7 @@ const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, rel
 // down; `rest` keeps it rare.
 // `pullOut` lifts the shot further by the same distance the boost camera backs away and rises (× BOOST_FEEL's
 // pullBack + rise), so the overhead view opens out about as wide as a boost's.
-const DRIFT_CINE = { trigger: 1, minPoints: 40, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5, pullOut: 0.136 };
+const DRIFT_CINE = { trigger: 0.8, minPoints: 25, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 15, pullOut: 0.136 };
 // The finale, when the last heart goes: time all but stops (`slowScale`), the camera goes straight up over the car,
 // climbing from `startHeight` to `height` m while looking down on it and turning a full `turn` round it, over
 // `duration` s (eased at both ends), and the frame takes the steel-blue end grade. It does not come back: the
