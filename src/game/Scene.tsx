@@ -27,7 +27,7 @@ import { nearMissLook } from './nearMissLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
 import { cullBehindGlobe } from './horizonCull';
-import { advanceTheme, currentThemes, setTheme, themeSunWarmth, themedColour, themeState } from './themes';
+import { advanceTheme, currentThemes, setTheme, themeSettings, themeSunWarmth, themedColour, themeState } from './themes';
 import type { Weather as WeatherKind } from './themes';
 import { roadLayoutFor } from './roadLayouts';
 import { currentPad } from './gamepad';
@@ -896,7 +896,7 @@ function DrivingScene(props: SceneProps) {
     const showing = mix < 0.5 ? from.weather : to.weather;
     if (showing !== weather) setWeather(showing);
     const blend = from.weather === to.weather ? 1 : Math.abs(1 - 2 * mix);
-    weatherAmount.current = THREE.MathUtils.damp(weatherAmount.current, props.started && !props.mapView ? blend : 0, 2, Math.min(delta, 0.05));
+    weatherAmount.current = THREE.MathUtils.damp(weatherAmount.current, (props.started && !props.mapView) || themeSettings.preview ? blend : 0, 2, Math.min(delta, 0.05));
   });
   const cullFrame = useRef(0);
   useFrame(({ camera }) => {

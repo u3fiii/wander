@@ -286,3 +286,34 @@ test('auto-cruise keeps the car in its own lane while the wheel is untouched, an
   for (const car of [withCruise, without]) for (let i = 0; i < 30; i++) stepLoopCar(car, { ...emptyControls(), forward: true, steer: 1 }, 1 / 60, true);
   assert.ok(Math.abs(withCruise.heading - without.heading) < 0.15, 'steering hard overrides the lane keeping');
 });
+
+// The assists never fight the player: no pull inside the road (the bridge approach included), and the road's edge is
+// a soft cushion rather than a rail.
+function assisted(start: Partial<CarState>, steer: (t: number) => number, seconds: number, assists = true) {
+  const saved = { roadAssist: CAR_CONFIG.roadAssist, bridgeFunnelAssist: CAR_CONFIG.bridgeFunnelAssist };
+  if (!assists) Object.assign(CAR_CONFIG, { roadAssist: 0, bridgeFunnelAssist: 0 });
+  const car = { ...initialLoopCar(), ...start };
+  let sharpest = 0, previous = car.heading;
+  for (let i = 0; i < seconds * 60; i++) {
+    stepLoopCar(car, { ...emptyControls(), throttle: Math.max(0, Math.min(1, ((start.speed ?? 12) - car.speed) * 0.9)), steer: steer(i / 60) } as never, 1 / 60, true);
+    sharpest = Math.max(sharpest, Math.abs(car.heading - previous) * 60);
+    previous = car.heading;
+  }
+  Object.assign(CAR_CONFIG, saved);
+  return { car, sharpest };
+}
+test('steering near the bridge is the player\'s alone', () => {
+  const free = assisted({ x: 1.25, z: 0, speed: 12 }, t => (t < 0.8 ? 0.4 : 0), 1.5, false).car;
+  const helped = assisted({ x: 1.25, z: 0, speed: 12 }, t => (t < 0.8 ? 0.4 : 0), 1.5).car;
+  assert.ok(Math.abs(helped.z - free.z) < 0.2, `the same line with and without the assist (${helped.z.toFixed(2)} vs ${free.z.toFixed(2)})`);
+});
+test('heading for the edge, the car is turned along it softly and never leaves the road', () => {
+  const { car, sharpest } = assisted({ x: 0.25, z: 0, heading: 0.35, speed: 12 }, () => 0, 2.5);
+  const latitude = loopLatitude(car.x) + car.z / GLOBE_RADIUS;
+  assert.ok(distanceToRoadNetwork(latitude, car.x) + WORLD_SETTINGS.roads.mainWidth / 2 < CAR_CONFIG.roadEdgeHalfWidth + 0.4, 'still on the road');
+  assert.ok(sharpest < 2.5, `no snap (${sharpest.toFixed(2)} rad/s at most)`);
+});
+test('let go while cruising, the car keeps the lane it was nearer to and follows the road', () => {
+  const { car } = assisted({ x: 0.05, z: -3, speed: 6, cruise: 1 }, () => 0, 12);
+  assert.ok(Math.abs(car.z + CAR_CONFIG.cruiseLaneOffset) < 0.6, `in its lane (${car.z.toFixed(2)})`);
+});

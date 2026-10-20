@@ -1,7 +1,7 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene, { scoreDrift } from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
@@ -211,10 +211,14 @@ import RunOver from './RunOver';
 import Leaderboard from './Leaderboard';
 import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { cycle, goTo, headingToNight, mixHex, nightAmount, resetToDay, skyAt, twilight } from './game/dayCycle';
-import { THEMES, THEME_COLOURS, THEME_TUNING_SLIDERS, applyThemeTuning, chapterFor, currentThemeTuning, currentThemes, readThemeEdit, setTheme as previewTheme, themeSettings, themeState, writeThemeEdit } from './game/themes';
+import { THEMES, THEME_CHOICES, THEME_COLOURS, THEME_TUNING_SLIDERS, applyThemeTuning, chapterFor, currentThemeTuning, currentThemes, readThemeEdit, setTheme as previewTheme, themeSettings, themeState, writeThemeEdit } from './game/themes';
 import type { ThemeEdit } from './game/themes';
 import { THEME_TUNING_SAVED } from './game/themeTuning';
 import { useGamepadMenu } from './useGamepadMenu';
+import { useInputDevice } from './inputDevice';
+import { Keys } from './Keys';
+import type { Action } from './Keys';
+import type { InputDevice } from './inputDevice';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
 const TITLE = 'take a spin.';
@@ -259,39 +263,34 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
   static getDerivedStateFromError() { return { error: true }; }
   render() { return this.state.error ? <div className="error-screen"><h2>The 3D scene could not load</h2><p>Enable graphics acceleration in your browser and try again.</p><button className="primary" onClick={() => location.reload()}>Try again</button></div> : this.props.children; }
 }
-function Help({ close, rails }: { close: () => void; rails: boolean }) {
+// Help: how the game works first (in a few lines), then the controls for the keyboard, an Xbox pad or touch, opening
+// on whichever the player is using.
+const HELP_ROWS: Array<{ action: Action; label: string }> = [
+  { action: 'steer', label: 'Steer' }, { action: 'gas', label: 'Go faster' }, { action: 'brake', label: 'Brake, then reverse' },
+  { action: 'drift', label: 'Handbrake — drift in a turn' }, { action: 'boost', label: 'Boost (when charged)' },
+  { action: 'recover', label: 'Back to the road' }, { action: 'camera', label: 'Change the view' }, { action: 'map', label: 'Map' },
+  { action: 'pause', label: 'Pause' }, { action: 'restart', label: 'Restart' },
+];
+function Help({ close, rails, device }: { close: () => void; rails: boolean; device: InputDevice }) {
+  const [tab, setTab] = useState<InputDevice>(rails ? 'touch' : device === 'touch' ? 'keyboard' : device);
+  const tabs: Array<[InputDevice, string]> = rails ? [['touch', 'Touch']] : [['keyboard', 'Keyboard'], ['gamepad', 'Controller']];
   return <div className="modal-shade help-shade" onClick={close}><section className="modal help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={e => e.stopPropagation()}>
     <button className="close-button" autoFocus aria-label="Close help" onClick={close}><X size={18} /></button>
-    <span className="eyebrow">CONTROLS</span><h2 id="help-title">Keep the wheel and the road.</h2>
-    {rails ? <>
-      <div className="help-row"><span>Steer left</span><span>Hold bottom-left <kbd>←</kbd></span></div>
-      <div className="help-row"><span>Steer right</span><span>Hold bottom-right <kbd>→</kbd></span></div>
-      <p>The car drives forward on its own. Hold either arrow to turn, then lift your finger to go straight.</p>
-    </> : <>
-      <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>W</kbd> <kbd>S</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></span></div>
-      <div className="help-row"><span>Steer left / right</span><span><kbd>A</kbd> <kbd>D</kbd> or <kbd>←</kbd> <kbd>→</kbd></span></div>
-      <div className="help-row"><span>Brake / handbrake drift</span><kbd>Space</kbd></div>
-      <div className="help-row"><span>Boost</span><kbd>Shift</kbd></div>
-      <div className="help-row"><span>Gentle throttle</span><kbd>Alt</kbd></div>
-      <div className="help-row"><span>Back to road when stuck</span><kbd>F</kbd></div>
-      <div className="help-row"><span>Tuning panel</span><kbd>`</kbd></div>
-      <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
-      <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
-      <div className="help-row"><span>Pause / resume</span><kbd>Esc</kbd></div>
-      <div className="help-row"><span>Map</span><kbd>M</kbd></div>
-      <p className="help-pad"><b>Xbox controller</b></p>
-      <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>RT</kbd> <kbd>LT</kbd></span></div>
-      <div className="help-row"><span>Steer</span><kbd>Left stick</kbd></div>
-      <div className="help-row"><span>Handbrake drift</span><kbd>A</kbd></div>
-      <div className="help-row"><span>Boost</span><span><kbd>X</kbd> or <kbd>RB</kbd></span></div>
-      <div className="help-row"><span>Gentle throttle</span><kbd>LB</kbd></div>
-      <div className="help-row"><span>Back to road when stuck</span><kbd>Y</kbd></div>
-      <div className="help-row"><span>Change camera</span><span><kbd>B</kbd> or <kbd>R3</kbd></span></div>
-      <div className="help-row"><span>Map</span><kbd>View</kbd></div>
-      <div className="help-row"><span>Pause / resume</span><kbd>Menu</kbd></div>
-      <div className="help-row"><span>In menus: move, press, back</span><span><kbd>D-pad</kbd> <kbd>A</kbd> <kbd>B</kbd></span></div>
-      <p>The car rolls on its own once you start; you choose the line. Lift off for corners, hold back to reverse. Weave through traffic, drift the bends, and bank your hearts for a bigger run.</p>
-    </>}
+    <span className="eyebrow">HOW TO PLAY</span><h2 id="help-title">A small world, a long road.</h2>
+    <ul className="help-how">
+      <li><Car aria-hidden="true" /><span><b>The car rolls on by itself.</b> {rails ? 'Hold either side of the screen to steer.' : 'Steer, and hold the gas to go faster.'}</span></li>
+      <li><Sparkles aria-hidden="true" /><span><b>Slip past cars to score</b> — the closer the call, the more it pays. Drift and boost for big points.</span></li>
+      <li><HeartIcon className="full" /><span><b>Crashes cost a heart.</b> Three, and the run is over.</span></li>
+      <li><Palette aria-hidden="true" /><span><b>Keep going</b> and the world changes its colours along the way.</span></li>
+    </ul>
+    {tabs.length > 1 && <div className="help-tabs" role="tablist">{tabs.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>}
+    {tab === 'touch'
+      ? <div className="help-rows">
+        <div className="help-row"><span>Steer</span><span>Hold the left or right side</span></div>
+        <div className="help-row"><span>Boost (when charged)</span><span>Tap the flame</span></div>
+        <div className="help-row"><span>Pause and more</span><span>The menu at the top left</span></div>
+      </div>
+      : <div className="help-rows">{HELP_ROWS.filter(row => tab === 'keyboard' || row.action !== 'restart').map(row => <div key={row.action} className="help-row"><span>{row.label}</span><Keys action={row.action} device={tab} /></div>)}</div>}
     <button className="primary" onClick={close}>Got it <Check size={18} /></button>
   </section></div>;
 }
@@ -317,8 +316,10 @@ function NightSky() {
 type LookValues = Record<string, number | string>;
 type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
 type LookMode = 'day' | 'night' | 'car' | 'drift' | 'theme' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
-function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, serialize, onChange, onClose }: {
+function LookPanel({ mode, onMode, look, sliders, colours, choices, saved, endpoint, serialize, onChange, onClose }: {
   mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
+  // A row of buttons choosing one value (the theme to edit).
+  choices?: { key: string; options: Array<{ value: number; label: string }> };
   endpoint: string; serialize?: () => unknown; onChange: (look: LookValues) => void; onClose: () => void;
 }) {
   const [status, setStatus] = useState('');
@@ -346,6 +347,9 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, seri
       </div>
       <button aria-label="Close" onClick={onClose}><X size={14} /></button>
     </div>
+    {choices && <div className="day-look-choices" role="group">
+      {choices.options.map(option => <button key={option.value} className={Number(look[choices.key]) === option.value ? 'on' : ''} onClick={() => set(choices.key, option.value)}>{option.label}</button>)}
+    </div>}
     {colours && <div className="day-look-colours">
       {colours.map(colour => <label key={colour.key}><span>{colour.label}</span><input type="color" value={String(look[colour.key])} onChange={event => set(colour.key, event.target.value)} /></label>)}
     </div>}
@@ -354,7 +358,7 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, seri
       <input type="range" min={slider.min} max={slider.max} step={slider.step} value={Number(look[slider.key])}
         onChange={event => set(slider.key, Number(event.target.value))} />
     </label></Fragment>)}
-    {'skyTop' in look && <div className="day-look-colours">
+    {'skyTop' in look && !colours?.some(colour => colour.key === 'skyTop') && <div className="day-look-colours">
       <label><span>Sky top</span><input type="color" value={String(look.skyTop)} onChange={event => set('skyTop', event.target.value)} /></label>
       <label><span>Sky horizon</span><input type="color" value={String(look.skyHorizon)} onChange={event => set('skyHorizon', event.target.value)} /></label>
     </div>}
@@ -435,6 +439,8 @@ export default function App() {
   // The Theme tab edits one theme at a time (`theme`: 1 amber, 2 blossom, 3 frost), shown live as it is changed;
   // the strength, speed and weather amount are shared. Apply saves every theme.
   const themeFlat = (index: number, base: { strength: number; seconds: number; weather: number }): LookValues => ({ theme: index, strength: base.strength, seconds: base.seconds, weather: base.weather, ...readThemeEdit(index) });
+  const [theme, setThemeIndex] = useState(FIRST_THEME);
+  const [road, setRoad] = useState(FIRST_ROAD);
   const themeSaved = (index: number): LookValues => ({ theme: index, strength: THEME_TUNING_SAVED.strength, seconds: THEME_TUNING_SAVED.seconds, weather: THEME_TUNING_SAVED.weather, ...THEME_TUNING_SAVED.themes[THEMES[index].id] });
   const [themeValues, setThemeValues] = useState<LookValues>(() => themeFlat(1, themeSettings));
   const changeTheme = (next: LookValues) => {
@@ -450,6 +456,19 @@ export default function App() {
     applyThemeTuning(currentThemeTuning(), true);
     setThemeValues(next);
   };
+  // While the Theme tab is open the theme's weather shows even over the start screen.
+  // Opening the tab shows the theme being edited; leaving it puts the run's own theme back.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  const editedTheme = useRef(1);
+  editedTheme.current = Number(themeValues.theme);
+  useEffect(() => {
+    const previewing = showLook && lookMode === 'theme';
+    themeSettings.preview = previewing;
+    if (previewing) previewTheme(editedTheme.current, true);
+    else if (themeState.progress >= 1) previewTheme(themeRef.current, true);
+    return () => { themeSettings.preview = false; };
+  }, [showLook, lookMode]);
   const [driftValues, setDriftValues] = useState<DriftTuning>(currentDriftTuning);
   const changeDrift = (next: DriftTuning) => { applyDriftTuning(next); setDriftValues(next); };
   const [cameraValues, setCameraValues] = useState<CameraTuning>({ ...cameraTuning });
@@ -537,6 +556,8 @@ export default function App() {
   const [revealed, setRevealed] = useState(false);
   const [data, setData] = useState<Telemetry>(initialLoopCar);
   const [gamepad, setGamepad] = useState(false);
+  // The controls in use right now (keyboard, pad or touch): every prompt shows its buttons.
+  const device = useInputDevice();
   useGamepadMenu({ started, ready, mapView, paused });
   const [muted, setMutedState] = useState(true);
   // Smooth-driving streak: grows while staying on the road at speed, resets off-road or when slowing right down.
@@ -625,8 +646,6 @@ export default function App() {
   // Themes (themes.ts): each score milestone eases the planet into its next look over a few seconds, while the
   // run goes on. Each new run after one has ended gets a new road layout (roadLayouts.ts; the world is rebuilt
   // for it then, between runs). `?theme=N` / `?road=N` start with another look or road, for checking them.
-  const [theme, setThemeIndex] = useState(FIRST_THEME);
-  const [road, setRoad] = useState(FIRST_ROAD);
   // Dev only: lets the console jump the score to a milestone (`__setScore(3000)`).
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __setScore: typeof setScore }).__setScore = setScore; }, []);
   useEffect(() => {
@@ -957,6 +976,7 @@ export default function App() {
       colours={lookMode === 'theme' ? THEME_COLOURS : lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
       saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, drift: DRIFT_TUNING_SAVED, theme: themeSaved(Number(themeValues.theme)), camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
       serialize={lookMode === 'theme' ? currentThemeTuning : undefined}
+      choices={lookMode === 'theme' ? THEME_CHOICES : undefined}
       endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', drift: '/__drift-tuning', theme: '/__theme-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
       onChange={values => {
         if (lookMode === 'day') changeLook(values as DayLook);
@@ -1016,19 +1036,19 @@ export default function App() {
         </div>
       </div>}
       {stuckHint
-        ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <kbd>F</kbd> to hop back on the road</span></div>
+        ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <Keys action="recover" device={device} /> to hop back on the road</span></div>
         : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
       <nav className="toolbar" aria-label="Game settings">
         {/* Phones, on the start screen: pick day or night, and the run starts there. */}
         {!started && <button className="mode-toggle" aria-label={night ? 'Start in daylight' : 'Start at night'} title={night ? 'Day' : 'Night'} onClick={() => goTo(night ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
-        <button className="desktop-only" aria-label={night ? 'Switch to evening' : 'Switch to night'} style={{ viewTransitionName: 'tool-night' } as CSSProperties} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>
+        {!started && <button className="desktop-only" aria-label={night ? 'Switch to evening' : 'Switch to night'} style={{ viewTransitionName: 'tool-night' } as CSSProperties} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
         {!started && <button className="mobile-home-theme" aria-label={night ? 'Switch to light mode' : 'Switch to dark mode'} title={night ? 'Light mode' : 'Dark mode'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
         {import.meta.env.DEV && <button aria-label="Day look" style={{ viewTransitionName: 'tool-look' } as CSSProperties} title="Day look" className={`desktop-only${showLook ? ' active' : ''}`} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
-        <button className={`desktop-only${fullscreen ? ' active' : ''}`} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>
-        {!runOver && !finale && <button className="desktop-only" aria-label="Choose your car" title="Garage" onClick={openGarage}><CarFront /></button>}
+        {!started && <button className={`desktop-only${fullscreen ? ' active' : ''}`} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>}
+        {!started && !runOver && !finale && <button className="desktop-only" aria-label="Choose your car" title="Garage" onClick={openGarage}><CarFront /></button>}
         {!started && <button aria-label="Leaderboard" title="Leaderboard" style={{ viewTransitionName: 'tool-board' } as CSSProperties} onClick={() => setBoardOpen(true)}><Trophy /></button>}
-        <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>
+        {!started && <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>}
         {started && !mapView && <button className="desktop-only" aria-label={paused ? 'Resume driving' : 'Pause game'} style={{ viewTransitionName: 'tool-pause' } as CSSProperties} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
       </nav>
     </header>
@@ -1044,8 +1064,10 @@ export default function App() {
         <span>Drive in your browser. Nothing to install.</span>
       </p>
       <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={start}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button></div>
-      <div className="intro-hints rise" style={{ '--d': '2500ms' } as CSSProperties}>
-        <div className="intro-controls"><span className="key-cluster"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span className="keys-word">or arrow keys</span></div>
+      <div className="intro-howto rise" style={{ '--d': '2500ms' } as CSSProperties} aria-label="How to play">
+        <span><span className="howto-keys"><Keys action="steer" device={device} />{device !== 'touch' && <Keys action="gas" device={device} />}</span><small>{device === 'touch' ? 'to steer' : 'Steer · speed up'}</small></span>
+        <span><Sparkles aria-hidden="true" /><small>Slip past traffic</small></span>
+        <span><HeartIcon className="full" /><small>Three hearts</small></span>
       </div>
     </section>}
 
@@ -1061,7 +1083,8 @@ export default function App() {
         <div className="heart-break-heart" aria-hidden="true"><HeartIcon className="half left" /><HeartIcon className="half right" /></div>
         <strong>{heartBreak.left === 0 ? 'OUT OF HEARTS' : heartBreak.left === 1 ? 'LAST HEART' : `${heartBreak.left} LEFT`}</strong>
       </div>}
-      {coachThisRun && <Coach key={`coach-${resetKey}`} rails={!!RAILS} active={!paused && !help && !roadWarning && !stuckHint} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={(data.boost ?? 1) >= 1 && !data.boosting} onComplete={RAILS ? finishRailsLesson : completeFirstDrive} />}
+      {/* The guide: the first-drive lesson, then the goal and tips at the right moments (Coach.tsx). */}
+      <Coach key={`coach-${resetKey}-${coachThisRun}`} lesson={coachThisRun} rails={!!RAILS} device={device} trafficOn={!firstDrive} active={!paused && !help && !roadWarning && !stuckHint && !finale && !runOver} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={boostUnlocked && (data.boost ?? 0) >= 1 && !data.boosting} onComplete={RAILS ? finishRailsLesson : completeFirstDrive} onSkip={RAILS ? undefined : () => setCoachThisRun(false)} />
       <div className="speedometer" ref={speedometer}>
         <svg className="speed-dial" viewBox="0 0 64 64" aria-hidden="true">
           <defs>
@@ -1088,7 +1111,14 @@ export default function App() {
         : <div key={hitNote.id} className={`hit-note ${/drift/i.test(hitNote.kind) ? `drift ${hitNote.kind}` : hitNote.kind}`} role="status">{hitNote.text} <b>{BADGE_NOTES.includes(hitNote.kind) ? hitNote.badge : `${hitNote.points > 0 ? '+' : ''}${hitNote.points}`}</b>{!BADGE_NOTES.includes(hitNote.kind) && hitNote.badge && <b className="note-combo">{hitNote.badge}</b>}</div>)}
       {/* One line of captions at a time: a traffic note takes the slot over a streak. */}
       {(!RAILS || !firstDrive) && streakShown && !hitNote && <div key={streakLevel} className="hit-note streak" role="status">{streakMessages[(streakLevel - 1) % streakMessages.length]} <b>×{streakLevel}</b></div>}
-      <div className="driving-actions"><button onClick={reset}><RotateCcw size={15} /> Restart</button><span className="key-hint"><kbd>Space</kbd> Brake</span><span className="key-hint"><kbd>Shift</kbd> Boost</span><span className="key-hint"><kbd>F</kbd> Back to road</span><span className="key-hint"><kbd>C</kbd> Camera</span>{gamepad && <span className="gamepad-hint">Gamepad connected</span>}</div>
+      {/* What the other buttons do, in the player's own buttons; it fades back once they have had a look. */}
+      {!RAILS && device !== 'touch' && <div key={`dock-${device}-${resetKey}`} className="controls-dock" aria-label="Controls">
+        <span><Keys action="drift" device={device} />Drift</span>
+        {boostUnlocked && <span><Keys action="boost" device={device} />Boost</span>}
+        <span><Keys action="camera" device={device} />Camera</span>
+        <span><Keys action="map" device={device} />Map</span>
+        <span><Keys action="pause" device={device} />Pause</span>
+      </div>}
       {RAILS ? <SteerPads key={`steer-${resetKey}`} controls={controls} tutorial={coachThisRun && firstDrive && !paused && !help && !roadWarning && !stuckHint} /> : <div className="touch-controls" aria-label="Touch controls"><SteeringWheel controls={controls} /><div className="pedals"><button className="reverse-touch" aria-label="Reverse" {...touch('back')}><ArrowDown /></button><button className="brake-touch" aria-label="Brake" {...touch('brake')}>Brake</button><button className="gas-touch" aria-label="Accelerate" {...touch('forward')}>Gas</button></div></div>}
     </>}
 
@@ -1105,6 +1135,15 @@ export default function App() {
         <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
         <button className="secondary" onClick={returnToHero}><ChevronLeft size={15} /> Back to the globe</button>
       </div>
+      {/* Everything else lives here while driving, so the screen stays clear. */}
+      <div className="pause-actions" role="group" aria-label="More">
+        <button onClick={() => { setPaused(false); morph(() => setMapView(true)); }}><MapIcon /><span>Map</span></button>
+        <button onClick={() => setCameraMode(mode => 1 - mode)}><Video /><span>{cameraMode ? 'Chase view' : 'Top view'}</span></button>
+        <button onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}<span>{night ? 'Day' : 'Night'}</span></button>
+        <button onClick={openGarage}><CarFront /><span>Garage</span></button>
+        <button onClick={() => setHelp(true)}><CircleHelp /><span>Controls</span></button>
+        <button className="desktop-only" onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}<span>{fullscreen ? 'Window' : 'Full screen'}</span></button>
+      </div>
     </section></div>}
     {garageOpen && <Garage selected={vehicleId} close={() => setGarageOpen(false)} onSelect={id => {
       setActiveVehicle(id);
@@ -1112,7 +1151,7 @@ export default function App() {
       saveVehicle(id);
       setGarageOpen(false);
     }} />}
-    {help && <Help rails={!!RAILS} close={() => setHelp(false)} />}
+    {help && <Help rails={!!RAILS} device={device} close={() => setHelp(false)} />}
     {boardOpen && <Leaderboard close={() => setBoardOpen(false)} />}
     {finale && <div className="letterbox" aria-hidden="true"><i /><i /></div>}
     {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={() => { setRoad(r => r + 1); reset(); }}

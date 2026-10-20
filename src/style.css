@@ -1115,3 +1115,87 @@
 /* Moving around the menus with a gamepad: a clear ring on the focused button (the pad has no pointer to show it). */
 .gamepad-nav button:focus,.gamepad-nav a:focus,.gamepad-nav input:focus{outline:4px solid #f4b544!important;outline-offset:5px!important}
 .help-pad{margin:14px 0 2px;font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.7}
+/* The Theme tab's theme chooser: three wide buttons, the chosen one filled. */
+.day-look-choices{display:flex;gap:6px;margin:4px 0 10px}
+.day-look-choices button{flex:1;padding:8px 4px;border:1px solid #1e5954;border-radius:8px;background:transparent;color:#1e5954;font-weight:700;font-size:12px}
+.day-look-choices button.on{background:#1e5954;color:#fff8dd}
+
+/* ===== Guide & HUD refresh =====
+   Buttons in the player's own controls (keycaps, Xbox buttons in their colours, or touch words), the guide's cards,
+   the controls dock, the pause menu's quick actions, the start screen's how-to strip and the help screen. */
+.keys{display:inline-flex;align-items:center;gap:4px;direction:ltr;flex:none}
+.keys .glyph{display:inline-grid;place-items:center;min-width:28px;height:28px;padding:0 8px;border-radius:8px;background:#ffffff1c;border:1px solid #ffffff40;border-bottom-width:3px;color:#fff;font:700 12px/1 var(--font-sans);letter-spacing:.2px;box-shadow:none;transition:background .15s,transform .15s,border-color .15s}
+.keys .glyph.wide{padding:0 9px}
+.keys .glyph.on{background:var(--gold);border-color:#c98c1d;color:#3a2a08;transform:translateY(1px)}
+.keys .glyph.pad{min-width:28px;padding:0;border-radius:50%;border-bottom-width:1px;font-size:12px}
+.keys .glyph.pad.wide,.keys .glyph.pad-lt,.keys .glyph.pad-rt,.keys .glyph.pad-ls{padding:0 8px;border-radius:9px;background:#0d1418;border-color:#ffffff38;font-size:11px}
+.keys .glyph.pad-a{background:#3fae49;border-color:#2d8a36}
+.keys .glyph.pad-b{background:#d9463b;border-color:#ad3229}
+.keys .glyph.pad-x{background:#2f7fd8;border-color:#2163ad}
+.keys .glyph.pad-y{background:#e3ad1c;border-color:#b8880f;color:#2a1f05}
+.keys .glyph.pad.on{box-shadow:0 0 0 3px var(--gold)}
+.keys.touch{font-weight:700;font-size:12px;color:var(--gold)}
+
+/* The guide: a card under the score. A step shows its buttons, a line, a hint under it, and answers live. */
+.coach{top:96px;gap:12px;min-height:54px;padding:8px 14px 8px 10px;border-radius:18px;background:#16212aee;border:1px solid #ffffff22;box-shadow:0 10px 30px #0b161a55,inset 0 1px 0 #ffffff1f;backdrop-filter:blur(10px);font-size:14px;animation:coach-in .45s cubic-bezier(.3,1.5,.5,1) both}
+.coach-text{display:flex;flex-direction:column;gap:2px;line-height:1.15;text-align:left}
+.coach-text strong{font-size:15px;font-weight:700;letter-spacing:-.1px}
+.coach-text small{font-size:11.5px;font-weight:500;color:#ffffffa8}
+.coach.working{border-color:#f4b54488;box-shadow:0 10px 30px #0b161a55,0 0 0 3px #f4b5442a,inset 0 1px 0 #ffffff1f}
+.coach.ticked{border-color:#2f9a6299;background:#16302aee}
+.coach-sides{display:flex;gap:5px;margin-left:2px}
+.coach-sides i{width:9px;height:9px;border-radius:50%;background:#ffffff2e;transition:background .2s,transform .2s}
+.coach-sides i.on{background:#2f9a62;transform:scale(1.15)}
+.coach-skip{margin:0 4px 0 6px;height:28px;padding:0 11px;flex:none;border-radius:20px;border:1px solid #ffffff2e;background:transparent;color:#ffffffb0;font-size:11px;font-weight:600}
+.coach-skip:hover{color:#fff;border-color:#ffffff66}
+.coach-fill{height:4px}
+.coach-fill span{display:block;height:100%;background:linear-gradient(90deg,#f4b544,#ff8a3d);transform-origin:left;transition:transform .2s}
+@keyframes coach-in{from{opacity:0;transform:translateY(-10px) scale(.96)}to{opacity:1;transform:none}}
+
+/* The goal, once, as the traffic arrives. */
+.coach-goal{position:absolute;top:96px;left:0;right:0;margin-inline:auto;width:min(380px,calc(100% - 28px));z-index:4;padding:16px 18px 14px;border-radius:20px;background:#16212af2;border:1px solid #ffffff24;box-shadow:0 16px 44px #0b161a66,inset 0 1px 0 #ffffff1f;backdrop-filter:blur(12px);color:#fff;animation:coach-in .5s cubic-bezier(.3,1.5,.5,1) both,coach-goal-out .5s ease-in 6s forwards;pointer-events:none}
+.coach-goal-title{display:block;font-size:11px;font-weight:800;letter-spacing:2.4px;text-transform:uppercase;color:var(--gold);margin-bottom:10px}
+.coach-goal ul{list-style:none;margin:0;padding:0;display:grid;gap:9px}
+.coach-goal li{display:flex;align-items:center;gap:11px;font-size:13.5px;line-height:1.3;color:#ffffffd0}
+.coach-goal li b{color:#fff}
+.coach-goal li>svg{flex:none;width:30px;height:30px;padding:6px;border-radius:10px;background:#f4b5441f;color:var(--gold)}
+.coach-goal .heart-icon{flex:none;width:30px;height:30px;padding:6px;border-radius:10px;background:#e8584a26}
+@keyframes coach-goal-out{to{opacity:0;transform:translateY(-8px)}}
+
+/* The controls dock: what the other buttons do, in the player's buttons; it settles back after a moment. */
+.controls-dock{position:absolute;left:38px;bottom:44px;z-index:3;display:flex;gap:8px;animation:dock-in .5s cubic-bezier(.3,1.4,.5,1) .3s both,dock-rest .8s ease 9s forwards;transition:opacity .25s}
+.controls-dock:hover{opacity:1!important}
+.controls-dock>span{display:flex;align-items:center;gap:8px;height:38px;padding:0 13px 0 5px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;font-size:12px;font-weight:600;letter-spacing:.2px}
+.controls-dock .keys .glyph{height:26px;min-width:26px;font-size:11px}
+@keyframes dock-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes dock-rest{to{opacity:.42}}
+@media(max-width:900px){.controls-dock{left:18px;bottom:24px;gap:6px}.controls-dock>span{height:34px;font-size:11px}}
+.road-warning .keys .glyph{background:#3a2a0818;border-color:#3a2a0866;color:#3a2a08;height:24px;min-width:24px}
+
+/* Pause: the quick actions that leave the screen while driving. */
+.pause-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px;padding-top:18px;border-top:1px solid #ffffff18}
+.pause-actions button{display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px 10px;border-radius:14px;border:1px solid #ffffff1c;background:#ffffff0d;color:#ffffffde;font-size:11.5px;font-weight:600;transition:background .2s,transform .2s}
+.pause-actions button:hover{background:#ffffff1c;transform:translateY(-1px)}
+.pause-actions svg{width:20px;height:20px;color:var(--gold)}
+
+/* Start screen: how to play, in three chips under the button. */
+.intro-howto{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.intro-howto>span{display:flex;align-items:center;gap:9px;height:44px;padding:0 15px 0 8px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff}
+.intro-howto small{font-size:12.5px;font-weight:600;letter-spacing:.1px;color:#fff}
+.intro-howto>span>svg{width:28px;height:28px;padding:5px;border-radius:50%;background:#f4b5442b;color:var(--gold)}
+.intro-howto .heart-icon{width:28px;height:28px;padding:5px;border-radius:50%;background:#e8584a2e}
+.howto-keys{display:flex;gap:6px}
+.intro-howto .keys .glyph{height:28px;min-width:28px}
+.intro-howto .keys.touch{padding-left:8px}
+@media(max-width:600px){.intro-howto{justify-content:center;gap:6px;margin-top:14px}.intro-howto>span{height:38px;padding:0 12px 0 6px}.intro-howto small{font-size:11px}.intro-howto>span:nth-child(n+2) small{display:none}.intro-howto>span:nth-child(n+2){padding:0 6px}}
+
+/* Help: how to play, then the controls for the device in use. */
+.help-how{list-style:none;margin:4px 0 18px;padding:0;display:grid;gap:10px}
+.help-how li{display:flex;gap:12px;align-items:flex-start;font-size:13px;line-height:1.45}
+.help-how li>svg,.help-how .heart-icon{flex:none;width:30px;height:30px;padding:6px;border-radius:10px;background:#f4b5441f;color:var(--gold)}
+.help-how .heart-icon{background:#e8584a26}
+.help-tabs{display:flex;gap:6px;margin:6px 0 4px;padding:4px;border-radius:14px;background:#ffffff0f}
+.help-tabs button{flex:1;height:36px;border:0;border-radius:10px;background:transparent;color:#ffffffb0;font-weight:700;font-size:12.5px}
+.help-tabs button.on{background:var(--gold);color:#3a2a08}
+.help-rows{margin-bottom:18px}
+.help-rows .help-row{min-height:46px;margin:0;border-bottom:1px solid #ffffff12;font-size:13px}

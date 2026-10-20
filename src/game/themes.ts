@@ -7,6 +7,11 @@ import type { PaletteKey } from './palette.ts';
 // palette, and every themed colour is retinted as it is drawn (merged scenery in its shader, the few other things
 // on the CPU), from one small table of per-colour factors that this module eases from one theme to the next.
 export type Weather = { kind: 'none' | 'petals' | 'leaves' | 'snow'; colours: string[] };
+// The colours that are touched up together in the Theme tab: the ground, the trees and the sea.
+export type ColourGroup = 'ground' | 'trees' | 'sea';
+const GROUP_OF: Partial<Record<PaletteKey, ColourGroup>> = {
+  land: 'ground', coastWall: 'ground', sand: 'ground', mainTree: 'trees', darkTree: 'trees', lightTree: 'trees', accentTree: 'trees', oceanDeep: 'sea', oceanShallow: 'sea',
+};
 export type Theme = {
   id: string;
   colours: Partial<Record<PaletteKey, string>>;
@@ -14,7 +19,7 @@ export type Theme = {
   // How much of the day look's warm (amber) sunlight the theme keeps.
   sunWarmth: number;
   // A touch-up over all of the theme's own colours (Theme tab): hue shift (a turn is 1), saturation ×, brightness added.
-  adjust?: { hue: number; saturation: number; lightness: number };
+  adjust?: { hue: number; saturation: number; lightness: number; groups?: Record<ColourGroup, { hue: number; lightness: number }> };
   weather: Weather;
 };
 
@@ -100,7 +105,7 @@ export const THEME_SLOTS = THEMED_KEYS.length;
 
 // How strongly a theme tints the world (0 = not at all, 1 = as designed, above 1 = pushed further), how long a change
 // takes (s), and how much weather falls (× its usual amount): tuned live from the Theme tab of the look panel.
-export const themeSettings = { strength: 1, seconds: 3.5, weather: 1 };
+export const themeSettings = { strength: 1, seconds: 3.5, weather: 1, preview: false };
 export const themeState = { from: 0, to: 0, progress: 1, version: 0 };
 const themedHex = (theme: Theme, key: PaletteKey) => theme.colours[key] ?? PALETTE[key];
 const fromColour = new THREE.Color(), toColour = new THREE.Color(), current = new THREE.Color(), tint = new THREE.Color(), scratch = new THREE.Color();
@@ -138,9 +143,10 @@ const hsl = { h: 0, s: 0, l: 0 };
 function adjusted(theme: Theme, key: PaletteKey) {
   tint.set(themedHex(theme, key));
   const adjust = theme.adjust;
-  if (!adjust || theme.colours[key] === undefined || (adjust.hue === 0 && adjust.saturation === 1 && adjust.lightness === 0)) return tint;
+  if (!adjust || theme.colours[key] === undefined) return tint;
+  const group = GROUP_OF[key] && adjust.groups ? adjust.groups[GROUP_OF[key]!] : undefined;
   tint.getHSL(hsl);
-  return tint.setHSL(((hsl.h + adjust.hue) % 1 + 1) % 1, Math.min(1, Math.max(0, hsl.s * adjust.saturation)), Math.min(1, Math.max(0, hsl.l + adjust.lightness)));
+  return tint.setHSL(((hsl.h + adjust.hue + (group?.hue ?? 0)) % 1 + 1) % 1, Math.min(1, Math.max(0, hsl.s * adjust.saturation)), Math.min(1, Math.max(0, hsl.l + adjust.lightness + (group?.lightness ?? 0))));
 }
 
 // A palette colour as it looks right now (mid-change, a blend of the two themes).
@@ -227,22 +233,30 @@ export function applyRetint(tracked: Tracked) {
 export const THEME_EDIT_COLOURS = {
   land: 'land', treeMain: 'mainTree', treeDark: 'darkTree', treeLight: 'lightTree', treeAccent: 'accentTree', sea: 'oceanDeep', seaShallow: 'oceanShallow',
 } as const satisfies Record<string, PaletteKey>;
-export type ThemeEdit = { [K in keyof typeof THEME_EDIT_COLOURS]: string } & { skyTop: string; skyHorizon: string; sunWarmth: number; hue: number; saturation: number; lightness: number };
+export type ThemeEdit = { [K in keyof typeof THEME_EDIT_COLOURS]: string } & { skyTop: string; skyHorizon: string; sunWarmth: number; hue: number; saturation: number; lightness: number } & { [K in `${ColourGroup}Hue` | `${ColourGroup}Light`]: number };
 export type ThemeTuning = { strength: number; seconds: number; weather: number; themes: Record<string, ThemeEdit> };
 // The Theme tab: which theme is being edited, the shared settings, and the colour pickers (the two sky colours get
 // their own pair of pickers in the panel).
 export const THEME_COLOURS = [
   { key: 'land', label: 'Ground' }, { key: 'treeMain', label: 'Trees' }, { key: 'treeDark', label: 'Dark trees' }, { key: 'treeLight', label: 'Light trees' },
   { key: 'treeAccent', label: 'Accent trees' }, { key: 'sea', label: 'Sea' }, { key: 'seaShallow', label: 'Sea (shallow)' },
+  { key: 'skyTop', label: 'Sky top' }, { key: 'skyHorizon', label: 'Sky horizon' },
 ];
+// The themes the tab can edit (and show, with their weather, over the start screen too).
+export const THEME_CHOICES = { key: 'theme', options: [{ value: 1, label: 'Amber' }, { value: 2, label: 'Blossom' }, { value: 3, label: 'Frost' }] };
 export const THEME_TUNING_SLIDERS: Array<{ key: string; label: string; min: number; max: number; step: number; group?: string }> = [
-  { group: 'Theme to edit (1 amber · 2 blossom · 3 frost)', key: 'theme', label: 'Theme', min: 1, max: 3, step: 1 },
-  { group: 'This theme', key: 'sunWarmth', label: 'Sunlight warmth', min: 0, max: 1.6, step: 0.05 },
-  { key: 'hue', label: 'Shift all its colours (hue)', min: -0.5, max: 0.5, step: 0.005 },
-  { key: 'saturation', label: 'Colour richness', min: 0, max: 2, step: 0.02 },
-  { key: 'lightness', label: 'Brighter / darker', min: -0.3, max: 0.3, step: 0.01 },
-  { group: 'All themes', key: 'strength', label: 'How strongly it tints', min: 0, max: 1.5, step: 0.05 },
-  { key: 'weather', label: 'Weather amount', min: 0, max: 1, step: 0.05 },
+  { group: 'Light', key: 'sunWarmth', label: 'Sunlight warmth', min: 0, max: 1.6, step: 0.05 },
+  { group: 'Tint all colours', key: 'hue', label: 'Hue', min: -0.5, max: 0.5, step: 0.005 },
+  { key: 'saturation', label: 'Richness', min: 0, max: 2, step: 0.02 },
+  { key: 'lightness', label: 'Brightness', min: -0.3, max: 0.3, step: 0.01 },
+  { group: 'Ground', key: 'groundHue', label: 'Hue', min: -0.5, max: 0.5, step: 0.005 },
+  { key: 'groundLight', label: 'Brightness', min: -0.3, max: 0.3, step: 0.01 },
+  { group: 'Trees', key: 'treesHue', label: 'Hue', min: -0.5, max: 0.5, step: 0.005 },
+  { key: 'treesLight', label: 'Brightness', min: -0.3, max: 0.3, step: 0.01 },
+  { group: 'Sea', key: 'seaHue', label: 'Hue', min: -0.5, max: 0.5, step: 0.005 },
+  { key: 'seaLight', label: 'Brightness', min: -0.3, max: 0.3, step: 0.01 },
+  { group: 'All themes', key: 'strength', label: 'How strongly a theme tints', min: 0, max: 1.5, step: 0.05 },
+  { key: 'weather', label: 'Weather amount (all themes)', min: 0, max: 1, step: 0.05 },
   { key: 'seconds', label: 'Change takes (s)', min: 1, max: 12, step: 0.5 },
 ];
 const PLAIN_SKY = { top: '#72cef0', horizon: '#e6f7f3' };
@@ -250,6 +264,10 @@ const PLAIN_SKY = { top: '#72cef0', horizon: '#e6f7f3' };
 export function readThemeEdit(index: number): ThemeEdit {
   const theme = THEMES[index];
   const edit = { skyTop: theme.sky?.top ?? PLAIN_SKY.top, skyHorizon: theme.sky?.horizon ?? PLAIN_SKY.horizon, sunWarmth: theme.sunWarmth, hue: theme.adjust?.hue ?? 0, saturation: theme.adjust?.saturation ?? 1, lightness: theme.adjust?.lightness ?? 0 } as ThemeEdit;
+  for (const group of ['ground', 'trees', 'sea'] as const) {
+    (edit as unknown as Record<string, number>)[`${group}Hue`] = theme.adjust?.groups?.[group].hue ?? 0;
+    (edit as unknown as Record<string, number>)[`${group}Light`] = theme.adjust?.groups?.[group].lightness ?? 0;
+  }
   for (const [field, key] of Object.entries(THEME_EDIT_COLOURS)) (edit as unknown as Record<string, string>)[field] = theme.colours[key as PaletteKey] ?? PALETTE[key as PaletteKey];
   return edit;
 }
@@ -258,7 +276,8 @@ export function writeThemeEdit(index: number, edit: ThemeEdit) {
   for (const [field, key] of Object.entries(THEME_EDIT_COLOURS)) theme.colours[key as PaletteKey] = (edit as unknown as Record<string, string>)[field];
   theme.sky = { top: edit.skyTop, horizon: edit.skyHorizon };
   theme.sunWarmth = edit.sunWarmth;
-  theme.adjust = { hue: edit.hue ?? 0, saturation: edit.saturation ?? 1, lightness: edit.lightness ?? 0 };
+  const group = (name: ColourGroup) => ({ hue: edit[`${name}Hue`] ?? 0, lightness: edit[`${name}Light`] ?? 0 });
+  theme.adjust = { hue: edit.hue ?? 0, saturation: edit.saturation ?? 1, lightness: edit.lightness ?? 0, groups: { ground: group('ground'), trees: group('trees'), sea: group('sea') } };
 }
 export function currentThemeTuning(): ThemeTuning {
   return { ...themeSettings, themes: Object.fromEntries(THEMES.slice(1).map((theme, index) => [theme.id, readThemeEdit(index + 1)])) };

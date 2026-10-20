@@ -6,6 +6,6 @@
   "nightLift": 0,
   "nightGlow": 0,
   "dayStrength": 1,
-  "cutChance": 0.7,
+  "cutChance": 1,
   "overheadShare": 0.5
 }

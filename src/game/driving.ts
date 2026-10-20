@@ -18,6 +18,10 @@ export type CarState = {
   // distance from (the scene reads it to set the pedals).
   // (`leadGap` is -1 when there is none.)
   cruise: number; leadGap: number; leadSpeed: number;
+  // Seconds the wheel has been left alone (the auto-cruise only keeps the lane once the player has let go a while).
+  handsOff: number;
+  // The lane it keeps once let go: the one it was nearer to at that moment (m from the centre line).
+  cruiseLane: number;
   // Seconds left of the stronger road assist that follows a head-on hit (so the car settles back on the road).
   hitAssist?: number;
   // Rails steering only: how fast the steering value is moving (it follows the pads on a spring, see RAILS).
@@ -33,7 +37,7 @@ export type Controls = {
 export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost';
 const steerInput = (controls: Controls) => controls.steer ?? (Number(controls.left) - Number(controls.right));
 export const emptyControls = (): Controls => ({ forward: false, back: false, left: false, right: false, brake: false });
-export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, boostTime: 0, boostCharge: 0 });
+export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, handsOff: 0, cruiseLane: 0, boostTime: 0, boostCharge: 0 });
 export const initialLoopCar = (): CarState => ({ ...initialCar(), x: 0, z: 0, heading: 0 });
 const toward = (n: number, target: number, amount: number) => n < target ? Math.min(n + amount, target) : Math.max(n - amount, target);
 
@@ -489,24 +493,49 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   // acts at the road's edge (curbs included): a car heading out there is turned back along the road, and with the
   // assist high enough the edge is a wall.
   const always = DRIVE_MODE.rails || boosting;
-  const lateral = Math.abs(car.z) * lateralScale(car.x);
-  const push = smoothstep(CAR_CONFIG.roadEdgeHalfWidth - CAR_CONFIG.roadEdgeZone, CAR_CONFIG.roadEdgeHalfWidth, lateral);
-  const edgeRate = !always && towardEdge ? CAR_CONFIG.roadAssist * CAR_CONFIG.roadEdgeAssist * push : 0;
-  const rate = ((always ? CAR_CONFIG.roadAssist * (DRIVE_MODE.rails ? RAILS.assist : 1) * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) : edgeRate) + funnel) * assistScale
+  if (!always) {
+    // On a computer the player drives: nothing turns the car while it is inside the road. Only after a crash does it
+    // ease back along the road for a moment (less while the player steers), and near the edge the cushion below keeps
+    // it from heading off the road.
+    if (recovering) car.heading = along + error * Math.exp(-CAR_CONFIG.crashAssist * (1 - steering * 0.7) * dt);
+    cushionRoadEdge(car, along, previousZ, dt);
+    return;
+  }
+  const rate = (CAR_CONFIG.roadAssist * (DRIVE_MODE.rails ? RAILS.assist : 1) * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
     + (recovering ? CAR_CONFIG.crashAssist * (1 - steering * 0.5) : 0);
   // In the first-drive lesson, releasing the arrows gently aims the car back toward the road's centre.
   const centerHeading = tutorial && steering < 0.05 ? -Math.max(-0.22, Math.min(0.22, car.z * RAILS.tutorialCentering)) : 0;
   car.heading = along + centerHeading + (error - centerHeading) * Math.exp(-rate * dt);
-  if (!always) holdRoadEdge(car, along, dt);
+}
+// The road's edge as a cushion, not a rail. Heading out towards it, the closer the car gets the less steeply it may
+// point outward: far off it can turn as it likes; within `roadEdgeZone` m of the edge the outward angle allowed
+// shrinks smoothly, to running along the road right at the edge (with the assist at its top). Only the outward part
+// is ever trimmed: steering back in, or along, is never touched, and nothing acts inside the road.
+function cushionRoadEdge(car: CarState, along: number, previousZ: number, dt: number) {
+  const strength = Math.max(0, Math.min(1, CAR_CONFIG.roadAssist / CAR_CONFIG.roadAssistFull));
+  if (strength <= 0 || Math.abs(car.z) <= Math.abs(previousZ) || Math.sign(car.z) !== Math.sign(car.z - previousZ)) return;
+  const lateral = Math.abs(car.z) * lateralScale(car.x);
+  const push = smoothstep(CAR_CONFIG.roadEdgeHalfWidth - CAR_CONFIG.roadEdgeZone, CAR_CONFIG.roadEdgeHalfWidth, lateral);
+  if (push <= 0) return;
+  const error = wrapAngle(car.heading - along);
+  const allowed = (Math.PI / 2) * (1 - push * strength);
+  if (Math.abs(error) <= allowed) return;
+  car.heading = along + Math.sign(error) * (allowed + (Math.abs(error) - allowed) * Math.exp(-CAR_CONFIG.roadEdgeHold * dt));
 }
 // Auto-cruise steering: while the car drives itself and the wheel is untouched, it eases back into its own lane (the
 // right-hand side of the way it is facing, like the traffic) and along the road. The player's wheel always wins.
 function cruiseSteer(car: CarState, controls: Controls, dt: number) {
-  if (car.cruise <= 0.02 || car.speed < 0.5) return;
+  const before = car.handsOff;
+  car.handsOff = Math.abs(steerInput(controls)) > 0.02 ? 0 : car.handsOff + dt;
+  // Picked once, as it is let go: the lane it is nearer to, so it never wanders across the road to the other one.
+  if (before < CAR_CONFIG.cruiseHandsOff && car.handsOff >= CAR_CONFIG.cruiseHandsOff) car.cruiseLane = (car.z >= 0 ? 1 : -1) * CAR_CONFIG.cruiseLaneOffset;
+  if (car.cruise <= 0.02 || car.speed < 0.5 || car.handsOff < CAR_CONFIG.cruiseHandsOff) return;
   const along = roadAlong(car);
   const direction = along === 0 ? 1 : -1;
-  const aim = -direction * Math.max(-CAR_CONFIG.cruiseLaneMaxAngle, Math.min(CAR_CONFIG.cruiseLaneMaxAngle, (car.z + direction * CAR_CONFIG.cruiseLaneOffset) * CAR_CONFIG.cruiseLaneGain));
-  const rate = CAR_CONFIG.cruiseSteerRate * car.cruise * (1 - Math.min(1, Math.abs(steerInput(controls)) * 3));
+  const aim = -direction * Math.max(-CAR_CONFIG.cruiseLaneMaxAngle, Math.min(CAR_CONFIG.cruiseLaneMaxAngle, (car.z - car.cruiseLane) * CAR_CONFIG.cruiseLaneGain));
+  // It takes over gently (over half a second) rather than at once.
+  const settle = Math.min(1, (car.handsOff - CAR_CONFIG.cruiseHandsOff) / 0.5);
+  const rate = CAR_CONFIG.cruiseSteerRate * car.cruise * settle;
   car.heading = along + aim + wrapAngle(car.heading - along - aim) * Math.exp(-rate * dt);
 }
 const smoothstep = (low: number, high: number, value: number) => { const t = Math.max(0, Math.min(1, (value - low) / (high - low))); return t * t * (3 - 2 * t); };
@@ -517,9 +546,10 @@ function holdRoadEdge(car: CarState, along: number, dt: number) {
   const scale = lateralScale(car.x);
   const limit = (CAR_CONFIG.roadEdgeHalfWidth + (1 - hold) * (1 - hold) * CAR_CONFIG.roadEdgeSlack) / scale;
   if (Math.abs(car.z) <= limit) return;
+  // Past the edge (the cushion has already turned the car along it): held there, and its heading is left alone, so
+  // steering back in works at once.
   car.z = Math.sign(car.z) * limit;
-  car.heading = along + wrapAngle(car.heading - along) * Math.exp(-CAR_CONFIG.roadEdgeHold * dt);
-  car.yawRate = 0;
+  void along; void dt;
 }
 
 // Deflections off walls, trunks and the shore turn the car at a capped rate. If the free direction

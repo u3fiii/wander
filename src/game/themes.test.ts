@@ -69,3 +69,15 @@ test('theme tuning: strength scales how far a theme departs from the base, and e
   applyThemeTuning(before, true);
   setTheme(0, true);
 });
+
+test('a group slider touches only its own colours: the trees\' hue leaves the ground alone', async () => {
+  const { applyThemeTuning, currentThemeTuning } = await import('./themes.ts');
+  const before = currentThemeTuning();
+  setTheme(1, true);
+  const ground = themedColour('land', new THREE.Color()), tree = themedColour('mainTree', new THREE.Color());
+  applyThemeTuning({ ...before, themes: { ...before.themes, amber: { ...before.themes.amber, treesHue: 0.3 } } }, true);
+  assert.ok(themedColour('land', new THREE.Color()).equals(ground), 'the ground did not move');
+  assert.ok(!themedColour('mainTree', new THREE.Color()).equals(tree), 'the trees changed colour');
+  applyThemeTuning(before, true);
+  setTheme(0, true);
+});

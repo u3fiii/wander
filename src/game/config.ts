@@ -59,10 +59,10 @@ export const CAR_CONFIG = {
   // higher the assist, and the assist is gone with none.
   roadAssist: 3,
   roadEdgeHalfWidth: 3.04, // asphalt (2.88) plus the curb, a hair inside the bridge railing posts (3.08) so the wall never snags on them
-  roadEdgeZone: 0.9,
+  roadEdgeZone: 1.8,
   roadAssistFull: 3,
   roadEdgeSlack: 1.6,
-  roadEdgeHold: 14,
+  roadEdgeHold: 5,
   roadEdgeAssist: 3,
   // The old assist (boost, touch screens): the heading eases back toward the road direction, firmer once the car is
   // this far (m) from the centre line and heading out.
@@ -149,9 +149,12 @@ export const CAR_CONFIG = {
   cruiseStopGap: 3,
   cruiseLookAhead: 18,
   cruiseLaneOffset: 1.22,
-  cruiseLaneGain: 0.7,
-  cruiseLaneMaxAngle: 0.28,
-  cruiseSteerRate: 3,
+  cruiseLaneGain: 0.45,
+  cruiseLaneMaxAngle: 0.18,
+  cruiseSteerRate: 2.6,
+  // Lane keeping (following the road in the lane it was let go nearest to) starts once the wheel has been left
+  // alone this long (s), and comes in over half a second; any touch of the wheel hands it straight back.
+  cruiseHandsOff: 0.5,
   // Camera
   cameraDistance: 13,
   cameraHeight: 16,
