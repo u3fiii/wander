@@ -13,8 +13,9 @@ import type { CarState } from './driving';
 import { styleCompact } from './compactStyle';
 import { prepareVehicleModel } from './vehicleModel';
 
-export default function PlayerVehicle({ vehicleId, car, onReady }: {
-  vehicleId: VehicleId; car?: React.RefObject<CarState>; onReady?: () => void;
+// `tint` paints the body another colour (party mode: one per player).
+export default function PlayerVehicle({ vehicleId, car, onReady, tint }: {
+  vehicleId: VehicleId; car?: React.RefObject<CarState>; onReady?: () => void; tint?: string;
 }) {
   const definition = VEHICLES.find(vehicle => vehicle.id === vehicleId)!;
   const gltf = useLoader(GLTFLoader, definition.url, withDraco);
@@ -34,6 +35,7 @@ export default function PlayerVehicle({ vehicleId, car, onReady }: {
         child.material = roleMaterials(baked.roles, role => ({ key: role === 'body' || role === 'light' ? 'carRed'
           : role === 'window' ? 'windows' : role === 'tire' ? 'tires' : role === 'lamp' ? 'carYellow'
           : role === 'accent' ? 'carCream' : 'roadShoulder', roughness: role === 'window' ? 0.5 : undefined }), jitter);
+        if (tint) baked.roles.forEach((role, index) => { if (role === 'body') (child.material as THREE.MeshStandardMaterial[])[index].color.set(tint); });
       } else {
         child.material = Array.isArray(child.material) ? child.material.map(item => item.clone()) : material.clone();
         if (vehicleId === 'rover') {
@@ -57,7 +59,7 @@ export default function PlayerVehicle({ vehicleId, car, onReady }: {
       wheelNodeNames: definition.wheelNodes, wheelRadius: radius,
     } : undefined);
     return { rig, ownedMaterials, ownedGeometries, ownedTextures };
-  }, [gltf.scene, vehicleId, definition]);
+  }, [gltf.scene, vehicleId, definition, tint]);
   // Each mounted model owns its travel origin, so switching cars never spins the wheels by the whole run distance.
   const travel = useMemo(() => ({ last: car?.current.wheelTravel ?? 0 }), [rig, car]);
   useFrame(() => {

@@ -223,3 +223,53 @@ test('the car ahead in the same lane is found with its gap and speed; oncoming a
   assert.equal(trafficAhead(0, 0, [0, 1], 6, 1.6, 0.8), undefined, 'out of range');
   clearObstacleGroup('ahead');
 });
+
+// A car `aside` metres to the player's left (and `along` metres ahead), as a movable obstacle driving the same way.
+function carBeside(car: ReturnType<typeof initialLoopCar>, aside: number, along: number): Obstacle {
+  const here = pose(car), [fx, fy] = here.facing;
+  const east = fx * along - fy * aside, north = fy * along + fx * aside;
+  return { latitude: here.latitude + north / GLOBE_RADIUS, longitude: here.longitude + east / (GLOBE_RADIUS * Math.cos(here.latitude)), radius: 0.6, movable: true, forward: [fx, fy], halfLength: 0.9, velocity: 5 };
+}
+test('a boosting car throws aside traffic it only passes close to, without touching it', () => {
+  const car = { ...initialLoopCar(), speed: 14, boostTime: 3 };
+  const other = carBeside(car, 2.9, 2);
+  setObstacleGroup('wake', [other]);
+  drainTrafficHits();
+  for (let i = 0; i < 20; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
+  const hits = drainTrafficHits();
+  clearObstacleGroup('wake');
+  assert.equal(car.boosting, 1);
+  assert.ok(other.boostHit && (other.impact ?? 0) > 0, 'the car beside was hit by the wake');
+  assert.ok(hits.some(hit => hit.wake && hit.boosted), 'and reported as a boosted, no-touch hit');
+  assert.ok(car.speed > 10, 'the player kept its speed');
+});
+test('without boost a car passed at the same distance is left alone', () => {
+  const car = { ...initialLoopCar(), speed: 14 };
+  const other = carBeside(car, 2.9, 2);
+  setObstacleGroup('wake', [other]);
+  drainTrafficHits();
+  for (let i = 0; i < 20; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
+  clearObstacleGroup('wake');
+  assert.ok(!other.boostHit && !other.impact, 'nothing happened to it');
+});
+test('a car further off than the wake reach is not touched even by a boosting car', () => {
+  const car = { ...initialLoopCar(), speed: 14, boostTime: 3 };
+  const other = carBeside(car, 6, 2);
+  setObstacleGroup('wake', [other]);
+  for (let i = 0; i < 20; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
+  clearObstacleGroup('wake');
+  assert.ok(!other.boostHit && !other.impact);
+});
+test('during the milestone moment the car passes through traffic: no hit, no near miss', () => {
+  const car = { ...initialLoopCar(), speed: 12, ghost: 1 };
+  const other = carBeside(car, 0, 3); // dead ahead, in the way
+  setObstacleGroup('ghost', [other]);
+  drainTrafficHits(); resetNearMiss();
+  for (let i = 0; i < 40; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
+  const hits = drainTrafficHits(), misses = drainNearMisses();
+  clearObstacleGroup('ghost');
+  assert.equal(hits.length, 0);
+  assert.equal(misses.length, 0);
+  assert.ok(!other.impact, 'the other car was not touched');
+  assert.ok(car.speed > 10, 'and the car kept going');
+});

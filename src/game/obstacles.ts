@@ -28,7 +28,9 @@ export const HITBOX_SCALE = 0.7;
 // `side` is where the struck car was: 1 on the player's right, -1 on its left. `closing` is how fast (m/s) the two
 // cars were coming together along the contact: high for a real smash, low for a nudge or a glancing scrape.
 // `cinematic` is set by the scene when the hit got the slow-motion cut-in (the HUD then shows it big).
-export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean; closing: number; cinematic?: boolean };
+export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; boosted?: boolean; closing: number; cinematic?: boolean;
+  // Thrown aside by a boosting car's wake as it passed close, not touched.
+  wake?: boolean };
 const trafficHits: TrafficHit[] = [];
 export function reportTrafficHit(hit: TrafficHit) { trafficHits.push(hit); }
 export function drainTrafficHits(): TrafficHit[] { return trafficHits.splice(0); }
@@ -210,4 +212,26 @@ export function trafficAhead(latitude: number, longitude: number, forward: [numb
     best = { gap, speed: (obstacle.velocity ?? 0) * (of[0] * forward[0] + of[1] * forward[1]) };
   }
   return best;
+}
+
+// Every traffic car whose bumper-to-bumper gap to the capsule (centre, facing as unit [east, north], halfLength, radius)
+// is under `reach` metres, nearest first. (`trafficContact` is just the first of these when it is touching.)
+export function trafficNear(latitude: number, longitude: number, forward: [number, number], halfLength: number, radius: number, reach: number) {
+  const found: TrafficContact[] = [];
+  for (const obstacle of flat) {
+    if (!obstacle.movable || obstacle.inactive) continue;
+    const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
+    const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
+    if (Math.hypot(east, north) > 10) continue;
+    const of = obstacle.forward ?? [0, 1], oh = obstacle.halfLength ?? 0;
+    const { distance, away, s } = segmentGap(
+      [-forward[0] * halfLength, -forward[1] * halfLength], [forward[0] * halfLength, forward[1] * halfLength],
+      [east - of[0] * oh, north - of[1] * oh], [east + of[0] * oh, north + of[1] * oh],
+    );
+    const gap = distance - radius - obstacle.radius;
+    if (gap >= reach) continue;
+    const length = distance > 1e-6 ? distance : 1;
+    found.push({ obstacle, gap, playerAlong: (2 * s - 1) * halfLength, away: distance > 1e-6 ? [away[0] / length, away[1] / length] : [1, 0] });
+  }
+  return found.sort((a, b) => a.gap - b.gap);
 }

@@ -4,7 +4,7 @@ import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
 import { difficulty } from './difficulty.ts';
-import { classifyTrafficHit, markTrafficTouch, obstacleAt, reportTrafficHit, resetNearMiss, trackNearMiss, trackStaticNearMiss, trafficAhead, trafficContact } from './obstacles.ts';
+import { classifyTrafficHit, markTrafficTouch, obstacleAt, reportTrafficHit, resetNearMiss, trackNearMiss, trackStaticNearMiss, trafficAhead, trafficContact, trafficNear } from './obstacles.ts';
 
 export type CarState = {
   // On the globe: longitude, latitude offset in metres, heading from the road tangent.
@@ -22,6 +22,12 @@ export type CarState = {
   handsOff: number;
   // The lane it keeps once let go: the one it was nearer to at that moment (m from the centre line).
   cruiseLane: number;
+  // How far onto the curb the car is, 0..1 (see CAR_CONFIG.curb*).
+  curb: number;
+  // Seconds spent riding the curb lately (it grows on the curb and drains off it).
+  curbTime: number;
+  // While above 0 (the milestone moment, see Scene) the car passes through traffic untouched.
+  ghost: number;
   // Seconds left of the stronger road assist that follows a head-on hit (so the car settles back on the road).
   hitAssist?: number;
   // Rails steering only: how fast the steering value is moving (it follows the pads on a spring, see RAILS).
@@ -37,7 +43,7 @@ export type Controls = {
 export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost';
 const steerInput = (controls: Controls) => controls.steer ?? (Number(controls.left) - Number(controls.right));
 export const emptyControls = (): Controls => ({ forward: false, back: false, left: false, right: false, brake: false });
-export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, handsOff: 0, cruiseLane: 0, boostTime: 0, boostCharge: 0 });
+export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, handsOff: 0, cruiseLane: 0, curb: 0, curbTime: 0, ghost: 0, boostTime: 0, boostCharge: 0 });
 export const initialLoopCar = (): CarState => ({ ...initialCar(), x: 0, z: 0, heading: 0 });
 const toward = (n: number, target: number, amount: number) => n < target ? Math.min(n + amount, target) : Math.max(n - amount, target);
 
@@ -213,6 +219,15 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   updateBoost(car, drive, dt, currentOnRoad, boostEnabled);
   // Nothing slows a boosting car: the off-road drag and the water drag below are skipped while boosting.
   updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence, tutorial ? RAILS.tutorialMaxSpeed : Infinity);
+  // On the curb the car rumbles and can't hold full speed (touch screens keep to the lanes anyway; boost ignores it).
+  car.curb = respectWater && !DRIVE_MODE.rails && currentOnRoad ? smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.curbFull, Math.abs(car.z) * lateralScale(car.x)) : 0;
+  car.curbTime = car.curb > 0.5 ? car.curbTime + dt : Math.max(0, car.curbTime - 2 * dt);
+  if (car.curb > 0 && car.boosting === 0) {
+    const long = Math.min(1, car.curbTime / CAR_CONFIG.curbLongAfter);
+    const factor = CAR_CONFIG.curbSpeedFactor + (CAR_CONFIG.curbSpeedFactorLong - CAR_CONFIG.curbSpeedFactor) * long;
+    const limit = CAR_CONFIG.maxSpeed * (1 - (1 - factor) * car.curb);
+    if (Math.abs(car.speed) > limit) car.speed = toward(car.speed, Math.sign(car.speed) * limit, CAR_CONFIG.curbScrub * dt);
+  }
   if (respectWater && car.boosting === 0 && !currentOnRoad && currentLand < LOOP_DRIVE.waterShoreInfluence) {
     const waterAmount = Math.min(1, Math.max(0,
       (LOOP_DRIVE.waterShoreInfluence - currentLand)
@@ -338,7 +353,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   let closingSpeed = 0;
   const capsuleAt = (point: typeof movement) => trafficContact(point.latitude, point.longitude,
     facingEastNorth(point.facing, point.latitude, point.longitude), CAR_CONFIG.collisionHalfLength, CAR_CONFIG.trafficRadius);
-  let contact = capsuleAt(movement);
+  let contact = car.ghost > 0 ? undefined : capsuleAt(movement);
   {
     // Both cars' velocities as [east, north], for the closing speed of a hit and the pace of a near miss.
     const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
@@ -347,6 +362,22 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     const turnAway = contact ? facing[0] * contact.away[1] - facing[1] * contact.away[0] : 0;
     trackNearMiss(contact, Math.hypot(relative[0], relative[1]), Math.abs(car.speed), turnAway > 0 ? 1 : -1, car.boosting > 0);
     if (contact) closingSpeed = Math.max(0, -(relative[0] * contact.away[0] + relative[1] * contact.away[1]));
+  }
+  // Boost is so strong that even passing close to a car throws it aside: every car within `boostWakeReach` m of the
+  // car's sides (not only the one it touches) is hit by the wake, without slowing or turning the player.
+  if (car.boosting > 0 && car.speed > 6 && car.ghost <= 0) {
+    const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
+    for (const near of trafficNear(movement.latitude, movement.longitude, facing, CAR_CONFIG.collisionHalfLength, CAR_CONFIG.trafficRadius, CAR_CONFIG.boostWakeReach)) {
+      const swept = near.obstacle;
+      // (A car actually touched is handled by the hit just below, as it always was.)
+      if ((contact && contact.gap < 0 && swept === contact.obstacle) || swept.ramCooldown) continue;
+      swept.impact = Math.max(swept.impact ?? 0, Math.abs(car.speed) * impactPower());
+      swept.impactPower = impactPower();
+      swept.hitKind = 'side';
+      swept.boostHit = true;
+      swept.ramCooldown = 0.5;
+      reportTrafficHit({ kind: 'side', speed: Math.abs(car.speed), side: facing[0] * near.away[1] - facing[1] * near.away[0] > 0 ? 1 : -1, boosted: true, closing: 0, wake: true });
+    }
   }
   if (contact && contact.gap < 0) {
     markTrafficTouch();

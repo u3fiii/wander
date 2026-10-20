@@ -154,7 +154,7 @@ export default function Coach({ rails = false, lesson, active, controls, speed, 
     id = tip.kind;
     className += ' tip' + (tip.ticked ? ' ticked' : '');
     body = tip.kind === 'boost'
-      ? <>{<Keys action="boost" device={device} />}<span className="coach-text"><strong>{tip.ticked ? 'Whoosh!' : 'Boost is ready'}</strong>{!tip.ticked && <small>Smash through traffic for a while</small>}</span>{tip.ticked ? tick : null}</>
+      ? <>{<Keys action="boost" device={device} />}<span className="coach-text"><strong>{tip.ticked ? 'Whoosh!' : 'Boost is ready'}</strong>{!tip.ticked && <small>Blows cars aside, even ones you pass close to</small>}</span>{tip.ticked ? tick : null}</>
       : tip.kind === 'drift'
         ? <>{<Keys action="drift" device={device} />}<span className="coach-text"><strong>{tip.ticked ? 'Sideways!' : 'Hold in a turn to drift'}</strong>{!tip.ticked && <small>Long drifts score big</small>}</span>{tip.ticked ? tick : null}</>
         : <><Keys action="camera" device={device} /><span className="coach-text"><strong>Change the view</strong><small>and open the map</small></span><Keys action="map" device={device} /></>;

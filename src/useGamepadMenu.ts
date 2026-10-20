@@ -52,6 +52,8 @@ export function useGamepadMenu(context: { started: boolean; ready: boolean; mapV
       const pad = currentPad();
       if (!pad) { seenPad = false; return; }
       const { started, ready, mapView } = latest.current;
+      // Party screens read the pads themselves (every pad is a player there).
+      if (document.querySelector('.party-lobby, .party-final')) return;
       const scope = menuScope(latest.current);
       const pressed = edges(pad);
       // The first frame of a freshly connected pad only records what is held.

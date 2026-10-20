@@ -550,3 +550,26 @@ function natureTick(dt: number) {
     natureWait = 7 + Math.random() * 12;
   } else natureWait = 3;
 }
+
+// Party mode's horn: a short, silly two-tone toot, its pitch set per player.
+export function playHonk(pitch = 1) {
+  if (!graph) return;
+  const { context, world } = graph;
+  const now = context.currentTime;
+  const filter = context.createBiquadFilter();
+  filter.type = 'lowpass'; filter.frequency.value = 1800;
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.09, now + 0.01);
+  gain.gain.setValueAtTime(0.09, now + 0.2);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+  for (const ratio of [1, 1.26]) {
+    const tone = context.createOscillator();
+    tone.type = 'square';
+    tone.frequency.setValueAtTime(330 * pitch * ratio, now);
+    tone.frequency.linearRampToValueAtTime(300 * pitch * ratio, now + 0.24);
+    tone.connect(filter);
+    tone.start(now); tone.stop(now + 0.27);
+  }
+  filter.connect(gain).connect(world);
+}

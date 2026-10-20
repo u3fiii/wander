@@ -7,7 +7,7 @@ import { MILESTONES, THEMES, advanceTheme, applyRetint, chapterFor, setTheme, sl
 test('the look changes rarely: only at big score milestones, then round the themes', () => {
   assert.equal(chapterFor(0), 0);
   assert.equal(chapterFor(MILESTONES[0] - 1), 0);
-  assert.ok(MILESTONES[0] >= 2500, 'the first change is far into a run');
+  assert.ok(MILESTONES[0] >= 2000, 'the first change is well into a run');
   assert.equal(chapterFor(MILESTONES[0]), 1);
   assert.equal(themeFor(THEMES.length).id, THEMES[0].id);
 });

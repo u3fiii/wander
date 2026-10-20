@@ -3,7 +3,7 @@
 // colours, the night blend (lights, fog, stars) and the warm low sun are all read from it, so the change is a
 // slow spectrum you barely notice rather than a cut. The sun/moon button skips that: it cross-fades straight to
 // full night or full day in a fraction of a second.
-export const CYCLE = { day: 120, dusk: 44, night: 88, dawn: 36 };
+export const CYCLE = { day: 90, dusk: 33, night: 66, dawn: 27 };
 const TOTAL = CYCLE.day + CYCLE.dusk + CYCLE.night + CYCLE.dawn;
 const DUSK_START = CYCLE.day, NIGHT_START = DUSK_START + CYCLE.dusk, DAWN_START = NIGHT_START + CYCLE.night;
 // How long the button's cross-fade takes (s).

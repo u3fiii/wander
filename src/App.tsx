@@ -1,8 +1,8 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
-import Scene, { scoreDrift } from './game/Scene';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Users, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import Scene, { MILESTONE, scoreDrift } from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
 import type { VehicleId } from './game/vehicles';
@@ -216,29 +216,43 @@ import type { ThemeEdit } from './game/themes';
 import { THEME_TUNING_SAVED } from './game/themeTuning';
 import { useGamepadMenu } from './useGamepadMenu';
 import { useInputDevice } from './inputDevice';
+import { PartyHud, PartyLobby } from './Party';
+import { PARTY, lineUp } from './game/party';
+import type { PartyPlayer, PartyRun } from './game/party';
 import { Keys } from './Keys';
 import type { Action } from './Keys';
 import type { InputDevice } from './inputDevice';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
 const TITLE = 'take a spin.';
+// The milestone moment's words for each look the world turns to.
+const MOMENT_TEXT: Record<string, { title: string; line: string }> = {
+  meadow: { title: 'GREEN AGAIN', line: 'The loop starts over — keep it going' },
+  amber: { title: 'GOLDEN ROAD', line: 'The world turns amber' },
+  blossom: { title: 'IN FULL BLOOM', line: 'Petals on the wind' },
+  frost: { title: 'FIRST FROST', line: 'Snow on the hills' },
+};
 // Traffic note wording, kept to a word or two, and which notes win when two land close together.
 const NOTE_TEXT = {
-  smash: ['Big crash!', 'Brutal hit.', 'Total wreck.', 'Ouch.'],
-  near: ['Close call!', 'By a whisker!', 'Threaded it!', 'Inches!'],
-  boost: ['Bulldozer!', 'Unstoppable!', 'Out of my way!', 'Absolute unit!'],
+  // A hard knock that costs points (a crash that costs a heart is the big one below).
+  smash: ['Ouch!', 'Hard knock', 'That hurt', 'Watch the road'],
+  // A close pass pays: the closer and faster, the more.
+  near: ['Close call!', 'Squeezed by!', 'Nice dodge!', 'Too close!'],
+  boost: ['Blown aside!', 'Shockwave!', 'Out of the way!', 'Clear the road!'],
   flick: ['Nice flick!', 'Sideswipe!', 'Pinball!'],
-  bump: ['Bump.', 'Easy now.', 'Careful.'],
+  bump: ['Bump', 'Easy now', 'Careful'],
   level: ['Level up!'],
   newBest: ['New best!'],
   stage: ['Traffic picks up'],
   // Shown big, in the middle of the screen, while a slow-motion cut-in plays.
-  bigSmash: ['WRECKED!', 'KABOOM!', 'TOTALED!', 'BRUTAL!'],
-  bigNear: ['BY A HAIR', 'TOO CLOSE', 'CLOSE CALL', 'INCHES'],
+  // A crash that costs a heart: the text says so (the heart count is added, see handleTrafficHit).
+  bigSmash: ['CRASH!', 'WRECKED!', 'OUCH!', 'HEART LOST'],
+  // Near-miss slow-motion: the big reward for a close one (bigger points than a plain close call).
+  bigNear: ['BY A HAIR!', 'THAT WAS TIGHT!', 'SO CLOSE!', 'CLOSE CALL!'],
   // Ramming cars under boost: big too, with the combo.
-  bigBoost: ['SMASH!', 'BOOM!', 'WRECKING BALL!', 'OUTTA MY WAY!', 'UNSTOPPABLE!'],
-  // The overhead near-miss cut-in (a tight head-on pass, camera looking straight down): purple, slid in like the car.
-  cineNear: ['THREADED IT', 'TIGHT SQUEEZE', 'NEEDLE EYE', 'RAZOR THIN'],
+  bigBoost: ['SMASH!', 'BOOM!', 'WRECKING BALL!', 'OUT OF MY WAY!', 'UNSTOPPABLE!'],
+  // The overhead near-miss cut-in, camera looking straight down: purple, slid in like the car, and the biggest payout.
+  cineNear: ['THREADED IT!', 'NEEDLE EYE!', 'RAZOR THIN!', 'PERFECT PASS!'],
   drift: ['Nice drift!', 'Clean slide!'],
   bigDrift: ['Big drift!', 'Sideways!'],
   hugeDrift: ['Drift king!', 'Endless slide!'],
@@ -250,8 +264,13 @@ const BADGE_NOTES: string[] = ['level', 'newBest', 'stage'];
 const FINALE_MS = 3400;
 // How big a score change is, for how strongly the score reacts to it.
 const bonusTier = (amount: number) => (amount < 0 ? 'loss' : amount < 40 ? 'small' : amount < 120 ? 'mid' : amount < 300 ? 'big' : 'huge');
-// Points for every metre driven, so the score always climbs while driving.
+// Points for every metre driven, so the score always climbs while driving (not while riding the curb).
 const DISTANCE_POINTS = 0.5;
+// Near-miss combo: each close pass within `window` s of the last raises the score multiplier by `step` (from ×1 up
+// to `max`); every point earned (distance, drifts, close calls, boost) is multiplied by it. A crash ends it, and so
+// does `window` s without a close pass. Riding the curb never builds it: the points are in the traffic.
+const COMBO = { window: 8, step: 0.5, max: 4 };
+const comboMultiplier = (count: number) => Math.min(COMBO.max, 1 + COMBO.step * Math.max(0, count - 1));
 // Hits slower than this (m/s) still score, but without a note.
 const QUIET_HIT_SPEED = 7;
 const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -440,6 +459,29 @@ export default function App() {
   // the strength, speed and weather amount are shared. Apply saves every theme.
   const themeFlat = (index: number, base: { strength: number; seconds: number; weather: number }): LookValues => ({ theme: index, strength: base.strength, seconds: base.seconds, weather: base.weather, ...readThemeEdit(index) });
   const [theme, setThemeIndex] = useState(FIRST_THEME);
+  // The look a run starts from (its milestones count on from there): the one the start screen was showing.
+  const themeBase = useRef(FIRST_THEME);
+  // How many mornings the day cycle has come round to (dayCycle.ts): new looks arrive with the sunrise, so each one is
+  // first seen in daylight.
+  const [morning, setMorning] = useState(cycle.day);
+  // The start screen lives through the same cycle as a drive: the day turns (the scene runs the clock) and every new
+  // morning the world eases into its next look, quietly (the moment is for runs only).
+  const homeMorning = useRef(cycle.day);
+  useEffect(() => {
+    if (started) { homeMorning.current = morning; return; }
+    if (morning > homeMorning.current) setThemeIndex(t => t + 1);
+    homeMorning.current = morning;
+  }, [morning, started]);
+  // The milestone moment's words and letterbox (the camera and the slow motion are the scene's, see MILESTONE).
+  const [moment, setMoment] = useState<{ id: number; theme: string; score: number } | null>(null);
+  const celebrate = (index: number, points: number) => setMoment(m => ({ id: (m?.id ?? 0) + 1, theme: THEMES[index % THEMES.length].id, score: points }));
+  useEffect(() => {
+    if (!moment) return;
+    const timer = window.setTimeout(() => setMoment(null), MILESTONE.duration * 1000);
+    return () => window.clearTimeout(timer);
+  }, [moment]);
+  // Dev only: `__nextTheme()` moves to the next look now, with its moment.
+  useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __nextTheme: () => void }).__nextTheme = () => setThemeIndex(t => { celebrate(t + 1, 0); return t + 1; }); });
   const [road, setRoad] = useState(FIRST_ROAD);
   const themeSaved = (index: number): LookValues => ({ theme: index, strength: THEME_TUNING_SAVED.strength, seconds: THEME_TUNING_SAVED.seconds, weather: THEME_TUNING_SAVED.weather, ...THEME_TUNING_SAVED.themes[THEMES[index].id] });
   const [themeValues, setThemeValues] = useState<LookValues>(() => themeFlat(1, themeSettings));
@@ -518,6 +560,7 @@ export default function App() {
       const style = mainRef.current?.style;
       for (const key in next) if (style && written[key] !== next[key]) { style.setProperty(key, next[key]); written[key] = next[key]; }
       setNight(n > 0.5);
+      setMorning(cycle.day);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -527,6 +570,14 @@ export default function App() {
   const [resetKey, setResetKey] = useState(0);
   const [help, setHelp] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  // Party mode (Party.tsx): the lobby, then a shared-screen race for 2–4 players.
+  const [party, setParty] = useState<'off' | 'lobby' | 'on'>('off');
+  const partyRun = useRef<PartyRun | null>(null);
+  const [partyCount, setPartyCount] = useState(0);
+  const [partyMatch, setPartyMatch] = useState(0);
+  const partyOn = party === 'on';
+  // Dev only: `__party.current` is the running party (players and cars) and `__PARTY` its rules, from the console.
+  useEffect(() => { if (import.meta.env.DEV) Object.assign(window, { __party: partyRun, __PARTY: PARTY }); }, []);
   const [vehicleId, setVehicleId] = useState<VehicleId>(() => {
     const id = loadVehicle();
     setActiveVehicle(id);
@@ -565,6 +616,9 @@ export default function App() {
   const [streakLevel, setStreakLevel] = useState(0);
   const streakMessages = ['Smooth driving', 'Nice line', 'Clean drive', 'Great flow', 'On a roll', 'Cruising', 'Road master', 'Zen mode'];
   const [streakShown, setStreakShown] = useState(false);
+  // Riding the curb for a moment: a quiet note that nothing scores there.
+  const curbTime = useRef(0);
+  const [curbHint, setCurbHint] = useState(false);
   // Traffic notes match what the camera shows: a red smash (the slow-motion crash) costs points, a grey near
   // miss pays, a clip from the side pays a little, a soft bump costs a little, and under boost every hit pays.
   // They stay short and quiet: slow nudges score without a note, and a lesser note never covers a bigger one
@@ -606,9 +660,20 @@ export default function App() {
   const shownNote = useRef<{ rank: number; until: number }>({ rank: 0, until: 0 });
   const lastText = useRef('');
   const nextMobileCelebration = useRef(0);
+  const [combo, setCombo] = useState({ count: 0, id: 0 });
+  const comboRef = useRef({ count: 0, until: 0 });
+  const multiplier = () => (performance.now() < comboRef.current.until ? comboMultiplier(comboRef.current.count) : 1);
+  const endCombo = useCallback(() => { comboRef.current = { count: 0, until: 0 }; setCombo(c => (c.count ? { count: 0, id: c.id + 1 } : c)); }, []);
+  // The combo runs out by itself after its window without a close pass.
+  useEffect(() => {
+    if (!combo.count) return;
+    const timer = window.setTimeout(endCombo, Math.max(0, comboRef.current.until - performance.now()));
+    return () => window.clearTimeout(timer);
+  }, [combo, endCombo]);
   const showNote = useCallback((kind: NoteKind, rawPoints: number, quiet: boolean, badge?: string, label?: string) => {
-    // Early levels are kinder: good moves pay a little more and crashes cost less (see difficulty.ts).
-    const points = Math.round(rawPoints * (rawPoints > 0 ? difficulty.bonus : difficulty.penalty));
+    // Early levels are kinder: good moves pay a little more and crashes cost less (see difficulty.ts); and every point
+    // earned is multiplied by the near-miss combo.
+    const points = Math.round(rawPoints * (rawPoints > 0 ? difficulty.bonus * multiplier() : difficulty.penalty));
     if (!BADGE_NOTES.includes(kind)) { setScore(total => total + points); if (points !== 0) setBonus(b => ({ id: (b?.id ?? 0) + 1, amount: points })); }
     if (points > 0 && !BADGE_NOTES.includes(kind)) setXp(total => total + points);
     const rank = NOTE_RANK[kind];
@@ -643,26 +708,30 @@ export default function App() {
     saveBest(score);
     if (!beatBest.current && bestAtRunStart.current > 0) { beatBest.current = true; showNote('newBest', 0, false, formatNumber(score)); }
   }, [score]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Themes (themes.ts): each score milestone eases the planet into its next look over a few seconds, while the
-  // run goes on. Each new run after one has ended gets a new road layout (roadLayouts.ts; the world is rebuilt
+  // Themes (themes.ts): each score milestone eases the planet into its next look over a few seconds at the next
+  // sunrise (see `morning`), while the run goes on. Each new run after one has ended gets a new road layout (roadLayouts.ts; the world is rebuilt
   // for it then, between runs). `?theme=N` / `?road=N` start with another look or road, for checking them.
   // Dev only: lets the console jump the score to a milestone (`__setScore(3000)`).
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __setScore: typeof setScore }).__setScore = setScore; }, []);
+  // A milestone reached waits for the next sunrise, then the new look comes in with its moment.
+  const themeWaitsFrom = useRef<number | null>(null);
   useEffect(() => {
-    const target = FIRST_THEME + chapterFor(score);
-    if (started && target > theme) setThemeIndex(target);
-  }, [score, started, theme]);
+    const target = themeBase.current + chapterFor(score);
+    if (!started || partyOn || target <= theme) { themeWaitsFrom.current = null; return; }
+    if (themeWaitsFrom.current === null) themeWaitsFrom.current = morning;
+    else if (morning > themeWaitsFrom.current) { themeWaitsFrom.current = null; setThemeIndex(target); celebrate(target, score); }
+  }, [score, started, theme, partyOn, morning]);
   // Distance: half a point a metre, added as the car drives (not while held, and not across a reset).
   const lastDistance = useRef(0);
   const distanceCarry = useRef(0);
   useEffect(() => {
     const travelled = data.distance - lastDistance.current;
     lastDistance.current = data.distance;
-    if (!started || halted || travelled <= 0 || travelled > 60) return;
-    distanceCarry.current += travelled * DISTANCE_POINTS;
+    if (!started || halted || partyOn || travelled <= 0 || travelled > 60 || (data.curb ?? 0) > 0.5) return;
+    distanceCarry.current += travelled * DISTANCE_POINTS * multiplier();
     const whole = Math.floor(distanceCarry.current);
     if (whole > 0) { distanceCarry.current -= whole; setScore(total => total + whole); }
-  }, [data, started, halted]);
+  }, [data, started, halted, partyOn]);
   // Hearts: a crash that gets the red slow motion costs one (with a short grace so one tussle takes only one);
   // a hard knock without the slow motion costs points, not a heart. The last heart ends the run
   // once the crash's slow motion has played.
@@ -679,7 +748,7 @@ export default function App() {
   }, [heartBreak]);
   const loseHeart = useCallback(() => {
     const now = performance.now();
-    if (heartsRef.current <= 0 || now - lastHeartLoss.current < HEART_GRACE_MS) return;
+    if (heartsRef.current <= 0 || now - lastHeartLoss.current < HEART_GRACE_MS) return -1;
     lastHeartLoss.current = now;
     const left = heartsRef.current - 1;
     heartsRef.current = left;
@@ -691,6 +760,7 @@ export default function App() {
       setFinale(true);
       window.setTimeout(() => { runStats.current.distance = dataRef.current.distance; setRunOver(true); }, FINALE_MS);
     }
+    return left;
   }, []);
   // The run's clock: it counts only while driving, and every few seconds of it moves the run up a stage, which
   // makes the road harder (difficulty.ts: more and faster traffic, swaying cars...), with a note to say so.
@@ -712,15 +782,26 @@ export default function App() {
   const [boostFlash, setBoostFlash] = useState(0);
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
     const magnitude = Math.round(hit.speed * 2) + 5;
-    if (hit.boosted) {
+    if (hit.wake) {
+      // Thrown aside by the boost's wake as it passed close: a smaller note, one per car, no combo flash.
+      showNote('boost', Math.round(magnitude * 0.9), false);
+      runStats.current.smashes++;
+    }
+    else if (hit.boosted) {
       showNote('bigBoost', Math.round(magnitude * 1.5), false);
       runStats.current.smashes++;
       setBoostFlash(n => n + 1);
     }
-    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) { if (hit.cinematic) loseHeart(); showNote(hit.cinematic ? 'bigSmash' : 'smash', -(Math.round(hit.closing * 2) + 5), false); }
+    else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) {
+      // A head-on crash that gets the slow-motion costs a heart, and the note says how many are left.
+      const left = hit.cinematic ? loseHeart() : -1;
+      endCombo();
+      const label = left < 0 ? undefined : left === 0 ? 'NO HEARTS LEFT' : left === 1 ? 'LAST HEART!' : `HEART LOST · ${left} LEFT`;
+      showNote(hit.cinematic ? 'bigSmash' : 'smash', -(Math.round(hit.closing * 2) + 5), false, undefined, label);
+    }
     else if (hit.kind === 'side') { showNote('flick', magnitude, hit.speed < QUIET_HIT_SPEED); if (hit.speed >= QUIET_HIT_SPEED) { earnBoost(car.current, BOOST_EARN.flick); } }
-    else { showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED); }
-  }, [showNote, loseHeart]);
+    else { showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED); if (hit.speed >= QUIET_HIT_SPEED) endCombo(); }
+  }, [showNote, loseHeart, endCombo]);
   // A drift held long enough gets the overhead slow-motion cut-in, with its word (the points come when it ends).
   // A drift pays for how long and how fast it slid; longer ones get bigger words.
   const handleDrift = useCallback((drift: DriftScore) => {
@@ -739,7 +820,16 @@ export default function App() {
   // Near misses pay more the faster the pass and the thinner the gap.
   const handleNearMiss = useCallback((miss: NearMiss) => {
     runStats.current.nearMisses++;
-    showNote(miss.overhead ? 'cineNear' : miss.cinematic ? 'bigNear' : 'near', Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5, false);
+    // A close pass pays for its speed and how thin the gap was; one that earns a slow-motion pays double, and the
+    // overhead one triple, so the best passes are worth going for.
+    const base = Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5;
+    // Each close pass in a row raises the combo (and this one is paid at the new multiplier).
+    const count = (performance.now() < comboRef.current.until ? comboRef.current.count : 0) + 1;
+    comboRef.current = { count, until: performance.now() + COMBO.window * 1000 };
+    setCombo(c => ({ count, id: c.id + 1 }));
+    runStats.current.bestWeave = Math.max(runStats.current.bestWeave, count);
+    const mult = comboMultiplier(count);
+    showNote(miss.overhead ? 'cineNear' : miss.cinematic ? 'bigNear' : 'near', base * (miss.overhead ? 3 : miss.cinematic ? 2 : 1), false, mult > 1 ? `×${mult}` : undefined);
     earnBoost(car.current, BOOST_EARN.nearMiss);
   }, [showNote]);
   useEffect(() => {
@@ -759,7 +849,9 @@ export default function App() {
     state.last = now;
     if (!started || halted) return;
     const topSpeed = DRIVING_CONFIG.maxSpeed * 3.6;
-    if (data.offroad || data.speed < topSpeed * 0.3) state.time = 0;
+    curbTime.current = (data.curb ?? 0) > 0.5 && !data.offroad ? curbTime.current + dt : 0;
+    setCurbHint(curbTime.current > 1.2);
+    if (data.offroad || (data.curb ?? 0) > 0.5 || data.speed < topSpeed * 0.3) state.time = 0;
     else if (data.speed > topSpeed * JUICE_CONFIG.streakSpeedRatio) state.time += dt;
     setStreakLevel(state.time > 0 ? Math.floor(state.time / JUICE_CONFIG.streakStep) + 1 : 0);
   }, [data, started, paused]);
@@ -878,11 +970,11 @@ export default function App() {
     boostElapsed.current = 0; setBoostUnlocked(false);
     controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
     // A new run: hearts, stage, stats, stars, clean driving and the best-score note start over.
-    beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
+    beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; comboRef.current = { count: 0, until: 0 }; setCombo({ count: 0, id: 0 }); shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
     setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats();
     stageRef.current = 1; setDifficultyLevel(1);
     nextMobileCelebration.current = 0;
-    setThemeIndex(FIRST_THEME);
+    setThemeIndex(FIRST_THEME); themeBase.current = FIRST_THEME;
     if (touchQuery?.matches) resetToDay();
   }, []);
   // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.
@@ -893,12 +985,13 @@ export default function App() {
     headerMotionTimers.current.forEach(timer => window.clearTimeout(timer));
     headerMotionTimers.current = [];
   };
-  const start = () => {
+  const start = (asParty = false) => {
     if (introExit) return;
+    themeBase.current = theme;
     clearCoachTimers();
     boostElapsed.current = 0; setBoostUnlocked(false);
     setCoachTransitioning(false);
-    setCoachThisRun(firstDrive);
+    setCoachThisRun(firstDrive && !asParty);
     clearHeaderMotionTimers();
     setHeaderMotion('exiting');
     setIntroExit(true);
@@ -927,6 +1020,24 @@ export default function App() {
     }, 140));
   };
   const onReady = useCallback(() => setReady(true), []);
+  // Party: everyone lines up where the car is parked, and the camera dives in as for a solo run.
+  const startParty = (players: PartyPlayer[]) => {
+    lineUp(players, car.current.x);
+    partyRun.current = { players, frozen: true, bumps: 0 };
+    setPartyCount(players.length); setPartyMatch(m => m + 1); setParty('on');
+    start(true);
+  };
+  const rematch = () => {
+    const run = partyRun.current;
+    if (!run) return;
+    lineUp(run.players, run.players[0].car.x);
+    run.frozen = true;
+    setPartyMatch(m => m + 1);
+  };
+  const leaveParty = () => {
+    reset(); returnToHero();
+    window.setTimeout(() => { partyRun.current = null; setParty('off'); setPartyCount(0); }, 160);
+  };
 
   useEffect(() => {
     const mapping: Record<string, ControlKey> = { ShiftLeft: 'boost', ShiftRight: 'boost', AltLeft: 'gentle', AltRight: 'gentle', KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake' };
@@ -939,12 +1050,13 @@ export default function App() {
       if (isTextEntry) return;
       const isButton = !!target && !!target.closest('button');
       if (isButton && (e.code === 'Enter' || (e.code === 'Space' && (!started || paused || help)))) return;
-      if (!started && ready && !e.repeat && (e.code === 'KeyW' || e.code === 'ArrowUp')) {
+      if (!started && ready && party === 'off' && !e.repeat && (e.code === 'KeyW' || e.code === 'ArrowUp')) {
         e.preventDefault();
         startRef.current();
       }
       if (mapping[e.code] && !paused && !help && !boardOpen && !mapView && !runOver && !finale) { e.preventDefault(); held.add(e.code); controls.current[mapping[e.code]] = true; }
       if (e.repeat) return;
+      if (partyOn && ['KeyM', 'KeyR', 'KeyF', 'KeyC'].includes(e.code)) return;
       if (e.code === 'KeyM' && started && !paused && !help && !runOver && !finale) { clear(); morph(() => setMapView(v => !v)); }
       if (e.code === 'KeyR' && started && !help && !mapView && !runOver && !finale) reset();
       if (e.code === 'KeyF' && started && !paused && !help && !mapView && !runOver && !finale) recover();
@@ -959,7 +1071,7 @@ export default function App() {
     const visibility = () => { if (document.hidden) blur(); };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur); document.addEventListener('visibilitychange', visibility);
     return () => { clear(); window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); document.removeEventListener('visibilitychange', visibility); };
-  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen, garageOpen, ready]);
+  }, [started, paused, help, boardOpen, mapView, runOver, finale, reset, recover, mobileMenuOpen, garageOpen, ready, party, partyOn]);
 
   const touch = (key: ControlKey) => ({
     onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); controls.current[key] = true; },
@@ -992,7 +1104,16 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive && !partyOn} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked && !partyOn} party={partyOn ? partyRun : undefined} partyCount={partyOn ? partyCount : 0} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    {/* The milestone moment: letterbox bars, a wash of the new look's colour, and its words. */}
+    {moment && started && <div key={moment.id} className={`moment moment-${moment.theme}`} role="status" aria-live="polite" style={{ '--moment-time': `${MILESTONE.duration}s` } as CSSProperties}>
+      <i className="moment-bar top" /><i className="moment-bar bottom" /><i className="moment-wash" />
+      <div className="moment-title">
+        {moment.score > 0 && <small>{formatNumber(moment.score)} points</small>}
+        <b aria-label={MOMENT_TEXT[moment.theme]?.title}>{[...(MOMENT_TEXT[moment.theme]?.title ?? '')].map((c, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</b>
+        <em>{MOMENT_TEXT[moment.theme]?.line}</em>
+      </div>
+    </div>}
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -1001,10 +1122,10 @@ export default function App() {
         // A round menu button, then the driver's level.
         ? <div className="topbar-left">
           <button className="home-button" aria-label="Open menu" title="Menu" onClick={openPauseMenu}><Menu /></button>
-          <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
+          {!partyOn && <div className="level-badge" aria-label={`Level ${level.level}, ${level.title}, ${level.into} of ${level.need} XP`}>
           <span className="level-number" key={level.level}>{level.level}</span>
           <div><strong>{level.title}</strong><i><span style={{ transform: `scaleX(${level.into / level.need})` }} /></i><small>{level.into} / {level.need} XP</small></div>
-          </div>
+          </div>}
         </div>
         : <>
           <a href="#" className="brand brand-desktop" aria-label="Wander, home" onClick={e => e.preventDefault()}>
@@ -1024,7 +1145,7 @@ export default function App() {
         </>}
       {/* Score and hearts side by side in the middle of the header. The score counts up smoothly (distance adds
           to it all the time); a bonus makes it react in proportion to its size, with the amount floating off. */}
-      {started && <div className="hud-center">
+      {started && !partyOn && <div className="hud-center">
         <div className="score-pill" aria-label={`Score ${score}, level ${level.level}`}>
           {/* Phones have no room for the level badge: its number joins the score instead (style.css). */}
           <span className="level-number score-level" aria-hidden="true">{level.level}</span>
@@ -1034,10 +1155,15 @@ export default function App() {
         <div key={`hearts-${heartBreak?.id ?? 0}`} className={`hearts-bar${hearts === 1 ? ' last' : ''}${heartBreak ? ' hit' : ''}`} aria-label={`${hearts} of ${HEARTS} hearts left`}>
           {Array.from({ length: HEARTS }, (_, i) => <HeartIcon key={i} className={i < hearts ? 'full' : i === hearts && heartBreak ? 'breaking' : 'lost'} />)}
         </div>
+        {/* The near-miss combo: its multiplier, and a bar running down until it ends. */}
+        {combo.count > 1 && <div key={`combo-${combo.id}`} className="combo-pill" aria-label={`Score ×${comboMultiplier(combo.count)}`}>
+          <b>×{comboMultiplier(combo.count)}</b><i style={{ animationDuration: `${COMBO.window}s` } as CSSProperties} />
+        </div>}
       </div>}
-      {stuckHint
+      {partyOn ? null : stuckHint
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <Keys action="recover" device={device} /> to hop back on the road</span></div>
-        : roadWarning && <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>}
+        : roadWarning ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>
+        : curbHint && <div className="curb-hint" role="status"><span>On the curb — slowing down, no points</span></div>}
       <nav className="toolbar" aria-label="Game settings">
         {/* Phones, on the start screen: pick day or night, and the run starts there. */}
         {!started && <button className="mode-toggle" aria-label={night ? 'Start in daylight' : 'Start at night'} title={night ? 'Day' : 'Night'} onClick={() => goTo(night ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
@@ -1053,7 +1179,7 @@ export default function App() {
       </nav>
     </header>
 
-    {(!started || introExit) && <section className={`intro-card${introExit ? ' exiting' : ''}`}>
+    {(!started || introExit) && party !== 'lobby' && <section className={`intro-card${introExit ? ' exiting' : ''}`}>
       {/* The driver's level, like the badge in the game's header; a welcome back for returning players. */}
       <div className="intro-level rise" style={{ '--d': '800ms' } as CSSProperties}>
         <span className="level-number">{level.level}</span><strong>{level.title}</strong>{best > 0 ? <span className="intro-welcome">Best {formatNumber(best)}</span> : xp > 0 && <span className="intro-welcome">Welcome back</span>}
@@ -1063,7 +1189,8 @@ export default function App() {
         <span>A small world, a long road.</span>
         <span>Drive in your browser. Nothing to install.</span>
       </p>
-      <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={start}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button></div>
+      <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={() => start()}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button>
+        {!RAILS && <button className="party-button" disabled={!ready} onClick={() => setParty('lobby')}><Users size={17} /><span>Party · 2–4 players</span></button>}</div>
       <div className="intro-howto rise" style={{ '--d': '2500ms' } as CSSProperties} aria-label="How to play">
         <span><span className="howto-keys"><Keys action="steer" device={device} />{device !== 'touch' && <Keys action="gas" device={device} />}</span><small>{device === 'touch' ? 'to steer' : 'Steer · speed up'}</small></span>
         <span><Sparkles aria-hidden="true" /><small>Slip past traffic</small></span>
@@ -1076,7 +1203,9 @@ export default function App() {
       <button className="map-back" autoFocus onClick={() => morph(() => setMapView(false))}>Back to the road <ArrowRight size={18} /></button>
       <span className="map-key"><kbd>M</kbd></span>
     </div>}
-    {started && !mapView && <>
+    {party === 'lobby' && !started && <PartyLobby onStart={startParty} onClose={() => setParty('off')} />}
+    {started && partyOn && !mapView && <PartyHud key={partyMatch} run={partyRun} paused={paused || help} onRematch={rematch} onLeave={leaveParty} />}
+    {started && !mapView && !partyOn && <>
       {boostFlash > 0 && <div key={boostFlash} className="boost-flash" aria-hidden="true" />}
       {heartBreak && <div key={`break-${heartBreak.id}`} className="heart-break" role="status" aria-label={heartBreak.left === 0 ? 'No hearts left' : `${heartBreak.left} hearts left`}>
         <div className="heart-break-pulse" aria-hidden="true" />
@@ -1132,8 +1261,8 @@ export default function App() {
       </div>
       <button autoFocus className="primary" onClick={() => setPaused(false)}>Keep going <Play size={18} /></button>
       <div className="modal-row">
-        <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>
-        <button className="secondary" onClick={returnToHero}><ChevronLeft size={15} /> Back to the globe</button>
+        {partyOn ? <button className="secondary" onClick={() => { rematch(); setPaused(false); }}><RotateCcw size={15} /> New match</button> : <button className="secondary" onClick={reset}><RotateCcw size={15} /> Restart</button>}
+        <button className="secondary" onClick={partyOn ? leaveParty : returnToHero}><ChevronLeft size={15} /> {partyOn ? 'Leave the party' : 'Back to the globe'}</button>
       </div>
       {/* Everything else lives here while driving, so the screen stays clear. */}
       <div className="pause-actions" role="group" aria-label="More">

@@ -317,3 +317,28 @@ test('let go while cruising, the car keeps the lane it was nearer to and follows
   const { car } = assisted({ x: 0.05, z: -3, speed: 6, cruise: 1 }, () => 0, 12);
   assert.ok(Math.abs(car.z + CAR_CONFIG.cruiseLaneOffset) < 0.6, `in its lane (${car.z.toFixed(2)})`);
 });
+
+test('riding the curb rumbles the car down to a slower pace; back in the lane it is full speed again', () => {
+  // The offset (along the globe's north) that puts the car's centre `metres` from the road's centre line here.
+  const offsetFor = (x: number, metres: number) => {
+    let z = 0;
+    while (distanceToRoadNetwork(loopLatitude(x) + z / GLOBE_RADIUS, x) + WORLD_SETTINGS.roads.mainWidth / 2 < metres) z += 0.02;
+    return z;
+  };
+  const run = (metres: number) => {
+    const car = { ...initialLoopCar(), x: 0.3, z: offsetFor(0.3, metres), speed: CAR_CONFIG.maxSpeed };
+    let lowest = Infinity, curb = 0;
+    for (let i = 0; i < 120; i++) {
+      stepLoopCar(car, { ...emptyControls(), forward: true }, 1 / 60, true);
+      curb = Math.max(curb, car.curb);
+      lowest = Math.min(lowest, car.speed);
+      car.z = offsetFor(car.x, metres); car.heading = 0;
+    }
+    return { curb, lowest };
+  };
+  const onCurb = run(2.75), inLane = run(1.2);
+  assert.ok(onCurb.curb > 0.5, `on the curb (${onCurb.curb.toFixed(2)})`);
+  assert.ok(onCurb.lowest < CAR_CONFIG.maxSpeed * 0.8, `slowed on the curb (${onCurb.lowest.toFixed(1)} m/s)`);
+  assert.equal(inLane.curb, 0);
+  assert.ok(inLane.lowest > onCurb.lowest + 2, `faster in the lane (${inLane.lowest.toFixed(1)} vs ${onCurb.lowest.toFixed(1)} m/s)`);
+});

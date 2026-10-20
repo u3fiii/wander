@@ -21,6 +21,8 @@ export const CAR_CONFIG = {
   boostSpeedFactor: 1.1,
   boostAccelFactor: 1.8,
   boostDuration: 5,
+  // Boost throws aside every car within this gap (m) of the car's sides as it passes, touched or not.
+  boostWakeReach: 2.2,
   boostCooldown: 5,
   boostOverspeedDecel: 8,
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.
@@ -57,6 +59,17 @@ export const CAR_CONFIG = {
   // (`roadAssist`); the turn-back is `roadEdgeAssist` per unit of assist. At `roadAssistFull` and above (the default) the
   // edge is a wall, as on a phone: the car cannot cross it, wherever it is pushed from. Below that the car can still push out past the edge, by less the
   // higher the assist, and the assist is gone with none.
+  // The curb: once the car's outer wheels are on it (its centre `curbStart` m from the centre line, fully at
+  // `curbFull`), it rumbles, and its top speed sinks to `curbSpeedFactor` of the usual, scrubbed off at `curbScrub`
+  // m/s². Nothing scores while riding it (see App), so the edge is safe but not a free lane.
+  curbStart: 2.35,
+  curbFull: 2.85,
+  curbSpeedFactor: 0.7,
+  // Riding it on and on drags harder: after `curbLongAfter` s on the curb the top speed is down to `curbSpeedFactorLong`
+  // (it eases back once the car is off the curb a while).
+  curbSpeedFactorLong: 0.45,
+  curbLongAfter: 2.5,
+  curbScrub: 6,
   roadAssist: 3,
   roadEdgeHalfWidth: 3.04, // asphalt (2.88) plus the curb, a hair inside the bridge railing posts (3.08) so the wall never snags on them
   roadEdgeZone: 1.8,

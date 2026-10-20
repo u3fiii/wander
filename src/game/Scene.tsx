@@ -6,7 +6,7 @@ import { JUICE_CONFIG, LOOP_DRIVE } from './config';
 import { DRIVING_CONFIG as CAR_CONFIG } from './vehicleHandling';
 import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
-import { playBoost, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
+import { playBoost, playHonk, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
 import { createBodySpring, updateBodySpring, updateCamera } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
@@ -32,6 +32,9 @@ import type { Weather as WeatherKind } from './themes';
 import { roadLayoutFor } from './roadLayouts';
 import { currentPad } from './gamepad';
 import { DRIFT_CAM, DRIFT_CINE, DRIFT_SCORE } from './driftTuning';
+import { PARTY, bump, catchUp, pack, partyControls, slotDrive, slotHorn, stepFx, track } from './party';
+import type { PartyRun } from './party';
+import PartyCars, { PartyBody } from './PartyCars';
 import { pickNearMissCut } from './nearMissCut';
 import Weather from './Weather';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
@@ -60,7 +63,7 @@ const ATMOSPHERE = {
 };
 
 
-export type Telemetry = { speed: number; distance: number; x: number; z: number; heading: number; offroad?: boolean; throttle?: number; boost?: number; boosting?: number };
+export type Telemetry = { speed: number; distance: number; x: number; z: number; heading: number; offroad?: boolean; curb?: number; throttle?: number; boost?: number; boosting?: number };
 
 // Standard gamepad mapping (see gamepad.ts): right trigger = throttle, left trigger = brake/reverse, left stick X =
 // steering, A handbrake, X / RB boost, LB gentle throttle, Y back to the road.
@@ -84,6 +87,9 @@ export type SceneProps = {
   // layout the run drives (roadLayouts.ts; a new one rebuilds the world, so it only changes between runs).
   theme?: number; road?: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
+  // Party mode (party.ts): player 1 drives the scene's own car, the others are drawn by PartyCars, and the camera
+  // follows the whole pack, pulling back as it spreads.
+  party?: React.RefObject<PartyRun | null>; partyCount?: number;
   onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void;
 };
 
@@ -91,10 +97,21 @@ const localUp = new THREE.Vector3(0, 1, 0);
 const localGlobeCenter = new THREE.Vector3(0, -GLOBE_RADIUS, 0);
 const scenicSpawnAngles = [0.32, 0.78, 1.92, 2.55, 3.82, 4.46, 5.7] as const;
 const TRAFFIC_LANE_OFFSET = 1.22;
+// Traffic doesn't leave the curb free: now and then a car drives on the outer side of its lane (`offset` m further
+// out, which leaves no room to squeeze by on the curb), about `share` of the time on its own slow rhythm; and when the
+// player has been riding the curb for `playerCurbTime` s, cars on that side within `reach` m along the road drift out
+// to it too. They move over at `rate` (gently, like a real car pulling over), never in a jump.
+const CURB_HUG = { offset: 0.95, share: 0.3, rate: 0.7, reach: 45, playerCurbTime: 0.8 };
 // A swaying car drifts this far (m) either side of its lane line, a full sway taking 2π / rate seconds.
 const SWERVE = { width: 0.9, rate: 0.75 };
 // Just inside the road edge (half width 2.88): counts as on-road but clear of both traffic lanes.
 const PARKING_OFFSET = -3.2;
+
+// Party mode's widest shot: straight above the middle of the pack, this high (m) over the ground, so the globe
+// fills the screen, reached at `fullAt` of the largest gap.
+const PARTY_CAMERA = { overheadHeight: 51, fullAt: 0.8 };
+// The controls of a car held still in party mode (both pedals: brakes, never creeps either way).
+const PARTY_HOLD: Controls = { forward: false, back: false, left: false, right: false, brake: false, throttle: 1, reverse: 1, steer: 0 };
 
 const circularAngleDistance = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
 
@@ -230,7 +247,7 @@ function CarModel({ car, vehicleId, active, landingCompression, landingActive, b
   useFrame((_, delta) => {
     const state = car.current;
     const dt = Math.min(delta, LOOP_DRIVE.maxFrameDelta);
-    updateBodySpring(spring, state, dt, active && !landingActive.current, !surfaceAt(state).onRoad);
+    updateBodySpring(spring, state, dt, active && !landingActive.current, !surfaceAt(state).onRoad || (state.curb ?? 0) > 0.4);
     landing.current = THREE.MathUtils.damp(landing.current, landingCompression.current, 13, dt);
     body.current.rotation.x = spring.pitch + landing.current * 0.09;
     body.current.rotation.z = spring.roll;
@@ -339,6 +356,12 @@ export const scoreDrift = (drift: DriftScore) => Math.round(drift.time * drift.s
 // The shot's turn and climb ease out exponentially: quick at first, then slower and slower, never quite stopping, so
 // the last frame (behind the run-over card) is still creeping round by a hair. `spinEase`/`climbEase` are their time
 // constants (s): most of `turn` is done in about three of them.
+// The milestone moment, when the world takes a new look (themes.ts): no pause, the car drives itself (and passes
+// through traffic) while time slows to `slowScale`, and the camera, staying where it is, rises `lift` (a share of its
+// height) as the colours change, then settles back with a burst of fast motion (`fastScale`, from `fastFrom` to
+// `fastUntil` s) and hands the wheel back at `returnEnd`. Quick: the whole thing is over in under a second and a half.
+// The words and the letterbox are the HUD's (App). All on real time.
+export const MILESTONE = { duration: 1.4, rise: 0.18, holdUntil: 0.77, returnEnd: 1.08, slowScale: 0.35, fastScale: 1.7, fastFrom: 0.92, fastUntil: 1.2, lift: 0.4 };
 const FINALE = { duration: 3.4, rise: 0.7, slowScale: 0.12, startHeight: 8, height: 34, turn: Math.PI * 0.55, spinEase: 1.1, climbEase: 1.3 };
 const driftCutEnvelope = (time: number) => {
   if (time < 0 || time > DRIFT_CINE.duration) return 0;
@@ -387,6 +410,8 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   const presence = useRef(enabled && trafficActive(progressIndex) ? 1 : 0);
   // Swaying in the lane (higher levels): eased in and out, with this car's own phase.
   const swerve = useRef({ amount: 0, phase: progressIndex * 1.7, time: 0 });
+  // How far out towards the curb this car is driving (see CURB_HUG).
+  const curbHug = useRef(0);
   const body = useRef<THREE.Group>(null!);
   const heading = useMemo(() => new THREE.Vector3(), []);
   const playerPoint = useMemo(() => new THREE.Vector3(), []);
@@ -420,7 +445,16 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     sway.amount = THREE.MathUtils.damp(sway.amount, trafficSwerves(progressIndex) ? 1 : 0, 0.8, Math.min(delta, 0.05));
     if (!paused) sway.time += dt;
     const swayOffset = sway.amount * SWERVE.width * Math.sin(sway.time * SWERVE.rate + sway.phase);
-    group.current.position.set(...frame.point).addScaledVector(right, TRAFFIC_LANE_OFFSET + m.push + swayOffset);
+    // Out to the curb: on its own rhythm now and then, or because the player is riding this curb nearby.
+    const rider = player.current;
+    playerPoint.set(...spherePoint(loopLatitude(rider.x) + rider.z / GLOBE_RADIUS, rider.x, 0));
+    toPlayer.set(...frame.point).sub(playerPoint).negate();
+    const riderAlong = Math.abs(toPlayer.dot(tangent)), riderAside = toPlayer.dot(right);
+    const ownRhythm = Math.sin(sway.time * 0.13 + sway.phase * 2.3) > 1 - 2 * CURB_HUG.share;
+    const chasing = reactive && rider.curbTime > CURB_HUG.playerCurbTime && riderAside > TRAFFIC_LANE_OFFSET + 0.6 && riderAlong < CURB_HUG.reach;
+    const hugTarget = enabled && (ownRhythm || chasing) ? CURB_HUG.offset : 0;
+    if (!paused) curbHug.current = THREE.MathUtils.damp(curbHug.current, hugTarget, CURB_HUG.rate, dt);
+    group.current.position.set(...frame.point).addScaledVector(right, TRAFFIC_LANE_OFFSET + curbHug.current + m.push + swayOffset);
     const surfaceRadius = Math.hypot(frame.point[0], frame.point[1] + GLOBE_RADIUS, frame.point[2]);
     group.current.position.sub(localGlobeCenter).normalize().multiplyScalar(surfaceRadius).add(localGlobeCenter);
     back.copy(tangent).negate();
@@ -769,9 +803,19 @@ function DrivingScene(props: SceneProps) {
   const lastTheme = useRef(-1);
   useEffect(() => {
     const next = props.theme ?? 0;
+    const moment = lastTheme.current >= 0 && next > lastTheme.current && props.started;
     setTheme(next, lastTheme.current < 0 || next < lastTheme.current);
     lastTheme.current = next;
-  }, [props.theme]);
+    // A new look mid-run is a milestone: play the moment (the HUD shows its words at the same time).
+    if (moment) startMilestone();
+  }, [props.theme]); // eslint-disable-line react-hooks/exhaustive-deps
+  const startMilestone = () => {
+    milestoneTime.current = 0;
+    milestoneSpeed.current = Math.max(Math.abs(props.car.current.speed), CAR_CONFIG.cruiseSpeed);
+    playSlowMoWhoosh(0.8);
+  };
+  // Dev only: `__milestone()` plays the moment at once.
+  if (import.meta.env.DEV) (window as unknown as { __milestone?: () => void }).__milestone = startMilestone;
   const lightColors = useMemo(() => {
     const c = (hex: string) => new THREE.Color(hex);
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
@@ -803,6 +847,20 @@ function DrivingScene(props: SceneProps) {
   const bodyRoll = useRef(0);
   const fovKick = useRef(0);
   const trauma = useRef(0);
+  // Party mode: the eased middle of the pack the camera follows, and a short rest between bump sounds.
+  const partyFocus = useRef({ x: 0, z: 0, spread: 0, fresh: true });
+  const partyBumpRest = useRef(0);
+  const partyFreeze = useRef(0);
+  const partySpot = useMemo(() => new THREE.Vector3(), []);
+  const popPoint = useMemo(() => new THREE.Vector3(), []);
+  // A word over a real knock (Party.tsx draws it): where on screen, and the colour of the car that did it.
+  const partyPop = (x: number, z: number, colour: string) => {
+    const frame = loopFrame(x, z);
+    popPoint.set(...spherePoint(frame.latitude, x, roadSurfaceElevation(frame.latitude, x) + 1.2));
+    globeGroup.current.localToWorld(popPoint).project(camera);
+    const canvas = gl.domElement;
+    window.dispatchEvent(new CustomEvent('party-pop', { detail: { x: (popPoint.x + 1) / 2 * canvas.clientWidth, y: (1 - popPoint.y) / 2 * canvas.clientHeight, colour } }));
+  };
   const crashTime = useRef(-1);
   const crashSide = useRef(1);
   // Whether the current cut-in is a cool (hard side) hit, which gets the faded, bleached grade instead of the red.
@@ -822,6 +880,11 @@ function DrivingScene(props: SceneProps) {
   const driftApplied = useMemo(() => new THREE.Vector3(), []);
   const driftTop = useMemo(() => new THREE.Vector3(), []);
   const finaleTime = useRef(-1);
+  // The milestone moment (see MILESTONE): its clock (-1 when not playing), the camera blend, and the speed it holds.
+  const milestoneTime = useRef(-1);
+  const milestoneLevel = useRef(0);
+  const milestoneSpeed = useRef(0);
+  const milestoneApplied = useMemo(() => new THREE.Vector3(), []);
   // The last-heart warning: eases in and out with `danger`, and its heartbeat is a double beat ("lub-dub") every
   // 0.9 s on real time, so it is the same on every device.
   const dangerLevel = useRef(0);
@@ -1034,6 +1097,21 @@ function DrivingScene(props: SceneProps) {
     cinematicState.finale = finaleLevel.current;
     // No slow motion while boosting, even if a cut-in started just before: the boost never pauses.
     gameTime.scale = props.car.current.boosting > 0 ? 1 : Math.min(THREE.MathUtils.lerp(1, CRASH_CAM.slowScale, crashLevel.current), THREE.MathUtils.lerp(1, DRIFT_CINE.slowScale, driftCutLevel.current));
+    // The milestone moment: slow while the camera swings round, then a burst of fast motion as it whips back.
+    if (milestoneTime.current >= 0) {
+      const mt = (milestoneTime.current += realDt);
+      if (mt > MILESTONE.duration) milestoneTime.current = -1;
+      const up = 1 - Math.pow(1 - Math.min(1, mt / MILESTONE.rise), 3);
+      const down = mt < MILESTONE.holdUntil ? 1 : 1 - easeInOutCubic(Math.min(1, (mt - MILESTONE.holdUntil) / (MILESTONE.returnEnd - MILESTONE.holdUntil)));
+      milestoneLevel.current = milestoneTime.current < 0 ? 0 : up * down;
+      if (mt < MILESTONE.fastFrom) gameTime.scale = Math.min(gameTime.scale, THREE.MathUtils.lerp(1, MILESTONE.slowScale, up));
+      else if (mt < MILESTONE.fastUntil) {
+        const p = (mt - MILESTONE.fastFrom) / (MILESTONE.fastUntil - MILESTONE.fastFrom);
+        if (mt - realDt < MILESTONE.fastFrom) playWhoosh();
+        gameTime.scale = THREE.MathUtils.lerp(1, MILESTONE.fastScale, Math.sin(Math.PI * p));
+      }
+    } else milestoneLevel.current = 0;
+    cinematicState.milestone = milestoneLevel.current;
     // The finale slows time whatever else is going on (a boost included).
     if (finaleLevel.current > 0) gameTime.scale = Math.min(gameTime.scale, THREE.MathUtils.lerp(1, FINALE.slowScale, finaleLevel.current));
     cinematicState.crash = crashLevel.current;
@@ -1058,6 +1136,8 @@ function DrivingScene(props: SceneProps) {
     document.documentElement.style.setProperty('--intro-zoom', introZoom.current.toFixed(4));
     introZoomCta.current = THREE.MathUtils.damp(introZoomCta.current, introZoom.current, 7, dt);
     document.documentElement.style.setProperty('--intro-zoom-cta', introZoomCta.current.toFixed(4));
+    const party = props.party?.current ?? null;
+    if (party) props.car.current = party.players[0].car;
     const car = props.car.current;
     boostAtmosphere.current = THREE.MathUtils.damp(
       boostAtmosphere.current,
@@ -1147,7 +1227,7 @@ function DrivingScene(props: SceneProps) {
     // traffic's pace, and keeps its distance from the car ahead (any pedal hands it straight back to the player).
     const auto = cruiseState.current;
     const pedalHeld = keys.forward || keys.back || keys.brake || keys.boost || pad.throttle > 0.05 || pad.brake > 0.05 || pad.handbrake || pad.boost || car.boosting > 0;
-    const cruising = CAR_CONFIG.cruiseSpeed > 0 && props.started && !props.paused && !props.finale && !props.tutorialDriving && !props.mapView && !DRIVE_MODE.rails;
+    const cruising = CAR_CONFIG.cruiseSpeed > 0 && props.started && !props.paused && !props.finale && !props.tutorialDriving && !props.mapView && !DRIVE_MODE.rails && !party;
     auto.idle = cruising && !pedalHeld ? auto.idle + realDt : 0;
     const wasIdle = auto.blend === 0;
     auto.blend = auto.idle > CAR_CONFIG.cruiseDelay
@@ -1181,8 +1261,61 @@ function DrivingScene(props: SceneProps) {
       reverse: Math.max(pedals.current.brake, pad.brake, cruiseBrake),
       steer: [pad.steer, keySteer, keys.steer ?? 0].reduce((best, value) => (Math.abs(value) > Math.abs(best) ? value : best), 0),
     };
+    // During the milestone moment the car drives itself: it holds its pace and its lane, and passes through traffic.
+    if (party) Object.assign(driveControls, slotDrive(party.players[0].slot));
+    const inMoment = milestoneTime.current >= 0 && milestoneTime.current < MILESTONE.returnEnd;
+    car.ghost = milestoneTime.current >= 0 ? 1 : 0;
+    if (inMoment) {
+      Object.assign(driveControls, { forward: false, back: false, left: false, right: false, brake: false, boost: false, steer: 0, reverse: 0,
+        throttle: THREE.MathUtils.clamp((milestoneSpeed.current - car.speed) * 0.9, 0, 1) });
+      car.cruise = 1;
+    }
     const intro = !props.started && zoomProgress.current < 0.02;
-    if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true, !!props.tutorialDriving && props.started, !!props.boostEnabled);
+    if (party) {
+      // Everyone drives (held: countdown, the cars brake to a stop), then the collision pass: a car rammed hard is
+      // knocked away like traffic in a solo run (a split-second freeze, a shake, a crunch, a comic word), a
+      // small knock thuds, and the horns toot. See party.ts.
+      partyBumpRest.current -= realDt;
+      if (props.started && !props.paused && !landingActive.current) {
+        // The freeze on a big hit: everything holds for a few frames while the camera shakes.
+        if (partyFreeze.current > 0) partyFreeze.current -= realDt;
+        else {
+          // Where each car was, so its distance round the loop counts every way it moved (driving, bumps, shoves).
+          const before = party.players.map(player => player.car.x);
+          party.players.forEach((player, index) => {
+            if (player.out) return;
+            const wanted = party.frozen ? PARTY_HOLD : index === 0 ? driveControls : slotDrive(player.slot);
+            stepLoopCar(player.car, partyControls(player, wanted), dt, true, false, false);
+            const landed = stepFx(player, dt);
+            if (landed > 3) playThud(Math.min(1.2, landed / 6));
+            // The horn: a toot, and the car hops up on its springs.
+            const honking = !party.frozen && slotHorn(player.slot);
+            if (honking && player.fx.honk <= 0) {
+              player.fx.honk = 0.28;
+              playHonk(1 + (player.id - 1.5) * 0.12);
+              player.fx.squash = -0.28;
+              if (player.fx.lift <= 0) player.fx.liftV = Math.max(player.fx.liftV, 2.4);
+            }
+          });
+          const hits = bump(party.players);
+          party.players.forEach((player, index) => { if (!player.out) track(player, before[index]); });
+          party.bumps += hits.length;
+          for (const hit of hits) {
+            if (hit.knocked) {
+              partyFreeze.current = 0.06;
+              trauma.current = Math.min(1, trauma.current + 0.35);
+              playImpact(); playThud(Math.min(1.5, hit.closing / 8));
+              partyPop(hit.x, hit.z, (hit.knocked === hit.a ? hit.b : hit.a).colour);
+            } else if (hit.closing > PARTY.hit.light && partyBumpRest.current <= 0) {
+              partyBumpRest.current = 0.3;
+              trauma.current = Math.min(1, trauma.current + 0.1);
+              playThud(Math.max(0.35, Math.min(1, hit.closing / 8)));
+            }
+          }
+          if (!party.frozen) catchUp(party.players, dt);
+        }
+      }
+    } else if ((props.started || intro) && !props.paused && !landingActive.current) stepLoopCar(car, driveControls, dt, true, !!props.tutorialDriving && props.started, !!props.boostEnabled);
     // Two cinematic beats share the slow-motion cut-in:
     // - the red one for a real smash: the cars come together fast (closing speed, so ramming an oncoming car
     //   counts far more than nudging one ahead, and a glancing scrape barely counts at all);
@@ -1280,7 +1413,7 @@ function DrivingScene(props: SceneProps) {
       if (props.started && Math.abs(car.speed) > 2) playThud(onRoad ? 0.5 : 1);
     }
     wasOnRoad.current = onRoad;
-    const drifting = props.started && !props.paused && car.drift > 0 && Math.abs(car.speed) > DRIFT_SCORE.minSpeed;
+    const drifting = !party && props.started && !props.paused && car.drift > 0 && Math.abs(car.speed) > DRIFT_SCORE.minSpeed;
     const run = driftRun.current;
     if (drifting) {
       run.time += dt; run.speed += Math.abs(car.speed) * dt; run.gap = 0;
@@ -1325,7 +1458,28 @@ function DrivingScene(props: SceneProps) {
     // Globe orientation: in the intro it follows the idle spin/drag; while driving it turns so the car
     // sits on top of the planet facing away from the camera (the inverse of the car's local pose).
     // Slerping one quaternion takes the shortest turn, so the zoom-in is a straight dolly, not an orbit.
-    driveQuat.copy(targetVehicleQuaternion).invert();
+    if (party) {
+      // The camera follows the middle of the pack (eased, so a knockout doesn't jerk it), facing along the road.
+      const now = pack(party.players), focus = partyFocus.current;
+      if (focus.fresh || party.frozen) Object.assign(focus, now, { fresh: false });
+      focus.x += Math.atan2(Math.sin(now.x - focus.x), Math.cos(now.x - focus.x)) * (1 - Math.exp(-3 * realDt));
+      focus.z = THREE.MathUtils.damp(focus.z, now.z, 3, realDt);
+      focus.spread = THREE.MathUtils.damp(focus.spread, now.spread, now.spread > focus.spread ? 3 : 1.2, realDt);
+      const frame = loopFrame(focus.x, focus.z);
+      groundVehiclePosition.set(...spherePoint(frame.latitude, focus.x, roadSurfaceElevation(frame.latitude, focus.x) + 0.075));
+      vehicleUp.set(...terrainNormal(frame.latitude, focus.x));
+      vehicleTangent.set(...frame.tangent);
+      vehicleTangent.addScaledVector(vehicleUp, -vehicleTangent.dot(vehicleUp)).normalize();
+      vehicleRight.crossVectors(vehicleTangent, vehicleUp);
+      vehicleBack.copy(vehicleTangent).negate();
+      vehicleBasis.makeBasis(vehicleRight, vehicleUp, vehicleBack);
+      driveQuat.setFromRotationMatrix(vehicleBasis).invert();
+      vehicle.current.visible = !party.players[0].out;
+    } else {
+      driveQuat.copy(targetVehicleQuaternion).invert();
+      vehicle.current.visible = true;
+      partyFocus.current.fresh = true;
+    }
     if (!globeReady.current) { globeQuat.copy(introQuat); globeReady.current = true; }
     // On exit, keep the driving orientation until the camera has pulled back, then turn to the intro spin;
     // turning earlier swings the car (and the camera chasing it) around the planet.
@@ -1335,11 +1489,13 @@ function DrivingScene(props: SceneProps) {
 
     vehiclePosition.copy(vehicle.current.position).sub(globeCenter).applyQuaternion(globeQuat).add(globeCenter);
     groundVehiclePosition.sub(globeCenter).applyQuaternion(globeQuat).add(globeCenter);
+    if (party) vehiclePosition.copy(groundVehiclePosition);
     vehicleTangent.applyQuaternion(globeQuat);
     surfaceUp.copy(vehicleUp).applyQuaternion(globeQuat);
     // Time of day: one slow clock (dayCycle.ts) that runs while driving. Every light, the fog and the exposure
     // follow its night blend, and the sun turns warm and low-feeling around sunset and sunrise.
-    advanceCycle(realDt, props.started && !props.paused);
+    // The clock runs on the start screen too, and while driving unless paused.
+    advanceCycle(realDt, !props.started || !props.paused);
     nightBlend.current = nightAmount();
     const golden = twilight();
     const n = nightBlend.current;
@@ -1422,6 +1578,21 @@ function DrivingScene(props: SceneProps) {
     // Camera falls back on hard acceleration and catches up afterwards.
     cameraLag.current = THREE.MathUtils.damp(cameraLag.current, THREE.MathUtils.clamp(cameraAcceleration.current * JUICE_CONFIG.cameraLag, -JUICE_CONFIG.cameraLagMax, JUICE_CONFIG.cameraLagMax), JUICE_CONFIG.cameraLagStiffness, dt);
     gameCamera.addScaledVector(vehicleTangent, -cameraLag.current);
+    // Party: higher and further back as the pack spreads, so every car stays in the shot, up to nearly the whole globe
+    // (that far apart, the race ends: party.ts outDistance). As it pulls back, its aim slides from the cars
+    // to the middle of the planet, so at the furthest the whole globe sits right in the middle of the screen.
+    // Pulled all the way out it looks straight down on the middle of the pack, the road running up the screen: the
+    // leader at the top of the globe, the last car at the bottom.
+    let partyOverhead = 0;
+    if (props.party?.current) {
+      // All the way out a little before the last car is pushed up, so the widest shot holds steady near the limit.
+      const reach = Math.min(1, partyFocus.current.spread / (PARTY.outDistance / 2 * PARTY_CAMERA.fullAt));
+      partyOverhead = THREE.MathUtils.smoothstep(reach, 0, 1);
+      gameCamera.sub(groundVehiclePosition).multiplyScalar(1.25 + 2.5 * reach).add(groundVehiclePosition);
+      partySpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, PARTY_CAMERA.overheadHeight);
+      gameCamera.lerp(partySpot, partyOverhead);
+      gameLook.lerp(globeCenter, partyOverhead);
+    }
     // The first steering lesson looks straight down from above the car; as the lesson ends, orbit smoothly back
     // to the normal chase view rather than replacing the camera in a single frame.
     const coachTarget = props.started && props.tutorialCamera ? 1 : 0;
@@ -1482,6 +1653,7 @@ function DrivingScene(props: SceneProps) {
     camera.position.sub(crashApplied);
     camera.position.sub(driftApplied);
     camera.position.sub(finaleApplied);
+    camera.position.sub(milestoneApplied);
     camera.position.lerp(desiredCamera, ease);
     // Never let the smoothed camera cut through the planet.
     cameraOffset.copy(camera.position).sub(globeCenter);
@@ -1509,6 +1681,8 @@ function DrivingScene(props: SceneProps) {
     }
     if (driving && cameraAcceleration.current < -JUICE_CONFIG.hardBrakeAccel && Math.abs(car.speed) > 8) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBrake);
     if (offRoadDriving) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
+    // Riding the curb: a light, steady judder (the rumble strip), a little less than off the road.
+    else if (driving && car.curb > 0.4) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * 0.6 * car.curb * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
     fovKick.current = THREE.MathUtils.damp(fovKick.current, 0, JUICE_CONFIG.fovKickDecay, dt);
     const shake = trauma.current * trauma.current * JUICE_CONFIG.shakeMax * zoom;
     const t = arrivalTime.current;
@@ -1543,11 +1717,16 @@ function DrivingScene(props: SceneProps) {
     finaleSpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, THREE.MathUtils.lerp(FINALE.startHeight, FINALE.height, climb)).addScaledVector(finaleOffset, -0.05);
     finaleApplied.copy(finaleSpot).sub(camera.position).multiplyScalar(finale);
     camera.position.add(finaleApplied);
+    // The milestone moment's rise: straight up from where the camera already is, by a share of its height.
+    const moment = milestoneLevel.current * zoom;
+    const cameraHeight = Math.max(0, milestoneApplied.copy(camera.position).sub(groundVehiclePosition).dot(surfaceUp));
+    milestoneApplied.copy(surfaceUp).multiplyScalar(cameraHeight * MILESTONE.lift * moment);
+    camera.position.add(milestoneApplied);
     // Side-hit glance toward the thrown car.
     lookSwing.current = THREE.MathUtils.damp(lookSwing.current, 0, SIDE_HIT_CAMERA.swingDecay, realDt);
     desiredLook.addScaledVector(vehicleRight, lookSwing.current * zoom);
     smoothedLook.lerp(desiredLook, ease);
-    targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).lerp(vehicleTangent, coachMix).normalize();
+    targetCameraUp.copy(localUp).lerp(surfaceUp, zoom).lerp(vehicleTangent, Math.max(coachMix, partyOverhead)).normalize();
     smoothedUp.lerp(targetCameraUp, 1 - Math.exp(-6 * dt)).normalize();
     camera.up.copy(smoothedUp);
     // Looking straight down, "up" on screen is the way the car is heading (turning with the orbit).
@@ -1598,7 +1777,7 @@ function DrivingScene(props: SceneProps) {
       }
       seaNear.current = props.started ? Math.min(1, (water / (SEA_RINGS.length * 8)) * 1.6) : 0.3;
     }
-    updateAudio({ speedRatio: Math.abs(car.speed) / CAR_CONFIG.maxSpeed, throttle, drift: car.drift, active: driving, timeScale: gameTime.scale, acceleration: car.acceleration, offroad: !onRoad, sea: seaNear.current,
+    updateAudio({ speedRatio: Math.abs(car.speed) / CAR_CONFIG.maxSpeed, throttle, drift: car.drift, active: driving, timeScale: gameTime.scale, acceleration: car.acceleration, offroad: !onRoad || car.curb > 0.4, sea: seaNear.current,
       // The plane is heard by the camera: full within PLANE_HEARD.near, gone beyond PLANE_HEARD.far.
       plane: 1 - THREE.MathUtils.smoothstep(camera.position.distanceTo(airplaneState.position), PLANE_HEARD.near, PLANE_HEARD.far) });
     telemetryTime.current += dt;
@@ -1642,7 +1821,8 @@ function DrivingScene(props: SceneProps) {
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld key={road} zoom={zoomProgress} />
         <Suspense fallback={null}><Traffic paused={props.paused} enabled={props.trafficEnabled !== false} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} /></Suspense>
-        <group ref={vehicle}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /><MapPin show={!!props.mapView} /></group>
+        {props.party && !!props.partyCount && <PartyCars run={props.party} count={props.partyCount} />}
+        <group ref={vehicle}><PartyBody run={props.party} index={0}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /></PartyBody><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
         <primitive object={dust.mesh} />
         <primitive object={soilClods.mesh} />

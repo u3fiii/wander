@@ -65,8 +65,8 @@ export const THEMES: Theme[] = [
 
 // Score milestones: the look changes rarely, so each new one is an event. After the listed ones, every
 // `MILESTONE_STEP` points brings another.
-export const MILESTONES = [3000, 7000, 12000];
-export const MILESTONE_STEP = 6000;
+export const MILESTONES = [2250, 5250, 9000];
+export const MILESTONE_STEP = 4500;
 export function chapterFor(score: number) {
   let chapter = 0;
   for (const milestone of MILESTONES) if (score >= milestone) chapter++;

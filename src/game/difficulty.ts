@@ -14,7 +14,7 @@ const RANGES = {
   nearMissSpeed: [5, 7], // minimum speed of the pass (m/s)
   nearMissRest: [15, 20], // seconds before another exceptional pass gets slow motion
   driftMinTime: [0.3, 0.5], // a drift scores once it lasts this long (s)
-  boostCooldown: [0.7, 1.2], // boost recharge time, × the tuned one
+  boostCooldown: [1, 1], // boost recharge time, × the tuned one (the same at every level: 45 s)
   bonus: [1.25, 1], // positive points ×
   penalty: [0.4, 1], // crash and bump penalties ×
 } as const;
