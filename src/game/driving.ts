@@ -30,8 +30,6 @@ export type CarState = {
   ghost: number;
   // Seconds left of the stronger road assist that follows a head-on hit (so the car settles back on the road).
   hitAssist?: number;
-  // Rails steering only: how fast the steering value is moving (it follows the pads on a spring, see RAILS).
-  steerRate?: number;
   // Seconds of boost left in the current burst, and cooldown progress (1 = ready).
   boostTime: number; boostCharge: number;
 };
@@ -83,31 +81,18 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
   car.boost = car.boosting ? car.boostTime / CAR_CONFIG.boostDuration : car.boostCharge;
 }
 
-// Rails mode, for touch screens: the car drives itself (the scene holds the throttle at `autoThrottle`), the
-// player only steers, and the car never leaves the road. Its offset from the road's centre line is held inside
-// `halfWidth`; at the edge its heading is turned back along the road (by `edgeTurn`) so it slides along the edge
-// instead of grinding, and the road assist pulls it straight `assist` times harder when the player lets go.
-// On rails the car only ever drives forward round the loop: a knock from traffic or a wall can swing it by at most
-// `maxHeading` (radians) off the road's direction, so it can never end up turned round and heading back the way
-// it came.
+// Rails mode, for touch screens: the car drives itself (the scene holds the throttle at `autoThrottle`) and the
+// player only steers. Otherwise it drives just as on a computer: the same steering, the same road assist (nothing
+// inside the road, a wall at its edge, curbs that slow it). Two things are its own, because there is no reverse:
+// the edge is always a wall, and a knock from traffic or a wall can swing it by at most `maxHeading` (radians) off
+// the road's direction, so it can never end up turned round and heading back the way it came. In the first-drive
+// lesson the car also eases back toward the road's centre when the pads are let go (`tutorialCentering`).
 export const DRIVE_MODE = { rails: false };
-// The touch pads are on/off, so on rails the steering follows them on a critically damped spring instead of
-// jumping: it builds up gently from a tap and lets go smoothly, `steerSpring` (rad/s) when a pad is held and
-// `releaseSpring` when it is let go (higher: back to straight a little quicker). `turnScale` softens the turn rate.
-export const RAILS = {
-  halfWidth: 2.15, edgeTurn: 14, assist: 3, autoThrottle: 1, tutorialMaxSpeed: 6, tutorialCentering: 0.08, maxHeading: 0.9,
-  steerSpring: 9, releaseSpring: 11, turnScale: 0.85,
-};
-function keepOnRails(car: CarState, dt: number) {
+export const RAILS = { autoThrottle: 1, tutorialMaxSpeed: 6, tutorialCentering: 0.08, maxHeading: 0.9 };
+function keepFacingForward(car: CarState) {
   car.heading = wrapAngle(car.heading);
-  if (Math.abs(car.heading) > RAILS.maxHeading) {
-    car.heading = Math.sign(car.heading) * RAILS.maxHeading;
-    car.yawRate = 0;
-  }
-  const limit = RAILS.halfWidth / lateralScale(car.x);
-  if (Math.abs(car.z) <= limit) return;
-  car.z = Math.sign(car.z) * limit;
-  car.heading *= Math.exp(-RAILS.edgeTurn * dt);
+  if (Math.abs(car.heading) <= RAILS.maxHeading) return;
+  car.heading = Math.sign(car.heading) * RAILS.maxHeading;
   car.yawRate = 0;
 }
 
@@ -177,13 +162,6 @@ export function updateSteering(car: CarState, controls: Controls, dt: number): v
     bend = Math.min(1, Math.abs(turn) / 0.055);
   }
   const steerTarget = Math.max(-1.3, Math.min(1.3, primary + tilt * (0.12 + 0.36 * bend)));
-  if (DRIVE_MODE.rails) {
-    const spring = steerTarget ? RAILS.steerSpring : RAILS.releaseSpring;
-    const rate = car.steerRate ?? 0;
-    car.steerRate = rate + (spring * spring * (steerTarget - car.steering) - 2 * spring * rate) * dt;
-    car.steering += car.steerRate * dt;
-    return;
-  }
   const response = steerTarget ? CAR_CONFIG.steerResponse : CAR_CONFIG.steerReturn;
   car.steering += (steerTarget - car.steering) * (1 - Math.exp(-response * dt));
 }
@@ -200,7 +178,7 @@ export function turnRate(steer: number, speed: number, drifting: number | boolea
   );
   // Boost also sharpens the steering: quicker turn-in and more grip, so the fast car still takes the bends easily.
   const boostTurn = boosting ? CAR_CONFIG.boostSteerFactor : 1;
-  const requested = steer * CAR_CONFIG.maxTurnRate * (DRIVE_MODE.rails ? RAILS.turnScale : 1) * speedFactor * boostTurn * Math.sign(speed)
+  const requested = steer * CAR_CONFIG.maxTurnRate * speedFactor * boostTurn * Math.sign(speed)
     * (1 + (CAR_CONFIG.driftYawBoost - 1) * slide);
   const maxYaw = CAR_CONFIG.lateralGrip * (1 + (CAR_CONFIG.driftGripBoost - 1) * slide) * (boosting ? CAR_CONFIG.boostGripFactor : 1) / Math.max(Math.abs(speed), 0.1);
   return Math.max(-maxYaw, Math.min(maxYaw, requested));
@@ -219,8 +197,9 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   updateBoost(car, drive, dt, currentOnRoad, boostEnabled);
   // Nothing slows a boosting car: the off-road drag and the water drag below are skipped while boosting.
   updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence, tutorial ? RAILS.tutorialMaxSpeed : Infinity);
-  // On the curb the car rumbles and can't hold full speed (touch screens keep to the lanes anyway; boost ignores it).
-  car.curb = respectWater && !DRIVE_MODE.rails && currentOnRoad ? smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.curbFull, Math.abs(car.z) * lateralScale(car.x)) : 0;
+  // On the curb the car rumbles and can't hold full speed (on touch screens too, which can steer onto it; boost
+  // ignores it).
+  car.curb = respectWater && currentOnRoad ? smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.curbFull, Math.abs(car.z) * lateralScale(car.x)) : 0;
   car.curbTime = car.curb > 0.5 ? car.curbTime + dt : Math.max(0, car.curbTime - 2 * dt);
   if (car.curb > 0 && car.boosting === 0) {
     const long = Math.min(1, car.curbTime / CAR_CONFIG.curbLongAfter);
@@ -469,10 +448,10 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   car.leadGap = lead ? lead.gap : -1;
   car.leadSpeed = lead ? lead.speed : 0;
   keepOnBridge(car, previousX, previousZ, dt);
-  if (DRIVE_MODE.rails) keepOnRails(car, dt);
-  // With the road assist at its top the road's edge is a wall on every step, not only while the car is on the road: a
-  // shove from traffic or a trunk can never leave it off the road.
-  else if (respectWater && CAR_CONFIG.roadAssist >= CAR_CONFIG.roadAssistFull) holdRoadEdge(car, roadAlong(car), dt);
+  if (DRIVE_MODE.rails) keepFacingForward(car);
+  // With the road assist at its top (and always on touch screens) the road's edge is a wall on every step, not only
+  // while the car is on the road: a shove from traffic or a trunk can never leave it off the road.
+  if (respectWater && (DRIVE_MODE.rails || CAR_CONFIG.roadAssist >= CAR_CONFIG.roadAssistFull)) holdRoadEdge(car, roadAlong(car), dt);
   car.distance += Math.abs(effectiveTravel);
   car.wheelTravel += effectiveTravel;
 }
@@ -486,7 +465,6 @@ export function recoverToRoad(car: CarState) {
   car.heading = roadAlong(car);
   car.speed = 0;
   car.steering = 0;
-  car.steerRate = 0;
   car.yawRate = 0;
   car.acceleration = 0;
   car.waterTravel = 0;
@@ -520,10 +498,10 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   // up with the road (and the deck) even when the player isn't steering.
   const bridgeDistance = Math.abs(wrapAngle(car.x - WORLD_SETTINGS.roads.bridgeLongitude));
   const funnel = bridgeDistance < CAR_CONFIG.bridgeFunnelReach ? CAR_CONFIG.bridgeFunnelAssist * (1 - bridgeDistance / CAR_CONFIG.bridgeFunnelReach) : 0;
-  // On touch screens and under boost the heading is always eased back along the road. Otherwise the assist only
-  // acts at the road's edge (curbs included): a car heading out there is turned back along the road, and with the
-  // assist high enough the edge is a wall.
-  const always = DRIVE_MODE.rails || boosting;
+  // Under boost (and in the touch screens' first lesson) the heading is always eased back along the road. Otherwise
+  // the assist only acts at the road's edge (curbs included): a car heading out there is turned back along the road,
+  // and with the assist high enough the edge is a wall.
+  const always = boosting || (DRIVE_MODE.rails && tutorial);
   if (!always) {
     // On a computer the player drives: nothing turns the car while it is inside the road. Only after a crash does it
     // ease back along the road for a moment (less while the player steers), and near the edge the cushion below keeps
@@ -532,7 +510,7 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
     cushionRoadEdge(car, along, previousZ, dt);
     return;
   }
-  const rate = (CAR_CONFIG.roadAssist * (DRIVE_MODE.rails ? RAILS.assist : 1) * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
+  const rate = (CAR_CONFIG.roadAssist * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
     + (recovering ? CAR_CONFIG.crashAssist * (1 - steering * 0.5) : 0);
   // In the first-drive lesson, releasing the arrows gently aims the car back toward the road's centre.
   const centerHeading = tutorial && steering < 0.05 ? -Math.max(-0.22, Math.min(0.22, car.z * RAILS.tutorialCentering)) : 0;

@@ -241,6 +241,21 @@ test('on rails (mobile) a knock never turns the car round: it keeps driving forw
   } finally { DRIVE_MODE.rails = false; }
 });
 
+test('on rails (mobile) the car can be steered onto the curb, and the curb slows it there too', () => {
+  DRIVE_MODE.rails = true;
+  try {
+    const car = { ...initialLoopCar(), x: 0.6, speed: CAR_CONFIG.maxSpeed };
+    let curb = 0, lowest = Infinity;
+    for (let i = 0; i < 60 * 6; i++) {
+      stepLoopCar(car, { ...emptyControls(), throttle: RAILS.autoThrottle, left: true }, 1 / 60, true);
+      curb = Math.max(curb, car.curb);
+      if (i > 60 * 3) lowest = Math.min(lowest, car.speed);
+    }
+    assert.ok(curb > 0.5, `reached the curb (${curb.toFixed(2)})`);
+    assert.ok(lowest < CAR_CONFIG.maxSpeed * 0.8, `slowed on it (${lowest.toFixed(1)} m/s)`);
+  } finally { DRIVE_MODE.rails = false; }
+});
+
 // Road assist: only a hold on the road's edge (the curbs count as road), nothing while the car is inside it.
 // The widest the car gets from the road's centre line (m) when it is steered hard out of the road.
 function widestOutOfRoad(assist: number) {
