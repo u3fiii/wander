@@ -532,6 +532,7 @@ export default function App() {
   const hitTimer = useRef<number | undefined>(undefined);
   const shownNote = useRef<{ rank: number; until: number }>({ rank: 0, until: 0 });
   const lastText = useRef('');
+  const nextMobileCelebration = useRef(0);
   const showNote = useCallback((kind: NoteKind, rawPoints: number, quiet: boolean, badge?: string, label?: string) => {
     // Early levels are kinder: good moves pay a little more and crashes cost less (see difficulty.ts).
     const points = Math.round(rawPoints * (rawPoints > 0 ? difficulty.bonus : difficulty.penalty));
@@ -539,7 +540,11 @@ export default function App() {
     if (points > 0 && !BADGE_NOTES.includes(kind)) setXp(total => total + points);
     const rank = NOTE_RANK[kind];
     const now = performance.now();
-    if (quiet || (now < shownNote.current.until && rank < shownNote.current.rank)) return;
+    const routine = RAILS && ['drift', 'near', 'flick', 'boost'].includes(kind);
+    const topCelebration = RAILS && rawPoints >= 0 && !kind.startsWith('big') && kind !== 'cineDrift' && kind !== 'newBest';
+    if (quiet || routine || (topCelebration && now < nextMobileCelebration.current)
+      || (now < shownNote.current.until && rank < shownNote.current.rank)) return;
+    if (topCelebration) nextMobileCelebration.current = now + 10000;
     const fresh = NOTE_TEXT[kind].filter(text => text !== lastText.current);
     const options = fresh.length ? fresh : NOTE_TEXT[kind];
     const text = label ?? options[Math.floor(Math.random() * options.length)];
@@ -548,7 +553,7 @@ export default function App() {
     setHitNote({ id: hitCount.current++, kind, points, text, badge });
     window.clearTimeout(hitTimer.current);
     hitTimer.current = window.setTimeout(() => setHitNote(null), kind === 'level' ? 3000 : kind === 'bigBoost' ? 1200 : kind === 'cineDrift' ? 1550 : kind.startsWith('big') ? 1550 : 2200);
-  }, []);
+  }, [RAILS]);
   // A level-up takes the caption slot over anything else, with the new title.
   useEffect(() => {
     saveXp(xp);
@@ -617,10 +622,10 @@ export default function App() {
       if (next === stageRef.current) return;
       stageRef.current = next;
       setDifficultyLevel(next);
-      showNote('stage', 0, false, `Stage ${next}`);
+      showNote('stage', 0, !!RAILS && next % 3 !== 0, `Stage ${next}`);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [started, halted, showNote]);
+  }, [started, halted, showNote, RAILS]);
   // Boost hits still award a fixed bonus and flash, but no longer chain into a timed score multiplier.
   const [boostFlash, setBoostFlash] = useState(0);
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
@@ -646,10 +651,10 @@ export default function App() {
       : drift.switches > 0 ? (drift.switches > 1 ? `Switchback ×${drift.switches}!` : 'Switchback!')
       : drift.angle > 0.8 && drift.clean > 0.95 && drift.time >= 1.8 ? 'Perfect drift!'
       : drift.clean > 0.95 ? 'Clean drift' : 'Nice drift';
-    showNote(points >= 160 ? 'hugeDrift' : points >= 70 ? 'bigDrift' : 'drift', points, false, undefined, label);
+    showNote(points >= 160 ? 'hugeDrift' : points >= 70 ? 'bigDrift' : 'drift', points, !!RAILS && points < 160, undefined, label);
     earnBoost(car.current, BOOST_EARN.drift + BOOST_EARN.driftPerSecond * drift.time);
     runStats.current.drifts++;
-  }, [showNote]);
+  }, [showNote, RAILS]);
   // Near misses pay more the faster the pass and the thinner the gap.
   const handleNearMiss = useCallback((miss: NearMiss) => {
     runStats.current.nearMisses++;
@@ -660,10 +665,12 @@ export default function App() {
     if (streakLevel === 0) { setStreakShown(false); return; }
     setXp(total => total + streakXp(streakLevel));
     earnBoost(car.current, BOOST_EARN.streak);
-    setStreakShown(true);
+    const celebrate = !RAILS || (streakLevel >= 4 && streakLevel % 4 === 0 && performance.now() >= nextMobileCelebration.current);
+    setStreakShown(celebrate);
+    if (RAILS && celebrate) nextMobileCelebration.current = performance.now() + 10000;
     const timer = setTimeout(() => setStreakShown(false), JUICE_CONFIG.streakShowTime * 1000);
     return () => clearTimeout(timer);
-  }, [streakLevel]);
+  }, [streakLevel, RAILS]);
   useEffect(() => {
     const now = performance.now();
     const state = streak.current;
@@ -793,6 +800,7 @@ export default function App() {
     beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
     setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats();
     stageRef.current = 1; setDifficultyLevel(1);
+    nextMobileCelebration.current = 0;
     if (touchQuery?.matches) resetToDay();
   }, []);
   // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.

@@ -12,7 +12,7 @@ const RANGES = {
   nearMissGap: [0.9, 0.55], // a pass this close (m) to a car counts as a near miss
   nearMissStaticGap: [0.75, 0.5], // the same for trees, poles, rocks, houses
   nearMissSpeed: [7, 10], // minimum speed of the pass (m/s)
-  nearMissRest: [2, 5], // seconds before another near miss gets the slow motion
+  nearMissRest: [8, 12], // seconds before another exceptional pass gets slow motion
   driftMinTime: [0.5, 0.9], // a drift scores once it lasts this long (s)
   boostCooldown: [0.7, 1.2], // boost recharge time, × the tuned one
   bonus: [1.25, 1], // positive points ×

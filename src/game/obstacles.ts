@@ -32,43 +32,57 @@ export type TrafficHit = { kind: 'side' | 'front'; speed: number; side: number; 
 const trafficHits: TrafficHit[] = [];
 export function reportTrafficHit(hit: TrafficHit) { trafficHits.push(hit); }
 export function drainTrafficHits(): TrafficHit[] { return trafficHits.splice(0); }
+// All physical contacts count, including gentle/rear contacts that award no hit.
+let trafficTouched = false;
+export function markTrafficTouch() { trafficTouched = true; }
+export function drainTrafficTouch() { const touched = trafficTouched; trafficTouched = false; return touched; }
 
 // Near misses: the player flashed past a traffic car at speed without touching it. `speed` is the relative
 // speed of the pass (m/s), `gap` the closest the two bodies got (m), `side` as for hits.
-export type NearMiss = { speed: number; gap: number; side: number; cinematic?: boolean };
+export type NearMiss = { speed: number; gap: number; side: number; playerSpeed: number; clearance: number; source: 'traffic' | 'static'; cinematic?: boolean };
+// Only a fast, clean pass with a small but visibly real gap deserves a cut-in.
+export function isSpecialNearMiss(miss: NearMiss) {
+  return miss.source === 'traffic' && miss.playerSpeed >= 11 && miss.speed >= 14
+    && miss.clearance >= 0.08 && miss.clearance <= 0.5;
+}
 const nearMisses: NearMiss[] = [];
 export function drainNearMisses(): NearMiss[] { return nearMisses.splice(0); }
 
 // One pass by an obstacle, from the moment it comes within `NEAR_MISS.watch` until it is left behind. A pass
-// counts once the bodies have been within `gap` of each other, never touched, and start pulling apart (so the
-// slow motion lands while the player is still right beside the thing it dodged, not after). Traffic and
+// counts once the bodies have been within `gap` of each other, never touched, and fully separated. Traffic and
 // static things (trees, poles, rocks, houses: threading past them off the road) are tracked separately.
 // How close and how fast a pass must be come from the difficulty (generous at low levels); `gap` here is only
 // the scale the reported gap is given on, for scoring.
-export const NEAR_MISS = { watch: 1.6, gap: 0.65, separate: 0.06, minPlayerSpeed: 8 };
-type Pass = { obstacle: Obstacle; closest: number; touched: boolean; reported: boolean; speed: number; side: number };
-function passTracker(gapLimit: () => number) {
+export const NEAR_MISS = { watch: 1.6, gap: 0.65, minPlayerSpeed: 8 };
+type Pass = { obstacle: Obstacle; closest: number; touched: boolean; boosted: boolean; speed: number; playerSpeed: number; side: number };
+function passTracker(gapLimit: () => number, source: NearMiss['source']) {
   let pass: Pass | undefined;
   return {
     reset() { pass = undefined; },
     // Called every physics step with the closest obstacle (or none), the relative speed and which side it is on.
     track(near: { obstacle: Obstacle; gap: number } | undefined, relativeSpeed: number, playerSpeed: number, side: number, boosting: boolean, touched = false) {
-      if (!near || near.gap > NEAR_MISS.watch || (pass && pass.obstacle !== near.obstacle)) pass = undefined;
-      if (!near || near.gap > NEAR_MISS.watch) return;
-      pass ??= { obstacle: near.obstacle, closest: Infinity, touched: false, reported: false, speed: 0, side };
-      if (near.gap < 0 || touched) pass.touched = true;
-      if (near.gap <= pass.closest) { pass.closest = near.gap; pass.speed = relativeSpeed; pass.side = side; return; }
-      const maxGap = gapLimit();
-      if (pass.reported || pass.touched || boosting || pass.closest > maxGap) return;
-      if (near.gap - pass.closest < NEAR_MISS.separate) return;
-      pass.reported = true;
-      if (pass.speed >= difficulty.nearMissSpeed && playerSpeed >= NEAR_MISS.minPlayerSpeed) nearMisses.push({ speed: pass.speed, gap: pass.closest / maxGap * NEAR_MISS.gap, side: pass.side });
+      if (!near || near.gap > NEAR_MISS.watch) {
+        const maxGap = gapLimit();
+        // Wait until fully clear: a tiny increase in gap can still end in a scrape.
+        if (pass && !pass.touched && !pass.boosted && !boosting && !touched && !pass.obstacle.inactive && !pass.obstacle.ramCooldown
+          && pass.closest <= maxGap && pass.speed >= difficulty.nearMissSpeed && playerSpeed >= NEAR_MISS.minPlayerSpeed) {
+          nearMisses.push({ speed: pass.speed, gap: pass.closest / maxGap * NEAR_MISS.gap, side: pass.side,
+            playerSpeed: pass.playerSpeed, clearance: pass.closest, source });
+        }
+        pass = undefined;
+        return;
+      }
+      if (pass && pass.obstacle !== near.obstacle) pass = undefined;
+      pass ??= { obstacle: near.obstacle, closest: Infinity, touched: false, boosted: false, speed: 0, playerSpeed, side };
+      if (near.gap <= 0 || touched || near.obstacle.ramCooldown) pass.touched = true;
+      pass.boosted ||= boosting;
+      if (near.gap <= pass.closest) { pass.closest = near.gap; pass.speed = relativeSpeed; pass.playerSpeed = playerSpeed; pass.side = side; }
     },
   };
 }
-const trafficPasses = passTracker(() => difficulty.nearMissGap);
-const staticPasses = passTracker(() => difficulty.nearMissStaticGap);
-export function resetNearMiss() { trafficPasses.reset(); staticPasses.reset(); }
+const trafficPasses = passTracker(() => difficulty.nearMissGap, 'traffic');
+const staticPasses = passTracker(() => difficulty.nearMissStaticGap, 'static');
+export function resetNearMiss() { trafficPasses.reset(); staticPasses.reset(); nearMisses.length = 0; trafficTouched = false; }
 export function trackNearMiss(contact: TrafficContact | undefined, relativeSpeed: number, playerSpeed: number, side: number, boosting: boolean) {
   trafficPasses.track(contact, relativeSpeed, playerSpeed, side, boosting);
 }

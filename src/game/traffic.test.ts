@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CAR_CONFIG } from './config.ts';
 import { initialLoopCar, stepLoopCar } from './driving.ts';
 import { GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
-import { NEAR_MISS, classifyTrafficHit, clearObstacleGroup, drainNearMisses, drainTrafficHits, resetNearMiss, setObstacleGroup, trafficContact } from './obstacles.ts';
+import { NEAR_MISS, classifyTrafficHit, clearObstacleGroup, drainNearMisses, drainTrafficHits, isSpecialNearMiss, resetNearMiss, setObstacleGroup, trackNearMiss, trafficContact } from './obstacles.ts';
 import type { TrafficContact } from './obstacles.ts';
 import { difficulty } from './difficulty.ts';
 import type { Obstacle } from './obstacles.ts';
@@ -110,6 +110,46 @@ test('ramming a car at speed is a hit with a high closing speed, not a near miss
   assert.ok(hits[0].closing > difficulty.nearMissSpeed);
 });
 
+test('a pass is not rewarded early and a later scrape invalidates the whole pass', () => {
+  resetNearMiss(); drainNearMisses();
+  const obstacle: Obstacle = { latitude: 0, longitude: 0, radius: 0.55, movable: true };
+  const track = (gap: number) => trackNearMiss({ obstacle, gap, away: [1, 0], playerAlong: 0 }, 22, 16, 1, false);
+  try {
+    track(1.2); track(0.25); track(0.4);
+    assert.equal(drainNearMisses().length, 0, 'small separation does not trigger a premature celebration');
+    track(-0.01); track(0.5); track(1.7);
+    assert.equal(drainNearMisses().length, 0, 'even a small scrape cancels the pass');
+  } finally { resetNearMiss(); drainNearMisses(); }
+});
+
+test('only a fully cleared fast traffic pass with a visible narrow gap qualifies for slow motion', () => {
+  resetNearMiss(); drainNearMisses();
+  const obstacle: Obstacle = { latitude: 0, longitude: 0, radius: 0.55, movable: true };
+  const track = (gap: number) => trackNearMiss({ obstacle, gap, away: [1, 0], playerAlong: 0 }, 22, 16, 1, false);
+  try {
+    track(1.2); track(0.25); track(0.4); track(1.7);
+    const misses = drainNearMisses();
+    assert.equal(misses.length, 1);
+    const miss = misses[0];
+    assert.equal(isSpecialNearMiss(miss), true);
+    assert.equal(isSpecialNearMiss({ ...miss, clearance: 0.05 }), false, 'visually grazing the car is not exceptional');
+    assert.equal(isSpecialNearMiss({ ...miss, clearance: 0.6 }), false, 'a wide pass is ordinary');
+    assert.equal(isSpecialNearMiss({ ...miss, playerSpeed: 9 }), false, 'a slow pass is ordinary');
+    assert.equal(isSpecialNearMiss({ ...miss, speed: 8 }), false, 'overtaking with little relative speed is ordinary');
+    assert.equal(isSpecialNearMiss({ ...miss, source: 'static' }), false, 'roadside props do not trigger the cut-in');
+  } finally { resetNearMiss(); drainNearMisses(); }
+});
+
+test('a pass that used boost remains ineligible even if boost ends before separation', () => {
+  resetNearMiss(); drainNearMisses();
+  const obstacle: Obstacle = { latitude: 0, longitude: 0, radius: 0.55, movable: true };
+  try {
+    trackNearMiss({ obstacle, gap: 0.25, away: [1, 0], playerAlong: 0 }, 22, 16, 1, true);
+    trackNearMiss(undefined, 22, 16, 1, false);
+    assert.equal(drainNearMisses().length, 0);
+  } finally { resetNearMiss(); drainNearMisses(); }
+});
+
 const pastTree = (lateral: number) => {
   const { npc } = parkedAlongside(lateral, 150);
   setObstacleGroup('trees', [{ latitude: npc.latitude, longitude: npc.longitude, radius: 0.5 }]);
@@ -137,6 +177,7 @@ test('under boost, traffic never slows, turns or shoves the player', () => {
     if (withCar) setObstacleGroup('traffic', [npc]);
     try {
       const car = initialLoopCar();
+      car.boostCharge = 1; // This case starts with boost available.
       drainTrafficHits();
       let boosted = false;
       for (let i = 0; i < 160; i++) { stepLoopCar(car, boostControls, 1 / 60); boosted ||= car.boosting > 0; }

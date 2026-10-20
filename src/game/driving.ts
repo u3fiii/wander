@@ -4,7 +4,7 @@ import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
 import { difficulty } from './difficulty.ts';
-import { classifyTrafficHit, obstacleAt, reportTrafficHit, resetNearMiss, trackNearMiss, trackStaticNearMiss, trafficContact } from './obstacles.ts';
+import { classifyTrafficHit, markTrafficTouch, obstacleAt, reportTrafficHit, resetNearMiss, trackNearMiss, trackStaticNearMiss, trafficContact } from './obstacles.ts';
 
 export type CarState = {
   // On the globe: longitude, latitude offset in metres, heading from the road tangent.
@@ -14,6 +14,8 @@ export type CarState = {
   boost: number; boosting: number; drift: number;
   // Seconds left of the stronger road assist that follows a head-on hit (so the car settles back on the road).
   hitAssist?: number;
+  // Rails steering only: how fast the steering value is moving (it follows the pads on a spring, see RAILS).
+  steerRate?: number;
   // Seconds of boost left in the current burst, and cooldown progress (1 = ready).
   boostTime: number; boostCharge: number;
 };
@@ -69,16 +71,33 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
 // player only steers, and the car never leaves the road. Its offset from the road's centre line is held inside
 // `halfWidth`; at the edge its heading is turned back along the road (by `edgeTurn`) so it slides along the edge
 // instead of grinding, and the road assist pulls it straight `assist` times harder when the player lets go.
+// On rails the car only ever drives forward round the loop: a knock from traffic or a wall can swing it by at most
+// `maxHeading` (radians) off the road's direction, so it can never end up turned round and heading back the way
+// it came.
 export const DRIVE_MODE = { rails: false };
-export const RAILS = { halfWidth: 2.15, edgeTurn: 14, assist: 3, autoThrottle: 1, tutorialMaxSpeed: 6, tutorialCentering: 0.08 };
+// The touch pads are on/off, so on rails the steering follows them on a critically damped spring instead of
+// jumping: it builds up gently from a tap and lets go smoothly, `steerSpring` (rad/s) when a pad is held and
+// `releaseSpring` when it is let go (higher: back to straight a little quicker). `turnScale` softens the turn rate.
+export const RAILS = {
+  halfWidth: 2.15, edgeTurn: 14, assist: 3, autoThrottle: 1, tutorialMaxSpeed: 6, tutorialCentering: 0.08, maxHeading: 0.9,
+  steerSpring: 9, releaseSpring: 11, turnScale: 0.85,
+};
 function keepOnRails(car: CarState, dt: number) {
+  car.heading = wrapAngle(car.heading);
+  if (Math.abs(car.heading) > RAILS.maxHeading) {
+    car.heading = Math.sign(car.heading) * RAILS.maxHeading;
+    car.yawRate = 0;
+  }
   const limit = RAILS.halfWidth / lateralScale(car.x);
   if (Math.abs(car.z) <= limit) return;
   car.z = Math.sign(car.z) * limit;
-  const along = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
-  car.heading = along + wrapAngle(car.heading - along) * Math.exp(-RAILS.edgeTurn * dt);
+  car.heading *= Math.exp(-RAILS.edgeTurn * dt);
   car.yawRate = 0;
 }
+
+// The road direction the assists line the car up with: whichever way along the road it is closer to facing,
+// except on rails, where it is always forward.
+const roadAlong = (car: CarState) => DRIVE_MODE.rails || Math.cos(car.heading) >= 0 ? 0 : Math.PI;
 
 // Boost is earned as well as waited for: skilled moves top the meter up (shares of a full charge), a level-up
 // fills it. Nothing is added while a burst is burning.
@@ -138,6 +157,13 @@ export function updateSteering(car: CarState, controls: Controls, dt: number): v
     bend = Math.min(1, Math.abs(turn) / 0.055);
   }
   const steerTarget = Math.max(-1.3, Math.min(1.3, primary + tilt * (0.12 + 0.36 * bend)));
+  if (DRIVE_MODE.rails) {
+    const spring = steerTarget ? RAILS.steerSpring : RAILS.releaseSpring;
+    const rate = car.steerRate ?? 0;
+    car.steerRate = rate + (spring * spring * (steerTarget - car.steering) - 2 * spring * rate) * dt;
+    car.steering += car.steerRate * dt;
+    return;
+  }
   const response = steerTarget ? CAR_CONFIG.steerResponse : CAR_CONFIG.steerReturn;
   car.steering += (steerTarget - car.steering) * (1 - Math.exp(-response * dt));
 }
@@ -152,7 +178,7 @@ export function turnRate(steer: number, speed: number, drifting = false, boostin
   );
   // Boost also sharpens the steering: quicker turn-in and more grip, so the fast car still takes the bends easily.
   const boostTurn = boosting ? CAR_CONFIG.boostSteerFactor : 1;
-  const requested = steer * CAR_CONFIG.maxTurnRate * speedFactor * boostTurn * Math.sign(speed)
+  const requested = steer * CAR_CONFIG.maxTurnRate * (DRIVE_MODE.rails ? RAILS.turnScale : 1) * speedFactor * boostTurn * Math.sign(speed)
     * (drifting ? CAR_CONFIG.driftYawBoost : 1);
   const maxYaw = CAR_CONFIG.lateralGrip * (drifting ? CAR_CONFIG.driftGripBoost : 1) * (boosting ? CAR_CONFIG.boostGripFactor : 1) / Math.max(Math.abs(speed), 0.1);
   return Math.max(-maxYaw, Math.min(maxYaw, requested));
@@ -301,6 +327,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
     if (contact) closingSpeed = Math.max(0, -(relative[0] * contact.away[0] + relative[1] * contact.away[1]));
   }
   if (contact && contact.gap < 0) {
+    markTrafficTouch();
     const hit = contact.obstacle;
     hit.impact = Math.max(hit.impact ?? 0, Math.abs(car.speed) * impactPower());
     hit.impactPower = impactPower();
@@ -394,9 +421,10 @@ export function recoverToRoad(car: CarState) {
   resetNearMiss();
   const side = car.z === 0 ? 1 : Math.sign(car.z);
   car.z = side * Math.min(Math.abs(car.z), CAR_CONFIG.recoverLaneOffset);
-  car.heading = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
+  car.heading = roadAlong(car);
   car.speed = 0;
   car.steering = 0;
+  car.steerRate = 0;
   car.yawRate = 0;
   car.acceleration = 0;
   car.waterTravel = 0;
@@ -418,7 +446,7 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
   // of the way; otherwise it would pull the heading straight back and stop the car getting across.
   const recovering = (car.hitAssist ?? 0) > 0;
   if (Math.abs(car.speed) < (recovering ? 1.5 : 4)) return;
-  const along = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
+  const along = roadAlong(car);
   const error = wrapAngle(car.heading - along);
   const steering = Math.min(1, Math.abs(steerInput(controls)));
   const towardEdge = Math.abs(car.z) > CAR_CONFIG.roadEdgeStart && Math.sign(car.z - previousZ) === Math.sign(car.z);
@@ -490,7 +518,7 @@ function keepOnBridge(car: CarState, previousX: number, previousZ: number, dt: n
   const fromInside = previousLateral <= inner + 1e-3 || (previousLateral < outer && lateral - inner < outer - lateral);
   if (!fromInside && lateral >= outer) return;
   car.z = side * (fromInside ? inner : outer) / scale;
-  const along = Math.cos(car.heading) >= 0 ? 0 : Math.PI;
+  const along = roadAlong(car);
   const angle = wrapAngle(car.heading - along);
   if (Math.abs(angle) > 0.05) car.speed *= 1 - 2 * dt;
   if (fromInside) car.heading = along + angle * Math.exp(-CAR_CONFIG.bridgeStraightenRate * dt);

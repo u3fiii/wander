@@ -11,7 +11,7 @@ import { createBodySpring, updateBodySpring, updateCamera } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
 import { DRIVE_MODE, RAILS, initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
-import { clearObstacleGroup, drainNearMisses, drainTrafficHits, setObstacleGroup } from './obstacles';
+import { clearObstacleGroup, drainNearMisses, drainTrafficHits, drainTrafficTouch, isSpecialNearMiss, setObstacleGroup } from './obstacles';
 import type { NearMiss, Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
 import MiniatureWorld, { airplaneState } from './MiniatureWorld';
@@ -332,7 +332,7 @@ const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, rel
 // down; `rest` keeps it rare.
 // `pullOut` lifts the shot further by the same distance the boost camera backs away and rises (× BOOST_FEEL's
 // pullBack + rise), so the overhead view opens out about as wide as a boost's.
-const DRIFT_CINE = { trigger: 1.2, minPoints: 70, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5, pullOut: 0.136 };
+const DRIFT_CINE = { trigger: 1, minPoints: 40, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 3.5, pullOut: 0.136 };
 // The finale, when the last heart goes: time all but stops (`slowScale`), the camera goes straight up over the car,
 // climbing from `startHeight` to `height` m while looking down on it and turning a full `turn` round it, over
 // `duration` s (eased at both ends), and the frame takes the steel-blue end grade. It does not come back: the
@@ -549,7 +549,9 @@ function Traffic({ paused, enabled, progresses, player, reactive, nightBlend }: 
 }
 
 const ARRIVAL = { duration: 2.6, yaw: -1.1, pitch: 0.5, zoom: 0.62 };
-const COACH_CAMERA = { height: 23, enter: 2.2, exitDuration: 3, arcLift: 1.6 };
+// Steering lesson camera: straight down from `height` m. It eases in at `enter` (a damping rate) and, when the lesson
+// ends, eases back to the chase view over `exitDuration` seconds on a single sine in-out curve.
+const COACH_CAMERA = { height: 23, enter: 2.2, exitDuration: 1.7, arcLift: 1.6 };
 const WHEEL_ZOOM = { closer: 0.23, duration: 0.55, tilt: 0.12 };
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -1104,6 +1106,14 @@ function DrivingScene(props: SceneProps) {
     // side beat. A cut-in always plays through and fades out cleanly, and the next one can only start after a
     // short rest (re-triggering during a tussle made the grade pulse on and off).
     const cutInFree = crashTime.current < 0 && crashRest.current <= 0;
+    if (drainTrafficTouch()) {
+      nearMissRest.current = Math.max(nearMissRest.current, 4);
+      if (crashCool.current && crashTime.current >= 0) {
+        crashTime.current = -1;
+        coolBlend.current = 0;
+        crashCool.current = false;
+      }
+    }
     for (const hit of drainTrafficHits()) {
       if (driftRun.current.time > 0) driftRun.current.spoiled = true;
       const smash = !hit.boosted && hit.closing >= JUICE_CONFIG.crashCinematicClosing;
@@ -1142,7 +1152,8 @@ function DrivingScene(props: SceneProps) {
     }
     for (const miss of drainNearMisses()) {
       if (driftRun.current.time > 0) driftRun.current.threaded++;
-      if (cutInFree && crashTime.current < 0 && nearMissRest.current <= 0 && props.started) {
+      if (isSpecialNearMiss(miss) && cutInFree && crashTime.current < 0 && nearMissRest.current <= 0
+        && props.started && !props.tutorialDriving && car.boosting === 0) {
         crashTime.current = 0;
         crashSide.current = miss.side;
         crashCool.current = true;
@@ -1151,7 +1162,7 @@ function DrivingScene(props: SceneProps) {
         nearMissRest.current = difficulty.nearMissRest;
         playSlowMoWhoosh();
         miss.cinematic = true;
-      } else if (props.started) playSlowMoWhoosh(0.6);
+      }
       if (props.started) props.onNearMiss?.(miss);
     }
 
@@ -1319,22 +1330,23 @@ function DrivingScene(props: SceneProps) {
     // The first steering lesson looks straight down from above the car; as the lesson ends, orbit smoothly back
     // to the normal chase view rather than replacing the camera in a single frame.
     const coachTarget = props.started && props.tutorialCamera ? 1 : 0;
+    let coachMix: number;
     if (coachTarget) {
       coachCameraWasTarget.current = true;
       coachCameraBlend.current = THREE.MathUtils.damp(coachCameraBlend.current, 1, COACH_CAMERA.enter, realDt);
+      coachMix = THREE.MathUtils.smoothstep(coachCameraBlend.current, 0, 1);
     } else {
       if (coachCameraWasTarget.current) {
         coachCameraWasTarget.current = false;
-        coachCameraExitStart.current = coachCameraBlend.current;
+        // Leave from wherever the camera is now (the lesson may end before it was fully overhead).
+        coachCameraExitStart.current = THREE.MathUtils.smoothstep(coachCameraBlend.current, 0, 1);
         coachCameraExitElapsed.current = 0;
       }
-      if (coachCameraExitElapsed.current < COACH_CAMERA.exitDuration && coachCameraExitStart.current > 0) {
-        coachCameraExitElapsed.current = Math.min(COACH_CAMERA.exitDuration, coachCameraExitElapsed.current + realDt);
-        const progress = coachCameraExitElapsed.current / COACH_CAMERA.exitDuration;
-        coachCameraBlend.current = coachCameraExitStart.current * (1 - THREE.MathUtils.smoothstep(progress, 0, 1));
-      }
+      coachCameraExitElapsed.current = Math.min(COACH_CAMERA.exitDuration, coachCameraExitElapsed.current + realDt);
+      const progress = coachCameraExitElapsed.current / COACH_CAMERA.exitDuration;
+      coachMix = coachCameraExitStart.current * 0.5 * (1 + Math.cos(Math.PI * progress));
+      coachCameraBlend.current = coachMix;
     }
-    const coachMix = THREE.MathUtils.smoothstep(coachCameraBlend.current, 0, 1);
     if (coachMix > 0.001) {
       coachCamera.copy(groundVehiclePosition)
         .addScaledVector(surfaceUp, COACH_CAMERA.height);

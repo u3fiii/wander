@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyControls, initialCar, initialLoopCar, isBlocked, onRoadSurface, stepCar, stepLoopCar } from './driving.ts';
+import { DRIVE_MODE, RAILS, emptyControls, initialCar, initialLoopCar, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
 import type { CarState, Controls } from './driving.ts';
 import { CAR_CONFIG, LOOP_DRIVE } from './config.ts';
 import { FULL_TURN, GLOBE_RADIUS, LOOP_LENGTH, loopFrame, loopLatitude, loopPoint } from './globe.ts';
@@ -218,4 +218,25 @@ test('the bridge deck is drivable out to its railings, and the railings hold the
     assert.ok(car.x > bridge + 0.12, `the car crossed the bridge (lateral ${lateral}, heading ${heading})`);
     assert.ok(worst <= railing - CAR_CONFIG.trafficRadius + 0.05, `stayed inside the railings (reached ${worst.toFixed(2)} m)`);
   }
+});
+
+test('on rails (mobile) a knock never turns the car round: it keeps driving forward round the loop', () => {
+  DRIVE_MODE.rails = true;
+  try {
+    // Knocked almost all the way round (as a hard hit can do), at speed and stopped, steering either way.
+    for (const heading of [2.9, -2.9, 1.8, -1.6]) for (const speed of [12, 1]) for (const steer of ['left', 'right', 'none'] as const) {
+      const car = { ...initialLoopCar(), x: 0.6, heading, speed };
+      const start = car.x;
+      for (let i = 0; i < 60 * 4; i++) {
+        stepLoopCar(car, { ...emptyControls(), throttle: RAILS.autoThrottle, left: steer === 'left', right: steer === 'right' }, 1 / 60, true);
+        assert.ok(Math.abs(car.heading) <= RAILS.maxHeading + 1e-9, `heading ${car.heading.toFixed(2)} off the road direction`);
+      }
+      const travelled = Math.atan2(Math.sin(car.x - start), Math.cos(car.x - start));
+      assert.ok(travelled > 0.3, `heading ${heading}, speed ${speed}, ${steer}: went ${travelled.toFixed(2)} rad forward`);
+    }
+    // Back to road on rails also faces forward.
+    const car = { ...initialLoopCar(), heading: 3 };
+    recoverToRoad(car);
+    assert.equal(car.heading, 0);
+  } finally { DRIVE_MODE.rails = false; }
 });
