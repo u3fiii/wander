@@ -240,3 +240,49 @@ test('on rails (mobile) a knock never turns the car round: it keeps driving forw
     assert.equal(car.heading, 0);
   } finally { DRIVE_MODE.rails = false; }
 });
+
+// Road assist: only a hold on the road's edge (the curbs count as road), nothing while the car is inside it.
+// The widest the car gets from the road's centre line (m) when it is steered hard out of the road.
+function widestOutOfRoad(assist: number) {
+  const saved = CAR_CONFIG.roadAssist;
+  CAR_CONFIG.roadAssist = assist;
+  const car = { ...initialLoopCar(), x: 0.3, z: 0, speed: 12 };
+  let widest = 0;
+  for (let i = 0; i < 360; i++) {
+    stepLoopCar(car, { ...emptyControls(), forward: true, steer: -0.5 }, 1 / 60, true);
+    const latitude = loopLatitude(car.x) + car.z / GLOBE_RADIUS;
+    widest = Math.max(widest, distanceToRoadNetwork(latitude, car.x) + WORLD_SETTINGS.roads.mainWidth / 2);
+  }
+  CAR_CONFIG.roadAssist = saved;
+  return widest;
+}
+test('with the road assist high the road edge, curbs included, is a wall; with none the car just leaves', () => {
+  assert.ok(widestOutOfRoad(0) > 8, 'no assist: the car drives off');
+  assert.ok(widestOutOfRoad(CAR_CONFIG.roadAssistFull) < CAR_CONFIG.roadEdgeHalfWidth + 0.4, 'full assist: held at the edge (within the curbs and shoulder)');
+  assert.ok(widestOutOfRoad(0.8) <= widestOutOfRoad(0) + 1e-6, 'a gentle assist never lets it go further than none');
+  assert.equal(CAR_CONFIG.roadAssist, CAR_CONFIG.roadAssistFull, 'and by default the edge is a wall');
+});
+test('road assist does not straighten the car while it is inside the road', () => {
+  const heading = (assist: number) => {
+    const saved = CAR_CONFIG.roadAssist;
+    CAR_CONFIG.roadAssist = assist;
+    const car = { ...initialLoopCar(), x: 0.3, z: 0.2, heading: 0.15, speed: 8 };
+    for (let i = 0; i < 30; i++) stepLoopCar(car, { ...emptyControls(), forward: true }, 1 / 60, true);
+    CAR_CONFIG.roadAssist = saved;
+    return car.heading;
+  };
+  assert.ok(Math.abs(heading(0) - heading(3)) < 1e-9, 'the same heading with no assist and with a lot, well inside the road');
+});
+
+test('auto-cruise keeps the car in its own lane while the wheel is untouched, and the player\'s wheel wins', () => {
+  const lane = (steer: number) => {
+    const car = { ...initialLoopCar(), x: 0.05, z: -3, speed: 6, cruise: 1 };
+    // (holding about the traffic's pace, as the auto-cruise does)
+    for (let i = 0; i < 60 * 8; i++) stepLoopCar(car, { ...emptyControls(), throttle: Math.max(0, Math.min(1, (6 - car.speed) * 0.9)), steer } as never, 1 / 60, true);
+    return car.z;
+  };
+  assert.ok(Math.abs(lane(0) + CAR_CONFIG.cruiseLaneOffset) < 0.6, 'it settles in the traffic lane');
+  const withCruise = { ...initialLoopCar(), x: 0.05, z: 0, speed: 6, cruise: 1 }, without = { ...initialLoopCar(), x: 0.05, z: 0, speed: 6, cruise: 0 };
+  for (const car of [withCruise, without]) for (let i = 0; i < 30; i++) stepLoopCar(car, { ...emptyControls(), forward: true, steer: 1 }, 1 / 60, true);
+  assert.ok(Math.abs(withCruise.heading - without.heading) < 0.15, 'steering hard overrides the lane keeping');
+});

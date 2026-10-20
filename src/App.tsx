@@ -189,6 +189,8 @@ import type { DayLook } from './game/dayLook';
 import { NIGHT_LOOK_COLOURS, NIGHT_LOOK_SAVED, NIGHT_LOOK_SLIDERS, nightLook } from './game/nightLook';
 import type { NightLook } from './game/nightLook';
 import { CAR_TUNING_SAVED, CAR_TUNING_SLIDERS } from './game/carTuning';
+import { DRIFT_TUNING_SAVED, DRIFT_TUNING_SLIDERS, applyDriftTuning, currentDriftTuning } from './game/driftTuning';
+import type { DriftTuning } from './game/driftTuning';
 import type { CarTuning } from './game/carTuning';
 import { CAMERA_TUNING_SAVED, CAMERA_TUNING_SLIDERS, applyCameraTuning, cameraTuning } from './game/cameraTuning';
 import { BOOST_TUNING_COLOURS, BOOST_TUNING_SAVED, BOOST_TUNING_SLIDERS, applyBoostTuning, boostTuning, type BoostTuning } from './game/boostTuning';
@@ -209,7 +211,9 @@ import RunOver from './RunOver';
 import Leaderboard from './Leaderboard';
 import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { cycle, goTo, headingToNight, mixHex, nightAmount, resetToDay, skyAt, twilight } from './game/dayCycle';
-import { chapterFor, currentThemes, THEMES } from './game/themes';
+import { THEMES, THEME_COLOURS, THEME_TUNING_SLIDERS, applyThemeTuning, chapterFor, currentThemeTuning, currentThemes, readThemeEdit, setTheme as previewTheme, themeSettings, themeState, writeThemeEdit } from './game/themes';
+import type { ThemeEdit } from './game/themes';
+import { THEME_TUNING_SAVED } from './game/themeTuning';
 import { useGamepadMenu } from './useGamepadMenu';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
@@ -229,13 +233,13 @@ const NOTE_TEXT = {
   bigNear: ['BY A HAIR', 'TOO CLOSE', 'CLOSE CALL', 'INCHES'],
   // Ramming cars under boost: big too, with the combo.
   bigBoost: ['SMASH!', 'BOOM!', 'WRECKING BALL!', 'OUTTA MY WAY!', 'UNSTOPPABLE!'],
-  // The drift cut-in (overhead camera): the word slides in like the car.
-  cineDrift: ['SIDEWAYS', 'DRIFT KING', 'SMOOTH SLIDE', 'PURE STYLE'],
+  // The overhead near-miss cut-in (a tight head-on pass, camera looking straight down): purple, slid in like the car.
+  cineNear: ['THREADED IT', 'TIGHT SQUEEZE', 'NEEDLE EYE', 'RAZOR THIN'],
   drift: ['Nice drift!', 'Clean slide!'],
   bigDrift: ['Big drift!', 'Sideways!'],
   hugeDrift: ['Drift king!', 'Endless slide!'],
 };
-const NOTE_RANK = { bigSmash: 5, bigNear: 5, bigBoost: 5, cineDrift: 5, level: 4, newBest: 4, stage: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
+const NOTE_RANK = { bigSmash: 5, bigNear: 5, bigBoost: 5, cineNear: 5, level: 4, newBest: 4, stage: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
 // Notes that show a badge (an XP reward, a score) instead of points.
 const BADGE_NOTES: string[] = ['level', 'newBest', 'stage'];
 // How long the end-of-run shot plays before the run-over card (ms); matches FINALE in Scene.tsx.
@@ -312,17 +316,17 @@ function NightSky() {
 // nightLook.json. Picking a tab switches the game to that time of day so the changes can be seen.
 type LookValues = Record<string, number | string>;
 type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
-type LookMode = 'day' | 'night' | 'car' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
-function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onChange, onClose }: {
+type LookMode = 'day' | 'night' | 'car' | 'drift' | 'theme' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
+function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, serialize, onChange, onClose }: {
   mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
-  endpoint: string; onChange: (look: LookValues) => void; onClose: () => void;
+  endpoint: string; serialize?: () => unknown; onChange: (look: LookValues) => void; onClose: () => void;
 }) {
   const [status, setStatus] = useState('');
   const set = (key: string, value: number | string) => { onChange({ ...look, [key]: value }); setStatus(''); };
   const apply = async () => {
     setStatus('Saving…');
     try {
-      const response = await fetch(endpoint, { method: 'POST', body: JSON.stringify(look) });
+      const response = await fetch(endpoint, { method: 'POST', body: JSON.stringify(serialize ? serialize() : look) });
       setStatus(response.ok ? 'Saved — tell Claude to use it' : 'Could not save');
     } catch { setStatus('Could not save (dev server only)'); }
   };
@@ -332,6 +336,8 @@ function LookPanel({ mode, onMode, look, sliders, colours, saved, endpoint, onCh
         <button className={mode === 'day' ? 'on' : ''} onClick={() => { onMode('day'); setStatus(''); }}>Day</button>
         <button className={mode === 'night' ? 'on' : ''} onClick={() => { onMode('night'); setStatus(''); }}>Night</button>
         <button className={mode === 'car' ? 'on' : ''} onClick={() => { onMode('car'); setStatus(''); }}>Car</button>
+        <button className={mode === 'drift' ? 'on' : ''} onClick={() => { onMode('drift'); setStatus(''); }}>Drift</button>
+        <button className={mode === 'theme' ? 'on' : ''} onClick={() => { onMode('theme'); setStatus(''); }}>Theme</button>
         <button className={mode === 'camera' ? 'on' : ''} onClick={() => { onMode('camera'); setStatus(''); }}>Camera</button>
         <button className={mode === 'boost' ? 'on' : ''} onClick={() => { onMode('boost'); setStatus(''); }}>Boost</button>
         <button className={mode === 'nearMiss' ? 'on' : ''} onClick={() => { onMode('nearMiss'); setStatus(''); }}>Near miss</button>
@@ -426,6 +432,26 @@ export default function App() {
   const [nightValues, setNightValues] = useState<NightLook>({ ...nightLook });
   const changeNightLook = (next: NightLook) => { Object.assign(nightLook, next); setNightValues(next); };
   const [lookMode, setLookMode] = useState<LookMode>('day');
+  // The Theme tab edits one theme at a time (`theme`: 1 amber, 2 blossom, 3 frost), shown live as it is changed;
+  // the strength, speed and weather amount are shared. Apply saves every theme.
+  const themeFlat = (index: number, base: { strength: number; seconds: number; weather: number }): LookValues => ({ theme: index, strength: base.strength, seconds: base.seconds, weather: base.weather, ...readThemeEdit(index) });
+  const themeSaved = (index: number): LookValues => ({ theme: index, strength: THEME_TUNING_SAVED.strength, seconds: THEME_TUNING_SAVED.seconds, weather: THEME_TUNING_SAVED.weather, ...THEME_TUNING_SAVED.themes[THEMES[index].id] });
+  const [themeValues, setThemeValues] = useState<LookValues>(() => themeFlat(1, themeSettings));
+  const changeTheme = (next: LookValues) => {
+    const index = Number(next.theme);
+    if (index !== Number(themeValues.theme)) {
+      // Another theme to edit: show it, with its own values.
+      previewTheme(index, true);
+      setThemeValues(themeFlat(index, next as { strength: number; seconds: number; weather: number }));
+      return;
+    }
+    Object.assign(themeSettings, { strength: Number(next.strength), seconds: Number(next.seconds), weather: Number(next.weather) });
+    writeThemeEdit(index, next as unknown as ThemeEdit);
+    applyThemeTuning(currentThemeTuning(), true);
+    setThemeValues(next);
+  };
+  const [driftValues, setDriftValues] = useState<DriftTuning>(currentDriftTuning);
+  const changeDrift = (next: DriftTuning) => { applyDriftTuning(next); setDriftValues(next); };
   const [cameraValues, setCameraValues] = useState<CameraTuning>({ ...cameraTuning });
   const changeCamera = (next: CameraTuning) => { applyCameraTuning(next); setCameraValues(next); };
   const [boostValues, setBoostValues] = useState<BoostTuning>({ ...boostTuning });
@@ -460,7 +486,10 @@ export default function App() {
       // The day sky follows the theme, blended through a change.
       const themes = currentThemes();
       const plain = { top: dayLook.skyTop, horizon: dayLook.skyHorizon };
-      const from = themes.from.sky ?? plain, to = themes.to.sky ?? plain;
+      // (A theme's sky is its own colours, scaled by the theme strength like the rest of its look.)
+      const strength = Math.min(1, themeSettings.strength);
+      const tinted = (theme: typeof themes.from) => ({ top: mixHex(plain.top, theme.sky?.top ?? plain.top, strength), horizon: mixHex(plain.horizon, theme.sky?.horizon ?? plain.horizon, strength) });
+      const from = tinted(themes.from), to = tinted(themes.to);
       const daySky = { top: mixHex(from.top, to.top, themes.mix), horizon: mixHex(from.horizon, to.horizon, themes.mix) };
       const sky = skyAt(daySky, { top: nightLook.skyTop, horizon: nightLook.skyHorizon });
       const n = nightAmount();
@@ -564,7 +593,7 @@ export default function App() {
     const rank = NOTE_RANK[kind];
     const now = performance.now();
     const routine = RAILS && ['drift', 'near', 'flick', 'boost'].includes(kind);
-    const topCelebration = RAILS && rawPoints >= 0 && !kind.startsWith('big') && kind !== 'cineDrift' && kind !== 'newBest';
+    const topCelebration = RAILS && rawPoints >= 0 && !kind.startsWith('big') && kind !== 'cineNear' && kind !== 'newBest';
     if (quiet || routine || (topCelebration && now < nextMobileCelebration.current)
       || (now < shownNote.current.until && rank < shownNote.current.rank)) return;
     if (topCelebration) nextMobileCelebration.current = now + 10000;
@@ -575,7 +604,7 @@ export default function App() {
     shownNote.current = { rank, until: now + 1400 };
     setHitNote({ id: hitCount.current++, kind, points, text, badge });
     window.clearTimeout(hitTimer.current);
-    hitTimer.current = window.setTimeout(() => setHitNote(null), kind === 'level' ? 3000 : kind === 'bigBoost' ? 1200 : kind === 'cineDrift' ? 1550 : kind.startsWith('big') ? 1550 : 2200);
+    hitTimer.current = window.setTimeout(() => setHitNote(null), kind === 'level' ? 3000 : kind === 'bigBoost' ? 1200 : kind === 'cineNear' ? 1550 : kind.startsWith('big') ? 1550 : 2200);
   }, [RAILS]);
   // A level-up takes the caption slot over anything else, with the new title.
   useEffect(() => {
@@ -674,7 +703,6 @@ export default function App() {
     else { showNote('bump', -Math.round(hit.speed + 3), hit.speed < QUIET_HIT_SPEED); }
   }, [showNote, loseHeart]);
   // A drift held long enough gets the overhead slow-motion cut-in, with its word (the points come when it ends).
-  const handleDriftCinematic = useCallback(() => showNote('cineDrift', 0, false), [showNote]);
   // A drift pays for how long and how fast it slid; longer ones get bigger words.
   const handleDrift = useCallback((drift: DriftScore) => {
     // A drift is scored on its quality, not just its length: how hard into the slide, how clean (on the road),
@@ -692,7 +720,7 @@ export default function App() {
   // Near misses pay more the faster the pass and the thinner the gap.
   const handleNearMiss = useCallback((miss: NearMiss) => {
     runStats.current.nearMisses++;
-    showNote(miss.cinematic ? 'bigNear' : 'near', Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5, false);
+    showNote(miss.overhead ? 'cineNear' : miss.cinematic ? 'bigNear' : 'near', Math.round(miss.speed * (1 + 1.5 * (1 - Math.max(0, miss.gap) / NEAR_MISS.gap))) + 5, false);
     earnBoost(car.current, BOOST_EARN.nearMiss);
   }, [showNote]);
   useEffect(() => {
@@ -924,15 +952,18 @@ export default function App() {
     {showLook && <LookPanel
       mode={lookMode}
       onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
-      look={{ day: look, night: nightValues, car: carValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
-      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
-      colours={lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
-      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
-      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
+      look={{ day: look, night: nightValues, car: carValues, drift: driftValues, theme: themeValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
+      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, drift: DRIFT_TUNING_SLIDERS, theme: THEME_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
+      colours={lookMode === 'theme' ? THEME_COLOURS : lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
+      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, drift: DRIFT_TUNING_SAVED, theme: themeSaved(Number(themeValues.theme)), camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
+      serialize={lookMode === 'theme' ? currentThemeTuning : undefined}
+      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', drift: '/__drift-tuning', theme: '/__theme-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
       onChange={values => {
         if (lookMode === 'day') changeLook(values as DayLook);
         else if (lookMode === 'night') changeNightLook(values as NightLook);
         else if (lookMode === 'car') changeCar(values as unknown as CarTuning);
+        else if (lookMode === 'drift') changeDrift(values as unknown as DriftTuning);
+        else if (lookMode === 'theme') changeTheme(values);
         else if (lookMode === 'camera') changeCamera(values as unknown as CameraTuning);
         else if (lookMode === 'boost') changeBoost(values as unknown as BoostTuning);
         else if (lookMode === 'nearMiss') changeNearMiss(values as unknown as NearMissLook);
@@ -941,7 +972,7 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -1046,9 +1077,9 @@ export default function App() {
         <span className="speed-label"><b>{car.current.speed < -0.1 ? 'R' : 'D'}</b>{formatNumber(data.distance)} m</span>
       </div>
       {boostUnlocked && <BoostGauge car={car} controls={controls} offroad={!!data.offroad} mobile={!!RAILS} />}
-      {(!RAILS || !firstDrive) && hitNote && (hitNote.kind.startsWith('big') || hitNote.kind === 'cineDrift'
+      {(!RAILS || !firstDrive) && hitNote && (hitNote.kind.startsWith('big') || hitNote.kind === 'cineNear'
         // During a slow-motion cut-in, or ramming cars under boost: big, the word built letter by letter.
-        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineDrift: 'drift-cine' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
+        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineNear: 'near-cine' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
           <strong aria-hidden="true">{[...hitNote.text].map((letter, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{letter === ' ' ? '\u00a0' : letter}</span>)}</strong>
           <span className="big-scores" aria-hidden="true">
             {hitNote.points !== 0 && <b style={{ '--i': hitNote.text.length } as CSSProperties}>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b>}

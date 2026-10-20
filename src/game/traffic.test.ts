@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { CAR_CONFIG } from './config.ts';
 import { initialLoopCar, stepLoopCar } from './driving.ts';
 import { GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
-import { NEAR_MISS, classifyTrafficHit, clearObstacleGroup, drainNearMisses, drainTrafficHits, isSpecialNearMiss, resetNearMiss, setObstacleGroup, trackNearMiss, trafficContact } from './obstacles.ts';
+import { trafficAhead, NEAR_MISS, classifyTrafficHit, clearObstacleGroup, drainNearMisses, drainTrafficHits, isSpecialNearMiss, resetNearMiss, setObstacleGroup, trackNearMiss, trafficContact } from './obstacles.ts';
 import type { TrafficContact } from './obstacles.ts';
 import { difficulty } from './difficulty.ts';
 import type { Obstacle } from './obstacles.ts';
@@ -207,4 +207,19 @@ test('in rails mode the car never leaves the road, even steering hard into the v
     assert.ok(car.speed > 10, 'kept driving');
     assert.ok(worst < 0.7, `went ${worst.toFixed(2)} off the road`);
   } finally { DRIVE_MODE.rails = false; }
+});
+
+test('the car ahead in the same lane is found with its gap and speed; oncoming and side lanes are not', () => {
+  const car = (latitude: number, east: number, velocity: number, direction: 1 | -1) => ({
+    latitude, longitude: east / GLOBE_RADIUS, radius: 0.6, movable: true, forward: [0, direction] as [number, number], halfLength: 0.9, velocity,
+  });
+  setObstacleGroup('ahead', [
+    car(10 / GLOBE_RADIUS, 0, 5, 1),     // 10 m ahead, going the same way
+    car(6 / GLOBE_RADIUS, 2.4, 5, -1),   // beside us, in the other lane, coming towards us
+  ]);
+  const found = trafficAhead(0, 0, [0, 1], 18, 1.6, 0.8);
+  assert.ok(found && Math.abs(found.gap - (10 - 0.9 - 0.8)) < 0.05, 'the gap is bumper to bumper');
+  assert.equal(found!.speed, 5);
+  assert.equal(trafficAhead(0, 0, [0, 1], 6, 1.6, 0.8), undefined, 'out of range');
+  clearObstacleGroup('ahead');
 });

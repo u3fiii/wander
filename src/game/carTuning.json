@@ -5,8 +5,11 @@
   "maxTurnRate": 4.2,
   "steerResponse": 5,
   "lateralGrip": 13,
-  "driftYawBoost": 1.56,
-  "roadAssist": 0.8,
+  "roadAssist": 3,
   "rollStiffness": 12,
-  "maxRoll": 0.255
+  "maxRoll": 0.255,
+  "cruiseSpeed": 6,
+  "cruiseDelay": 0.7,
+  "cruiseRamp": 2.5,
+  "cruiseFollowGap": 4.5
 }

@@ -51,3 +51,21 @@ test('only an exact themed colour is matched; a near miss of two colours is left
   assert.equal(slotForColour(new THREE.Color(PALETTE.land)), themeSlotOf('land'));
   assert.equal(slotForColour(new THREE.Color('#000000')), -1);
 });
+
+test('theme tuning: strength scales how far a theme departs from the base, and edits show up live', async () => {
+  const { applyThemeTuning, currentThemeTuning, themeSettings } = await import('./themes.ts');
+  const before = currentThemeTuning();
+  setTheme(3, true);
+  const frost = new THREE.Color(THEMES[3].colours.land!);
+  const base = new THREE.Color(PALETTE.land);
+  applyThemeTuning({ ...before, strength: 0 }, true);
+  assert.ok(themedColour('land', new THREE.Color()).equals(base), 'at strength 0 the world keeps its base colours');
+  applyThemeTuning({ ...before, strength: 0.5 }, true);
+  const half = themedColour('land', new THREE.Color());
+  assert.ok(Math.abs(half.r - (base.r + frost.r) / 2) < 1e-6, 'half strength is half way');
+  applyThemeTuning({ ...before, themes: { ...before.themes, frost: { ...before.themes.frost, land: '#ff0000' } } }, true);
+  assert.ok(themedColour('land', new THREE.Color()).equals(new THREE.Color('#ff0000')), 'an edited colour is what is drawn');
+  assert.equal(themeSettings.strength, 1);
+  applyThemeTuning(before, true);
+  setTheme(0, true);
+});

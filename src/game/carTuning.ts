@@ -14,8 +14,11 @@ export const CAR_TUNING_SLIDERS: Array<{ key: keyof CarTuning; label: string; mi
   { key: 'maxTurnRate', label: 'Steering', min: 1.5, max: 7, step: 0.05 },
   { key: 'steerResponse', label: 'Steering response', min: 1, max: 14, step: 0.1 },
   { key: 'lateralGrip', label: 'Grip', min: 5, max: 26, step: 0.1 },
-  { key: 'driftYawBoost', label: 'Drift', min: 1, max: 2.2, step: 0.01 },
   { key: 'roadAssist', label: 'Road assist', min: 0, max: 3, step: 0.05 },
   { key: 'rollStiffness', label: 'Suspension stiffness', min: 12, max: 110, step: 1 },
   { key: 'maxRoll', label: 'Body roll', min: 0, max: 0.35, step: 0.005 },
+  { key: 'cruiseSpeed', label: 'Auto-cruise speed (m/s, 0 = off)', min: 0, max: 14, step: 0.1 },
+  { key: 'cruiseDelay', label: 'Auto-cruise starts after (s)', min: 0, max: 4, step: 0.1 },
+  { key: 'cruiseRamp', label: 'Auto-cruise builds up over (s)', min: 0.5, max: 8, step: 0.1 },
+  { key: 'cruiseFollowGap', label: 'Gap kept behind a car (m)', min: 2, max: 12, step: 0.1 },
 ];

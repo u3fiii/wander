@@ -13,6 +13,8 @@ export type Theme = {
   sky: { top: string; horizon: string } | null;
   // How much of the day look's warm (amber) sunlight the theme keeps.
   sunWarmth: number;
+  // A touch-up over all of the theme's own colours (Theme tab): hue shift (a turn is 1), saturation ×, brightness added.
+  adjust?: { hue: number; saturation: number; lightness: number };
   weather: Weather;
 };
 
@@ -96,10 +98,12 @@ export function slotForMaterial(material: THREE.Material) {
 export const themeUniforms = { uThemeFactor: { value: THEMED_KEYS.map(() => new THREE.Vector3(1, 1, 1)) } };
 export const THEME_SLOTS = THEMED_KEYS.length;
 
-const TRANSITION_SECONDS = 3.5;
+// How strongly a theme tints the world (0 = not at all, 1 = as designed, above 1 = pushed further), how long a change
+// takes (s), and how much weather falls (× its usual amount): tuned live from the Theme tab of the look panel.
+export const themeSettings = { strength: 1, seconds: 3.5, weather: 1 };
 export const themeState = { from: 0, to: 0, progress: 1, version: 0 };
 const themedHex = (theme: Theme, key: PaletteKey) => theme.colours[key] ?? PALETTE[key];
-const fromColour = new THREE.Color(), toColour = new THREE.Color(), current = new THREE.Color();
+const fromColour = new THREE.Color(), toColour = new THREE.Color(), current = new THREE.Color(), tint = new THREE.Color(), scratch = new THREE.Color();
 const ease = (t: number) => t * t * (3 - 2 * t);
 export const themeMix = () => ease(themeState.progress);
 
@@ -114,7 +118,7 @@ export function setTheme(index: number, instant = false) {
 // Moves the change along by `dt` seconds. True while something changed (so callers retint only then).
 export function advanceTheme(dt: number) {
   if (themeState.progress >= 1) return false;
-  themeState.progress = Math.min(1, themeState.progress + dt / TRANSITION_SECONDS);
+  themeState.progress = Math.min(1, themeState.progress + dt / Math.max(0.1, themeSettings.seconds));
   refresh();
   return true;
 }
@@ -129,13 +133,26 @@ function refresh() {
 }
 const factor = (target: number, original: number) => Math.min(12, target / Math.max(original, 0.02));
 
+// The theme's colour for a palette key, touched up by its hue / saturation / brightness (only colours it overrides).
+const hsl = { h: 0, s: 0, l: 0 };
+function adjusted(theme: Theme, key: PaletteKey) {
+  tint.set(themedHex(theme, key));
+  const adjust = theme.adjust;
+  if (!adjust || theme.colours[key] === undefined || (adjust.hue === 0 && adjust.saturation === 1 && adjust.lightness === 0)) return tint;
+  tint.getHSL(hsl);
+  return tint.setHSL(((hsl.h + adjust.hue) % 1 + 1) % 1, Math.min(1, Math.max(0, hsl.s * adjust.saturation)), Math.min(1, Math.max(0, hsl.l + adjust.lightness)));
+}
+
 // A palette colour as it looks right now (mid-change, a blend of the two themes).
 export function themedColour(key: PaletteKey, out: THREE.Color, from = THEMES[themeState.from], to = THEMES[themeState.to], t = themeMix()) {
-  fromColour.set(themedHex(from, key));
-  toColour.set(themedHex(to, key));
+  // Each theme's colour is its distance from the base colour, scaled by the strength.
+  scratch.set(PALETTE[key]);
+  fromColour.copy(scratch).lerp(adjusted(from, key), themeSettings.strength);
+  toColour.copy(scratch).lerp(adjusted(to, key), themeSettings.strength);
   return out.copy(fromColour).lerp(toColour, t);
 }
-export const themeSunWarmth = () => THREE.MathUtils.lerp(THEMES[themeState.from].sunWarmth, THEMES[themeState.to].sunWarmth, themeMix());
+const warmthOf = (theme: Theme) => 1 + (theme.sunWarmth - 1) * themeSettings.strength;
+export const themeSunWarmth = () => THREE.MathUtils.lerp(warmthOf(THEMES[themeState.from]), warmthOf(THEMES[themeState.to]), themeMix());
 export const currentThemes = () => ({ from: THEMES[themeState.from], to: THEMES[themeState.to], mix: themeMix() });
 
 // Merged scenery: each vertex carries its slot (`themeSlot`, -1 for colours no theme touches) and the shader
@@ -203,4 +220,52 @@ export function applyRetint(tracked: Tracked) {
     }
     mesh.instanceColor!.needsUpdate = true;
   }
+}
+
+// ---- Tuning (the Theme tab of the look panel; saved values come from themeTuning.json via themeTuning.ts) ----
+// What can be edited per theme, and the palette colours it stands for.
+export const THEME_EDIT_COLOURS = {
+  land: 'land', treeMain: 'mainTree', treeDark: 'darkTree', treeLight: 'lightTree', treeAccent: 'accentTree', sea: 'oceanDeep', seaShallow: 'oceanShallow',
+} as const satisfies Record<string, PaletteKey>;
+export type ThemeEdit = { [K in keyof typeof THEME_EDIT_COLOURS]: string } & { skyTop: string; skyHorizon: string; sunWarmth: number; hue: number; saturation: number; lightness: number };
+export type ThemeTuning = { strength: number; seconds: number; weather: number; themes: Record<string, ThemeEdit> };
+// The Theme tab: which theme is being edited, the shared settings, and the colour pickers (the two sky colours get
+// their own pair of pickers in the panel).
+export const THEME_COLOURS = [
+  { key: 'land', label: 'Ground' }, { key: 'treeMain', label: 'Trees' }, { key: 'treeDark', label: 'Dark trees' }, { key: 'treeLight', label: 'Light trees' },
+  { key: 'treeAccent', label: 'Accent trees' }, { key: 'sea', label: 'Sea' }, { key: 'seaShallow', label: 'Sea (shallow)' },
+];
+export const THEME_TUNING_SLIDERS: Array<{ key: string; label: string; min: number; max: number; step: number; group?: string }> = [
+  { group: 'Theme to edit (1 amber · 2 blossom · 3 frost)', key: 'theme', label: 'Theme', min: 1, max: 3, step: 1 },
+  { group: 'This theme', key: 'sunWarmth', label: 'Sunlight warmth', min: 0, max: 1.6, step: 0.05 },
+  { key: 'hue', label: 'Shift all its colours (hue)', min: -0.5, max: 0.5, step: 0.005 },
+  { key: 'saturation', label: 'Colour richness', min: 0, max: 2, step: 0.02 },
+  { key: 'lightness', label: 'Brighter / darker', min: -0.3, max: 0.3, step: 0.01 },
+  { group: 'All themes', key: 'strength', label: 'How strongly it tints', min: 0, max: 1.5, step: 0.05 },
+  { key: 'weather', label: 'Weather amount', min: 0, max: 1, step: 0.05 },
+  { key: 'seconds', label: 'Change takes (s)', min: 1, max: 12, step: 0.5 },
+];
+const PLAIN_SKY = { top: '#72cef0', horizon: '#e6f7f3' };
+
+export function readThemeEdit(index: number): ThemeEdit {
+  const theme = THEMES[index];
+  const edit = { skyTop: theme.sky?.top ?? PLAIN_SKY.top, skyHorizon: theme.sky?.horizon ?? PLAIN_SKY.horizon, sunWarmth: theme.sunWarmth, hue: theme.adjust?.hue ?? 0, saturation: theme.adjust?.saturation ?? 1, lightness: theme.adjust?.lightness ?? 0 } as ThemeEdit;
+  for (const [field, key] of Object.entries(THEME_EDIT_COLOURS)) (edit as unknown as Record<string, string>)[field] = theme.colours[key as PaletteKey] ?? PALETTE[key as PaletteKey];
+  return edit;
+}
+export function writeThemeEdit(index: number, edit: ThemeEdit) {
+  const theme = THEMES[index];
+  for (const [field, key] of Object.entries(THEME_EDIT_COLOURS)) theme.colours[key as PaletteKey] = (edit as unknown as Record<string, string>)[field];
+  theme.sky = { top: edit.skyTop, horizon: edit.skyHorizon };
+  theme.sunWarmth = edit.sunWarmth;
+  theme.adjust = { hue: edit.hue ?? 0, saturation: edit.saturation ?? 1, lightness: edit.lightness ?? 0 };
+}
+export function currentThemeTuning(): ThemeTuning {
+  return { ...themeSettings, themes: Object.fromEntries(THEMES.slice(1).map((theme, index) => [theme.id, readThemeEdit(index + 1)])) };
+}
+// Lays tuning over the themes and settings, then shows it (instantly) if `show`.
+export function applyThemeTuning(tuning: ThemeTuning, show = false) {
+  Object.assign(themeSettings, { strength: tuning.strength, seconds: tuning.seconds, weather: tuning.weather });
+  THEMES.forEach((theme, index) => { const edit = tuning.themes[theme.id]; if (edit && index > 0) writeThemeEdit(index, edit); });
+  if (show) setTheme(themeState.to, true); else refresh();
 }

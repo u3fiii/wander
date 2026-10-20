@@ -5,5 +5,7 @@
   "nightContrast": 1.15,
   "nightLift": 0,
   "nightGlow": 0,
-  "dayStrength": 1
+  "dayStrength": 1,
+  "cutChance": 0.7,
+  "overheadShare": 0.5
 }

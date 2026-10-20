@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Weather as WeatherKind } from './themes';
 import { VISUAL_QUALITY } from './artDirection';
+import { themeSettings } from './themes';
 
 // The theme's weather: petals, leaves or snow drifting down through a box of air in front of the camera, so it
 // is always around the car wherever it drives. One instanced mesh (a single draw call); a flake that leaves the
@@ -47,7 +48,9 @@ export default function Weather({ weather, globeCentre, intensity }: {
   useFrame(({ camera, clock }, delta) => {
     if (!mesh.current || !kind) return;
     const amount = intensity.current ?? 1;
-    mesh.current.visible = amount > 0.02;
+    // Tunable density (Theme tab): the first share of the flakes fall.
+    mesh.current.count = Math.min(count, Math.round(count * themeSettings.weather));
+    mesh.current.visible = amount > 0.02 && mesh.current.count > 0;
     if (!mesh.current.visible) return;
     material.opacity = WEATHER.opacity * amount;
     const dt = Math.min(delta, 0.05), time = clock.elapsedTime, half = WEATHER.box / 2;

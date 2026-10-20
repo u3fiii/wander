@@ -19,4 +19,6 @@ export const NEAR_MISS_LOOK_SLIDERS: Array<{ key: keyof NearMissLook; label: str
   { key: 'nightLift', label: 'Shadow lift', min: 0, max: 0.4, step: 0.01 },
   { key: 'nightGlow', label: 'Light glow', min: 0, max: 1.5, step: 0.01 },
   { key: 'dayStrength', label: 'Day look strength', min: 0, max: 1, step: 0.01, group: 'Day' },
+  { key: 'cutChance', label: 'Chance a near miss gets a slow-motion', min: 0, max: 1, step: 0.01, group: 'Slow-motion' },
+  { key: 'overheadShare', label: 'Share that are the purple overhead one', min: 0, max: 1, step: 0.01 },
 ];

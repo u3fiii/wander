@@ -1,0 +1,52 @@
+{
+  "strength": 1,
+  "seconds": 3.5,
+  "weather": 1,
+  "themes": {
+    "amber": {
+      "skyTop": "#86b9d6",
+      "skyHorizon": "#f6e3c8",
+      "sunWarmth": 1.2,
+      "hue": 0,
+      "saturation": 1,
+      "lightness": 0,
+      "land": "#c6a463",
+      "treeMain": "#df8b3d",
+      "treeDark": "#b95a31",
+      "treeLight": "#ebb84c",
+      "treeAccent": "#c8472f",
+      "sea": "#4a8db6",
+      "seaShallow": "#8ac6d9"
+    },
+    "blossom": {
+      "skyTop": "#7cc8ee",
+      "skyHorizon": "#fbe9ef",
+      "sunWarmth": 0.8,
+      "hue": 0,
+      "saturation": 1,
+      "lightness": 0,
+      "land": "#a9c97a",
+      "treeMain": "#f2a7c0",
+      "treeDark": "#d97a9e",
+      "treeLight": "#f8c9d6",
+      "treeAccent": "#fbe2e8",
+      "sea": "#4fa6d2",
+      "seaShallow": "#9be3ea"
+    },
+    "frost": {
+      "skyTop": "#9fc8e4",
+      "skyHorizon": "#eef5f8",
+      "sunWarmth": 0.2,
+      "hue": 0,
+      "saturation": 1,
+      "lightness": 0,
+      "land": "#eef3f6",
+      "treeMain": "#4c7a5c",
+      "treeDark": "#3a6350",
+      "treeLight": "#dbe7ea",
+      "treeAccent": "#f4f8f9",
+      "sea": "#4a7ea6",
+      "seaShallow": "#a2cde0"
+    }
+  }
+}

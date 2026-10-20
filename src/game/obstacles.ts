@@ -39,7 +39,9 @@ export function drainTrafficTouch() { const touched = trafficTouched; trafficTou
 
 // Near misses: the player flashed past a traffic car at speed without touching it. `speed` is the relative
 // speed of the pass (m/s), `gap` the closest the two bodies got (m), `side` as for hits.
-export type NearMiss = { speed: number; gap: number; side: number; playerSpeed: number; clearance: number; source: 'traffic' | 'static'; cinematic?: boolean };
+export type NearMiss = { speed: number; gap: number; side: number; playerSpeed: number; clearance: number; source: 'traffic' | 'static'; cinematic?: boolean;
+  // Which slow-motion it got (see nearMissCut.ts): the overhead, purple one, or else the usual faded one.
+  overhead?: boolean };
 // Only a fast, clean pass with a small but visibly real gap deserves a cut-in.
 export function isSpecialNearMiss(miss: NearMiss) {
   return miss.source === 'traffic' && miss.playerSpeed >= 9 && miss.speed >= 11
@@ -187,6 +189,25 @@ export function trafficContact(latitude: number, longitude: number, forward: [nu
       obstacle, gap, playerAlong: (2 * s - 1) * halfLength,
       away: distance > 1e-6 ? [away[0] / length, away[1] / length] : [1, 0],
     };
+  }
+  return best;
+}
+
+// The nearest traffic car straight ahead (in the same lane) within `maxDistance`: the bumper-to-bumper gap and how fast
+// it is moving along `forward` (negative: coming towards us). For the cars that drive themselves to keep their distance.
+export function trafficAhead(latitude: number, longitude: number, forward: [number, number], maxDistance: number, laneHalfWidth: number, ownHalfLength: number) {
+  let best: { gap: number; speed: number } | undefined;
+  for (const obstacle of flat) {
+    if (!obstacle.movable || obstacle.inactive) continue;
+    const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
+    const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
+    const along = east * forward[0] + north * forward[1];
+    const aside = Math.abs(east * forward[1] - north * forward[0]);
+    if (along <= 0 || along > maxDistance || aside > laneHalfWidth) continue;
+    const gap = along - (obstacle.halfLength ?? 0) - ownHalfLength;
+    if (best && gap >= best.gap) continue;
+    const of = obstacle.forward ?? [0, 1];
+    best = { gap, speed: (obstacle.velocity ?? 0) * (of[0] * forward[0] + of[1] * forward[1]) };
   }
   return best;
 }

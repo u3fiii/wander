@@ -23,6 +23,7 @@ import { difficulty, trafficActive, trafficSwerves } from './difficulty';
 import { dayLook } from './dayLook';
 import { warmLight } from './warmLight';
 import { nightLook } from './nightLook';
+import { nearMissLook } from './nearMissLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
 import { cullBehindGlobe } from './horizonCull';
@@ -30,6 +31,8 @@ import { advanceTheme, currentThemes, setTheme, themeSunWarmth, themedColour, th
 import type { Weather as WeatherKind } from './themes';
 import { roadLayoutFor } from './roadLayouts';
 import { currentPad } from './gamepad';
+import { DRIFT_CAM, DRIFT_CINE, DRIFT_SCORE } from './driftTuning';
+import { pickNearMissCut } from './nearMissCut';
 import Weather from './Weather';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
@@ -81,7 +84,7 @@ export type SceneProps = {
   // layout the run drives (roadLayouts.ts; a new one rebuilds the world, so it only changes between runs).
   theme?: number; road?: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
-  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void; onDriftCinematic?: () => void;
+  onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void;
 };
 
 const localUp = new THREE.Vector3(0, 1, 0);
@@ -328,18 +331,7 @@ export const scoreDrift = (drift: DriftScore) => Math.round(drift.time * drift.s
   * (0.4 + 0.6 * Math.max(0, drift.clean))
   * (1 + 0.6 * Math.min(drift.switches, 3))
   * (1 + 0.5 * Math.min(drift.threaded, 3)));
-const DRIFT_SCORE = { minSpeed: 3.5, grace: 0.4, settle: 0.3 };
-// Drift camera, once a slide has settled in: it swings out to the outside of the turn to show the car's
-// angle, drops a little lower, widens the lens a touch and leans into the corner. All gentle, on smooth easing.
-const DRIFT_CAM = { swing: 2.4, drop: 0.9, fov: 4, roll: 0.025, attack: 2.6, release: 1.8 };
-// Drift cut-in: once a good drift has lasted `trigger` seconds (on the road, at speed, not under boost), the camera
-// shoots up to look straight down on the car from `height` m (with the car heading up the screen; `turn` can swing
-// it round the car on the way, off by default) while time slows to `slowScale` (gentler than a crash, so the slide
-// still moves), holds a moment, then comes back down more slowly to land behind the car again. All on real time. `rise` and `hold` are when it is fully up and when it starts back
-// down; `rest` keeps it rare.
-// `pullOut` lifts the shot further by the same distance the boost camera backs away and rises (× BOOST_FEEL's
-// pullBack + rise), so the overhead view opens out about as wide as a boost's.
-const DRIFT_CINE = { trigger: 0.8, minPoints: 25, duration: 1.8, rise: 0.35, hold: 0.65, slowScale: 0.35, height: 13, back: 0.5, turn: 0, rest: 15, pullOut: 0.136 };
+// The drift scoring, camera and cut-in numbers live in driftTuning.ts (they are tuned live from the Drift tab).
 // The finale, when the last heart goes: time all but stops (`slowScale`), the camera goes straight up over the car,
 // climbing from `startHeight` to `height` m while looking down on it and turning a full `turn` round it, over
 // `duration` s (eased at both ends), and the frame takes the steel-blue end grade. It does not come back: the
@@ -805,6 +797,9 @@ function DrivingScene(props: SceneProps) {
     themedColour('haze', lightColors.dayFog);
   });
   const pedals = useRef({ throttle: 0, brake: 0 });
+  // Auto-cruise (CAR_CONFIG.cruise*): seconds with no pedal held, how far in the car is driving itself, and the speed it
+  // started from.
+  const cruiseState = useRef({ idle: 0, blend: 0, from: 0 });
   const bodyRoll = useRef(0);
   const fovKick = useRef(0);
   const trauma = useRef(0);
@@ -838,7 +833,7 @@ function DrivingScene(props: SceneProps) {
   useEffect(() => { finaleTime.current = props.finale ? 0 : -1; }, [props.finale]);
   const driftOffset = useMemo(() => new THREE.Vector3(), []);
   const seaNear = useRef(0);
-  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0, cinematicShown: false });
+  const driftRun = useRef({ time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0 });
   const driftHold = useRef(0);
   const driftSide = useRef(0);
   const crashRest = useRef(0);
@@ -1148,13 +1143,42 @@ function DrivingScene(props: SceneProps) {
       throttle = Math.max(throttle, RAILS.autoThrottle * cruise.current);
     }
     if (keys.gentle || pad.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
+    // Auto-cruise: with no gas, brake or handbrake held the car soon starts to roll on its own, up to about the
+    // traffic's pace, and keeps its distance from the car ahead (any pedal hands it straight back to the player).
+    const auto = cruiseState.current;
+    const pedalHeld = keys.forward || keys.back || keys.brake || keys.boost || pad.throttle > 0.05 || pad.brake > 0.05 || pad.handbrake || pad.boost || car.boosting > 0;
+    const cruising = CAR_CONFIG.cruiseSpeed > 0 && props.started && !props.paused && !props.finale && !props.tutorialDriving && !props.mapView && !DRIVE_MODE.rails;
+    auto.idle = cruising && !pedalHeld ? auto.idle + realDt : 0;
+    const wasIdle = auto.blend === 0;
+    auto.blend = auto.idle > CAR_CONFIG.cruiseDelay
+      ? Math.min(1, auto.blend + realDt / Math.max(0.2, CAR_CONFIG.cruiseRamp))
+      : Math.max(0, auto.blend - realDt / 0.25);
+    if (wasIdle && auto.blend > 0) auto.from = Math.max(0, car.speed);
+    car.cruise = auto.blend;
+    let cruiseBrake = 0;
+    if (auto.blend > 0) {
+      // The speed it wants: eased from where it was to the traffic's pace, and never faster than the car ahead allows.
+      const ease = auto.blend * auto.blend * (3 - 2 * auto.blend);
+      let wanted = auto.from + (CAR_CONFIG.cruiseSpeed - auto.from) * ease;
+      let hard = 0.4;
+      if (car.leadGap >= 0) {
+        const room = car.leadGap - CAR_CONFIG.cruiseStopGap;
+        const allowed = room <= 0 ? 0 : Math.max(0, car.leadSpeed + (car.leadGap - CAR_CONFIG.cruiseFollowGap) * 0.6);
+        wanted = Math.min(wanted, allowed);
+        if (room < 4) hard = 0.9;
+      }
+      throttle = Math.max(throttle, THREE.MathUtils.clamp((wanted - car.speed) * 0.9, 0, 1) * (wanted > 0.1 ? 1 : 0));
+      cruiseBrake = THREE.MathUtils.clamp((car.speed - wanted - 0.1) * 0.35, 0, hard);
+      // Held to a stop (behind a car, or while settling to a halt) means braking, not coasting the last bit.
+      if (wanted <= 0.05 && car.speed > 0.02) cruiseBrake = Math.max(cruiseBrake, 0.5);
+    }
     const keySteer = Number(keys.left) - Number(keys.right);
     const driveControls = {
       ...keys,
       brake: keys.brake || pad.handbrake,
       boost: keys.boost || pad.boost,
       throttle,
-      reverse: Math.max(pedals.current.brake, pad.brake),
+      reverse: Math.max(pedals.current.brake, pad.brake, cruiseBrake),
       steer: [pad.steer, keySteer, keys.steer ?? 0].reduce((best, value) => (Math.abs(value) > Math.abs(best) ? value : best), 0),
     };
     const intro = !props.started && zoomProgress.current < 0.02;
@@ -1167,8 +1191,16 @@ function DrivingScene(props: SceneProps) {
     // side beat. A cut-in always plays through and fades out cleanly, and the next one can only start after a
     // short rest (re-triggering during a tussle made the grade pulse on and off).
     const cutInFree = crashTime.current < 0 && crashRest.current <= 0;
+    // Dev only: `__cut('overhead')` / `__cut('cool')` from the console plays a near-miss slow-motion at once, to look at it.
+    if (import.meta.env.DEV) (window as unknown as { __cut?: (kind: string) => void }).__cut = kind => {
+      nearMissRest.current = 0; driftCutRest.current = 0; crashRest.current = 0;
+      if (kind === 'overhead') { driftCutTime.current = 0; driftOrbit.current = 0; playSlowMoWhoosh(0.7); props.onNearMiss?.({ speed: 22, gap: 0.2, side: 1, playerSpeed: 12, clearance: 0.2, source: 'traffic', cinematic: true, overhead: true }); }
+      else { crashTime.current = 0; crashSide.current = 1; crashCool.current = true; coolBlend.current = 1; crashStrength.current = NEAR_MISS_CAM.strength; playSlowMoWhoosh(); props.onNearMiss?.({ speed: 18, gap: 0.2, side: 1, playerSpeed: 12, clearance: 0.2, source: 'traffic', cinematic: true }); }
+    };
     if (drainTrafficTouch()) {
       nearMissRest.current = Math.max(nearMissRest.current, 4);
+      // A touch ends an overhead near-miss shot early too (it was meant to be a clean pass).
+      if (driftCutTime.current >= 0) driftCutTime.current = Math.max(driftCutTime.current, DRIFT_CINE.hold);
       if (crashCool.current && crashTime.current >= 0) {
         crashTime.current = -1;
         coolBlend.current = 0;
@@ -1215,14 +1247,27 @@ function DrivingScene(props: SceneProps) {
       if (driftRun.current.time > 0) driftRun.current.threaded++;
       if (isSpecialNearMiss(miss) && cutInFree && crashTime.current < 0 && nearMissRest.current <= 0
         && props.started && !props.tutorialDriving && car.boosting === 0) {
-        crashTime.current = 0;
-        crashSide.current = miss.side;
-        crashCool.current = true;
-        coolBlend.current = 1;
-        crashStrength.current = NEAR_MISS_CAM.strength;
-        nearMissRest.current = difficulty.nearMissRest;
-        playSlowMoWhoosh();
-        miss.cinematic = true;
+        // Whether it gets a slow-motion at all, and which of the two, is a roll (tuned in the Near miss tab).
+        let cut = pickNearMissCut(Math.random, nearMissLook.cutChance, nearMissLook.overheadShare);
+        if (cut === 'overhead' && (driftCutTime.current >= 0 || driftCutRest.current > 0)) cut = 'faded';
+        if (cut !== 'none') {
+          nearMissRest.current = difficulty.nearMissRest;
+          miss.cinematic = true;
+          if (cut === 'overhead') {
+            // The overhead one: the camera rises to look straight down on the car while time slows (purple grade).
+            miss.overhead = true;
+            driftCutTime.current = 0;
+            driftOrbit.current = 0;
+            playSlowMoWhoosh(0.7);
+          } else {
+            crashTime.current = 0;
+            crashSide.current = miss.side;
+            crashCool.current = true;
+            coolBlend.current = 1;
+            crashStrength.current = NEAR_MISS_CAM.strength;
+            playSlowMoWhoosh();
+          }
+        }
       }
       if (props.started) props.onNearMiss?.(miss);
     }
@@ -1249,18 +1294,7 @@ function DrivingScene(props: SceneProps) {
       if (!onRoad) run.offroad += dt;
     } else if (run.time > 0 && (run.gap += dt) > DRIFT_SCORE.grace) {
       if (!run.spoiled && run.time >= difficulty.driftMinTime && run.offroad < run.time * 0.3) props.onDrift?.({ time: run.time, speed: run.speed / run.time, angle: run.steer / run.time, clean: 1 - run.offroad / run.time, switches: run.switches, threaded: run.threaded });
-      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0, cinematicShown: false });
-    }
-    if (drifting && run.time >= DRIFT_CINE.trigger && !run.spoiled && !run.cinematicShown && run.offroad < run.time * 0.3
-      && scoreDrift({ time: run.time, speed: run.speed / run.time, angle: run.steer / run.time,
-        clean: 1 - run.offroad / run.time, switches: run.switches, threaded: run.threaded }) >= DRIFT_CINE.minPoints
-      && driftCutTime.current < 0 && driftCutRest.current <= 0
-      && crashTime.current < 0 && car.boosting === 0) {
-      run.cinematicShown = true;
-      driftCutTime.current = 0;
-      driftOrbit.current = 0;
-      playSlowMoWhoosh(0.7);
-      props.onDriftCinematic?.();
+      Object.assign(run, { time: 0, speed: 0, gap: 0, offroad: 0, spoiled: false, steer: 0, side: 0, switches: 0, threaded: 0 });
     }
     const driftShown = drifting && run.time > DRIFT_SCORE.settle;
     driftHold.current = THREE.MathUtils.damp(driftHold.current, driftShown ? 1 : 0, driftShown ? DRIFT_CAM.attack : DRIFT_CAM.release, realDt);
@@ -1386,7 +1420,7 @@ function DrivingScene(props: SceneProps) {
       props.cameraMode, cameraSpeed.current, landingCameraBlend.current, landingHeight.current, !!props.mobileCamera,
     );
     // Camera falls back on hard acceleration and catches up afterwards.
-    cameraLag.current = THREE.MathUtils.damp(cameraLag.current, THREE.MathUtils.clamp(cameraAcceleration.current * JUICE_CONFIG.cameraLag, -2, 2), JUICE_CONFIG.cameraLagStiffness, dt);
+    cameraLag.current = THREE.MathUtils.damp(cameraLag.current, THREE.MathUtils.clamp(cameraAcceleration.current * JUICE_CONFIG.cameraLag, -JUICE_CONFIG.cameraLagMax, JUICE_CONFIG.cameraLagMax), JUICE_CONFIG.cameraLagStiffness, dt);
     gameCamera.addScaledVector(vehicleTangent, -cameraLag.current);
     // The first steering lesson looks straight down from above the car; as the lesson ends, orbit smoothly back
     // to the normal chase view rather than replacing the camera in a single frame.

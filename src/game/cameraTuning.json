@@ -1,10 +1,15 @@
 {
   "baseFov": 44.5,
   "speedFovBoost": 25,
-  "cameraDistance": 7.9,
-  "cameraHeight": 14.6,
+  "cameraDistance": 10.5,
+  "cameraHeight": 15.6,
   "cameraSmoothing": 1.7,
   "focusRange": 15.5,
   "blurDriving": 1.65,
-  "blurOverview": 1.2
+  "blurOverview": 1.2,
+  "cameraHeightPerSpeed": 0.035,
+  "cameraLookAhead": 6,
+  "cameraLag": 0.15,
+  "cameraLagMax": 2,
+  "cameraLagStiffness": 6
 }

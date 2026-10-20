@@ -26,8 +26,16 @@ export const CAR_CONFIG = {
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.
   gamepadDeadzone: 0.1,
   gamepadCurve: 1.5,
+  // The handbrake (Space): speed lost per second while sliding (steering with it held), and when pulled straight (a share of the foot brake's).
   handbrakeDecel: 4,
+  handbrakeStraightFactor: 1, // × the brakes
+  // How the slide builds up and lets go: seconds to reach a full drift, and to straighten out after letting go (at
+  // 0.03 or less it is instant, as it was originally).
+  driftEntryTime: 0.02,
+  driftExitTime: 0.02,
   driftMinSpeed: 3,
+  // How far the wheel must be turned (0..1) with the brake held for it to count as a drift.
+  driftSteerMin: 0.2,
   driftYawBoost: 1.25,
   driftGripBoost: 1.6,
   coastFriction: 0.45,
@@ -43,8 +51,21 @@ export const CAR_CONFIG = {
   lateralGrip: 13,
   // Hidden road assist: how fast the heading eases back to the road direction (rad/s per rad),
   // the extra pull when heading for the edge, and how far from the centre the edge pull starts.
-  roadAssist: 0.8,
+  // Road assist keeps the car on the road, and nothing more: it does not straighten the car while it is inside the
+  // road. The road ends at the outer edge of the curbs (`roadEdgeHalfWidth`, m from the centre line). Within
+  // `roadEdgeZone` m of it a car heading outward is turned back along the road, at a rate that grows with the assist
+  // (`roadAssist`); the turn-back is `roadEdgeAssist` per unit of assist. At `roadAssistFull` and above (the default) the
+  // edge is a wall, as on a phone: the car cannot cross it, wherever it is pushed from. Below that the car can still push out past the edge, by less the
+  // higher the assist, and the assist is gone with none.
+  roadAssist: 3,
+  roadEdgeHalfWidth: 3.04, // asphalt (2.88) plus the curb, a hair inside the bridge railing posts (3.08) so the wall never snags on them
+  roadEdgeZone: 0.9,
+  roadAssistFull: 3,
+  roadEdgeSlack: 1.6,
+  roadEdgeHold: 14,
   roadEdgeAssist: 3,
+  // The old assist (boost, touch screens): the heading eases back toward the road direction, firmer once the car is
+  // this far (m) from the centre line and heading out.
   roadEdgeStart: 1.8,
   // The approach to the bridge: extra road assist (per second) that fades out over this many radians from the deck.
   bridgeFunnelAssist: 14,
@@ -117,6 +138,20 @@ export const CAR_CONFIG = {
   maxWheelSteerAngle: 0.52,
   wheelNodeNames: { FL: '', FR: '', RL: '', RR: '' },
   logModelNodes: false,
+  // Auto-cruise (desktop): with no gas, brake or handbrake held for `cruiseDelay` s the car starts to roll on its own,
+  // building up over `cruiseRamp` s to `cruiseSpeed` m/s (about the traffic's pace; 0 turns it off), keeps to its lane
+  // while the wheel is untouched, and never closes on a car ahead: it holds `cruiseFollowGap` m behind it and stops
+  // short of `cruiseStopGap` m. Any pedal hands the car back to the player at once.
+  cruiseSpeed: 6,
+  cruiseDelay: 0.7,
+  cruiseRamp: 2.5,
+  cruiseFollowGap: 4.5,
+  cruiseStopGap: 3,
+  cruiseLookAhead: 18,
+  cruiseLaneOffset: 1.22,
+  cruiseLaneGain: 0.7,
+  cruiseLaneMaxAngle: 0.28,
+  cruiseSteerRate: 3,
   // Camera
   cameraDistance: 13,
   cameraHeight: 16,
@@ -176,7 +211,9 @@ export const JUICE_CONFIG = {
   boostCameraLookAhead: 0.5,
   boostCameraPulseDecay: 3.8,
   fovKickDecay: 3,
+  // On hard acceleration the camera falls back (and catches up after): metres of fall-back per m/s² (up to `cameraLagMax` m).
   cameraLag: 0.15,
+  cameraLagMax: 2,
   cameraLagStiffness: 6,
   shakeMax: 0.35,
   shakeDecay: 1.8,
