@@ -447,24 +447,24 @@
    bottom edge, between the buttons, and the captions rise above them. */
 .steer-pads{position:absolute;inset:0;z-index:2;display:flex;touch-action:none}
 .steer-zone{position:relative;flex:1;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:background .25s}
-.steer-button{position:absolute;bottom:calc(30px + env(safe-area-inset-bottom));display:grid;place-items:center;width:78px;height:78px;border-radius:50%;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;transition:transform .18s cubic-bezier(.3,1.6,.5,1),background .15s,color .15s,box-shadow .2s}
-.steer-zone.left .steer-button{left:20px}
-.steer-zone.right .steer-button{right:20px}
-.steer-lesson{position:absolute;bottom:calc(130px + env(safe-area-inset-bottom));z-index:1;display:grid;justify-items:center;gap:2px;min-width:78px;padding:7px 9px 3px;border-radius:12px;background:#f4b544;color:#2b1d05;box-shadow:0 5px 18px #0006;font-size:11px;font-weight:800;letter-spacing:.05em;white-space:nowrap;pointer-events:none;animation:lesson-nudge 1.7s ease-in-out infinite}
+.steer-button{position:absolute;bottom:calc(30px + env(safe-area-inset-bottom));display:grid;place-items:center;width:62px;height:62px;border-radius:50%;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff;transition:transform .18s cubic-bezier(.3,1.6,.5,1),background .15s,color .15s,box-shadow .2s}
+.steer-zone.left .steer-button{left:16px}
+.steer-zone.right .steer-button{right:16px}
+.steer-lesson{position:absolute;bottom:calc(130px + env(safe-area-inset-bottom));z-index:1;display:grid;justify-items:center;gap:2px;min-width:62px;padding:7px 9px 3px;border-radius:12px;background:#f4b544;color:#2b1d05;box-shadow:0 5px 18px #0006;font-size:11px;font-weight:800;letter-spacing:.05em;white-space:nowrap;pointer-events:none;animation:lesson-nudge 1.7s ease-in-out infinite}
 .steer-lesson::after{content:'↓';font-size:17px;line-height:14px}
-.steer-zone.left .steer-lesson{left:20px}
-.steer-zone.right .steer-lesson{right:20px}
+.steer-zone.left .steer-lesson{left:16px}
+.steer-zone.right .steer-lesson{right:16px}
 .steer-zone.practiced .steer-lesson{background:#2f9a62;color:#fff;animation:none}
 .steer-zone.tutorial:not(.practiced):not(.held) .steer-button{border-color:#f4b544;box-shadow:0 0 0 5px #f4b54444,var(--glass-shadow)}
 @keyframes lesson-nudge{0%,100%{translate:0 0}50%{translate:0 5px}}
-.steer-button svg{width:36px;height:36px;stroke-width:2.6}
+.steer-button svg{width:29px;height:29px;stroke-width:2.6}
 .steer-zone.held .steer-button{background:linear-gradient(135deg,#f4b544,color-mix(in srgb,#ff3b30 calc(var(--strain) * 100%),#f4b544));border-color:color-mix(in srgb,#ff3b30 calc(var(--strain) * 100%),#f4b544);color:#2b1d05;transform:scale(.9);box-shadow:0 0 0 7px color-mix(in srgb,#ff3b3033 calc(var(--strain) * 100%),#f4b5442e),var(--glass-shadow)}
 .rails.playing .speedometer{right:auto;left:calc(50% + 7px);bottom:calc(52px + env(safe-area-inset-bottom));width:84px;height:84px;z-index:3}
 .rails .boost-gauge{left:auto;right:calc(50% + 7px);bottom:calc(63px + env(safe-area-inset-bottom));width:62px;height:62px;z-index:3}
 .rails .speed-readout strong{font-size:26px}
 .rails .boost-flame{width:30px;height:30px}
 .rails .hit-note{bottom:calc(178px + env(safe-area-inset-bottom))}
-@media (max-width:380px){.steer-button{width:66px;height:66px}.steer-zone.left .steer-button,.steer-zone.left .steer-lesson{left:14px}.steer-zone.right .steer-button,.steer-zone.right .steer-lesson{right:14px}.steer-lesson{bottom:calc(116px + env(safe-area-inset-bottom));min-width:66px;padding-inline:5px;font-size:10px}}
+@media (max-width:380px){.steer-button{width:53px;height:53px}.steer-zone.left .steer-button,.steer-zone.left .steer-lesson{left:16px}.steer-zone.right .steer-button,.steer-zone.right .steer-lesson{right:16px}.steer-lesson{bottom:calc(116px + env(safe-area-inset-bottom));min-width:53px;padding-inline:5px;font-size:10px}}
 @media (prefers-reduced-motion:reduce){.steer-button{transition:none}.steer-lesson{animation:none}}
 
 /* Slow-motion notes: while the cut-in plays the player can only watch, so the note takes the stage. Big, in the
