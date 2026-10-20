@@ -19,17 +19,6 @@ export type Theme = {
 export const THEMES: Theme[] = [
   { id: 'meadow', colours: {}, sky: null, sunWarmth: 1, weather: { kind: 'none', colours: [] } },
   {
-    id: 'blossom',
-    colours: {
-      land: '#a9c97a', coastWall: '#c7ae7c', sand: '#f3e2bb',
-      mainTree: '#f2a7c0', darkTree: '#d97a9e', lightTree: '#f8c9d6', accentTree: '#fbe2e8',
-      flowerCream: '#ffd9e6', oceanDeep: '#4fa6d2', oceanShallow: '#9be3ea',
-      lightDaySkyFill: '#f7ecee', haze: '#f2e3ea',
-    },
-    sky: { top: '#7cc8ee', horizon: '#fbe9ef' }, sunWarmth: 0.8,
-    weather: { kind: 'petals', colours: ['#f9d3df', '#fbe5ec'] },
-  },
-  {
     id: 'amber',
     colours: {
       land: '#c6a463', coastWall: '#a98a56', sand: '#e8d29f', soil: '#8e6a44',
@@ -40,6 +29,17 @@ export const THEMES: Theme[] = [
     },
     sky: { top: '#86b9d6', horizon: '#f6e3c8' }, sunWarmth: 1.2,
     weather: { kind: 'leaves', colours: ['#df8b3d', '#c8472f', '#ebb84c'] },
+  },
+  {
+    id: 'blossom',
+    colours: {
+      land: '#a9c97a', coastWall: '#c7ae7c', sand: '#f3e2bb',
+      mainTree: '#f2a7c0', darkTree: '#d97a9e', lightTree: '#f8c9d6', accentTree: '#fbe2e8',
+      flowerCream: '#ffd9e6', oceanDeep: '#4fa6d2', oceanShallow: '#9be3ea',
+      lightDaySkyFill: '#f7ecee', haze: '#f2e3ea',
+    },
+    sky: { top: '#7cc8ee', horizon: '#fbe9ef' }, sunWarmth: 0.8,
+    weather: { kind: 'petals', colours: ['#f9d3df', '#fbe5ec'] },
   },
   {
     id: 'frost',
