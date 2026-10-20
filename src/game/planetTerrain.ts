@@ -1,5 +1,4 @@
 import { GLOBE_RADIUS } from './globe.ts';
-import { PALETTE } from './palette.ts';
 
 // Faceted planet controls. These values are intentionally kept together so
 // the coastline density, coverage, elevation and palette can be tuned quickly.
@@ -8,9 +7,6 @@ export const PLANET_TERRAIN = {
   threshold: 0.5,
   landHeight: GLOBE_RADIUS * 0.03,
   noiseFrequency: 1.35,
-  oceanColor: PALETTE.oceanDeep,
-  landColor: PALETTE.land,
-  coastWallColor: PALETTE.coastWall,
   facetLightnessVariation: 0.04,
 } as const;
 

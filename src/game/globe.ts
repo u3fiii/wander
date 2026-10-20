@@ -40,7 +40,62 @@ export function spherePoint(latitude: number, longitude: number, elevation = 0):
   return [x * radius, y * radius - GLOBE_RADIUS, z * radius];
 }
 
-function rawLoopLatitude(angle: number) {
+// Road layouts: each chapter of a run (seasons.ts) bends the road a little differently, so its curves don't stay
+// the same lap after lap. A layout adds a few gentle waves to the hand-shaped loop; they fade out round the bridge
+// (`ROAD_ANCHORS`), where the road, the water channel and the bridge deck have to line up. No layout (the first
+// chapter) is the original road. Everything built along the road reads it through these functions, so it follows.
+export type RoadWave = { k: number; amplitude: number; phase: number };
+// Round each anchor the waves are fully off within `still` (radians of longitude, wider than the bridge itself, as
+// the road's smoothing below reaches 0.36 either way) and fade in by `clear`.
+const ROAD_ANCHORS = [{ at: 1.56, still: 0.5, clear: 0.95 }];
+let roadWaves: RoadWave[] = [];
+// Bumped whenever the layout changes, for anything that caches what it worked out from the road.
+export let roadLayoutVersion = 0;
+// The layout's offset (and its slope) is tabulated round the loop when it is set: the road is read very often
+// (physics, traffic, and many thousands of times while the world is built), so it must stay cheap.
+const TABLE_SIZE = 2048;
+const offsetTable = new Float64Array(TABLE_SIZE + 1);
+const slopeTable = new Float64Array(TABLE_SIZE + 1);
+export function setRoadLayout(waves: RoadWave[]) {
+  if (waves.length === roadWaves.length && waves.every((wave, index) => wave.k === roadWaves[index].k
+    && wave.amplitude === roadWaves[index].amplitude && wave.phase === roadWaves[index].phase)) return;
+  roadWaves = waves;
+  roadLayoutVersion++;
+  for (let index = 0; index <= TABLE_SIZE; index++) {
+    const angle = (index / TABLE_SIZE) * FULL_TURN;
+    offsetTable[index] = exactOffset(angle);
+    slopeTable[index] = (exactOffset(angle + 1e-4) - exactOffset(angle - 1e-4)) / 2e-4;
+  }
+}
+function anchorMask(angle: number) {
+  let mask = 1;
+  for (const anchor of ROAD_ANCHORS) {
+    const distance = Math.abs(Math.atan2(Math.sin(angle - anchor.at), Math.cos(angle - anchor.at)));
+    const t = Math.max(0, Math.min(1, (distance - anchor.still) / (anchor.clear - anchor.still)));
+    mask *= t * t * (3 - 2 * t);
+  }
+  return mask;
+}
+// The waves are in longitude, which shrinks towards the poles: scaled by cos² of the road's latitude there, they
+// bend the road about as much wherever it runs.
+function exactOffset(angle: number) {
+  if (!roadWaves.length) return 0;
+  let sum = 0;
+  for (const wave of roadWaves) sum += wave.amplitude * Math.sin(wave.k * angle + wave.phase);
+  const reach = Math.cos(shapeLatitude(angle));
+  return anchorMask(angle) * reach * reach * sum;
+}
+function fromTable(table: Float64Array, angle: number) {
+  if (!roadWaves.length) return 0;
+  const at = (((angle / FULL_TURN) % 1) + 1) % 1 * TABLE_SIZE;
+  const index = Math.floor(at), t = at - index;
+  return table[index] + (table[index + 1] - table[index]) * t;
+}
+const layoutOffset = (angle: number) => fromTable(offsetTable, angle);
+const layoutSlope = (angle: number) => fromTable(slopeTable, angle);
+
+// The hand-shaped loop, before any layout.
+function shapeLatitude(angle: number) {
   const frontDetour = Math.exp(1.5 * (Math.cos(angle - 1.05) - 1));
   const northDetour = Math.exp(2 * (Math.cos(angle - 2) - 1));
   const southDetour = Math.exp(2 * (Math.cos(angle - 4.65) - 1));
@@ -53,6 +108,10 @@ function rawLoopLatitude(angle: number) {
     - 0.33 * southDetour;
 }
 
+function rawLoopLatitude(angle: number) {
+  return shapeLatitude(angle) + layoutOffset(angle);
+}
+
 function rawLoopSlope(angle: number) {
   const frontDetour = Math.exp(1.5 * (Math.cos(angle - 1.05) - 1));
   const northDetour = Math.exp(2 * (Math.cos(angle - 2) - 1));
@@ -62,7 +121,8 @@ function rawLoopSlope(angle: number) {
     + 0.35 * Math.cos(angle * 5 - 0.85)
     + 0.63 * Math.sin(angle - 1.05) * frontDetour
     - 0.56 * Math.sin(angle - 2) * northDetour
-    + 0.66 * Math.sin(angle - 4.65) * southDetour;
+    + 0.66 * Math.sin(angle - 4.65) * southDetour
+    + layoutSlope(angle);
 }
 
 // A circular low-pass filter keeps the large detours while spreading

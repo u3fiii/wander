@@ -97,36 +97,53 @@ export function updateTireMarks(marks: TireMarks, dt: number, vehicle: THREE.Obj
 // pulled in closer to the centre of the frame, like the focus lines of an action shot. They move on game time, so
 // in the slow motion they crawl past.
 const CRASH_LINES = { count: 34, innerRadius: 1.3, outerRadius: 4.4, length: 10, thickness: 0.1, opacity: 1, speed: 46, color: '#ffffff' };
+// Each set of lines is one instanced mesh (one draw call, not one per line); `lines`/`crashLines` hold each line's
+// place, written into the instances as they move.
+function lineSet(geometry: THREE.BufferGeometry, material: THREE.Material, places: THREE.Object3D[]) {
+  const mesh = new THREE.InstancedMesh(geometry, material, places.length);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  // They ride with the camera, so they are always in view.
+  mesh.frustumCulled = false;
+  const sync = () => {
+    places.forEach((place, index) => { place.updateMatrix(); mesh.setMatrixAt(index, place.matrix); });
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  sync();
+  return { mesh, sync };
+}
+
 export function createSpeedLines() {
   const count = JUICE_CONFIG.speedLineCount;
   const group = new THREE.Group();
   const geometry = new THREE.BoxGeometry(0.025, 0.025, 2.4);
   const material = new THREE.MeshBasicMaterial({ color: PALETTE.clouds, transparent: true, opacity: 0, depthWrite: false, fog: false });
   const lines = Array.from({ length: count }, () => {
-    const mesh = new THREE.Mesh(geometry, material);
+    const place = new THREE.Object3D();
     const angle = Math.random() * Math.PI * 2;
     const radius = 2.2 + Math.random() * 2.2;
-    mesh.position.set(Math.cos(angle) * radius * 1.6, Math.sin(angle) * radius, -4 - Math.random() * 26);
-    group.add(mesh);
-    return mesh;
+    place.position.set(Math.cos(angle) * radius * 1.6, Math.sin(angle) * radius, -4 - Math.random() * 26);
+    return place;
   });
+  const lineMesh = lineSet(geometry, material, lines);
+  group.add(lineMesh.mesh);
   const crashGeometry = new THREE.BoxGeometry(CRASH_LINES.thickness, CRASH_LINES.thickness, CRASH_LINES.length);
   // Added on top of the frame (additive), so they read as light, strong even over the red grade.
   const crashMaterial = new THREE.MeshBasicMaterial({ color: CRASH_LINES.color, transparent: true, opacity: 0, depthWrite: false, fog: false, blending: THREE.AdditiveBlending });
   const crashGroup = new THREE.Group();
   const crashLines = Array.from({ length: CRASH_LINES.count }, () => {
-    const mesh = new THREE.Mesh(crashGeometry, crashMaterial);
+    const place = new THREE.Object3D();
     const angle = Math.random() * Math.PI * 2;
     const radius = CRASH_LINES.innerRadius + Math.random() * (CRASH_LINES.outerRadius - CRASH_LINES.innerRadius);
-    mesh.position.set(Math.cos(angle) * radius * 1.6, Math.sin(angle) * radius, -3 - Math.random() * 24);
-    mesh.scale.setScalar(0.6 + Math.random() * 0.8);
-    crashGroup.add(mesh);
-    return mesh;
+    place.position.set(Math.cos(angle) * radius * 1.6, Math.sin(angle) * radius, -3 - Math.random() * 24);
+    place.scale.setScalar(0.6 + Math.random() * 0.8);
+    return place;
   });
+  const crashMesh = lineSet(crashGeometry, crashMaterial, crashLines);
+  crashGroup.add(crashMesh.mesh);
   group.add(crashGroup);
   return {
-    group, lines, material, crashGroup, crashLines, crashMaterial,
-    dispose: () => { geometry.dispose(); material.dispose(); crashGeometry.dispose(); crashMaterial.dispose(); },
+    group, lines, material, crashGroup, crashLines, crashMaterial, syncLines: lineMesh.sync, syncCrashLines: crashMesh.sync,
+    dispose: () => { geometry.dispose(); material.dispose(); crashGeometry.dispose(); crashMaterial.dispose(); lineMesh.mesh.dispose(); crashMesh.mesh.dispose(); },
   };
 }
 export type SpeedLines = ReturnType<typeof createSpeedLines>;
@@ -151,11 +168,13 @@ export function updateSpeedLines(lines: SpeedLines, dt: number, camera: THREE.Ca
     line.position.z += (12 + Math.abs(speed) * 2.2) * dt;
     if (line.position.z > -1) line.position.z -= 30;
   }
+  lines.syncLines();
   if (!lines.crashGroup.visible) return;
   for (const line of lines.crashLines) {
     line.position.z += CRASH_LINES.speed * dt;
     if (line.position.z > -1) line.position.z -= 26;
   }
+  lines.syncCrashLines();
 }
 
 // Dust: cream low-poly puffs from the rear wheels, scaled by throttle and speed, with bursts on launch and drift.

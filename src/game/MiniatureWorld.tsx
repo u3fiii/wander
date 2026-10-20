@@ -6,7 +6,7 @@ import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { withDraco } from './gltf';
 import { ColladaLoader } from 'three/addons/loaders/ColladaLoader.js';
-import { GLOBE_RADIUS, roadLatitude, sphereNormal, spherePoint } from './globe';
+import { GLOBE_RADIUS, roadLatitude, roadLayoutVersion, sphereNormal, spherePoint } from './globe';
 import { MOUNTAIN_SITES, REGIONS, ROAD_PATHS, WORLD_SETTINGS, distanceToRoadNetwork, isLandAt, landInfluence, regionInfluence, roadPathFrame, roadPoint, roadSurfaceElevation, terrainElevation, groundNormal, terrainPoint } from './worldMap';
 import type { RoadPath } from './worldMap';
 import { clearObstacleGroup, obstacleAt, setObstacleGroup } from './obstacles';
@@ -16,6 +16,7 @@ import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { createSimpleSwimRing } from './mobileScenery';
 import { batchStatic } from './staticBatch';
+import { RETINT, applyRetint, themeSlotOf, themeState, themedColour, trackRetint } from './themes';
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
 import type { PaletteKey } from './palette';
 import type { FaceSample } from './recolor';
@@ -606,10 +607,12 @@ function JapaneseBridgeGarden() {
 const BEACH = { keepClear: 3.2, areas: [[0.22, 5.34, 0.34], [0.5, 5.64, 0.3]] as Array<[number, number, number]> };
 type BeachFacet = { latitude: number; longitude: number; direction: THREE.Vector3; toSea: THREE.Vector3; ring: 0 | 1 };
 let beachCache: BeachFacet[] | null = null;
+let beachLayout = -1;
 const facetKey = (direction: THREE.Vector3) => `${direction.x.toFixed(3)},${direction.y.toFixed(3)},${direction.z.toFixed(3)}`;
 
 function beachFacets() {
-  if (beachCache) return beachCache;
+  if (beachCache && beachLayout === roadLayoutVersion) return beachCache;
+  beachLayout = roadLayoutVersion;
   const geometry = new THREE.IcosahedronGeometry(1, PLANET_TERRAIN.detail);
   const position = geometry.getAttribute('position');
   const vertexKey = (index: number) => `${position.getX(index).toFixed(5)},${position.getY(index).toFixed(5)},${position.getZ(index).toFixed(5)}`;
@@ -758,10 +761,13 @@ function buildFacetedLand() {
   const attribute = source.getAttribute('position');
   const topPositions: number[] = [];
   const topColors: number[] = [];
+  // Retint slots (themes.ts): sandy facets follow the sand colour, the rest the land.
+  const topSlots: number[] = [];
+  const landSlot = themeSlotOf('land'), sandSlot = themeSlotOf('sand');
   const edges = new Map<string, { count: number; a: THREE.Vector3; b: THREE.Vector3; centroid: THREE.Vector3 }>();
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
   const centroid = new THREE.Vector3();
-  const baseColor = new THREE.Color(PLANET_TERRAIN.landColor);
+  const baseColor = new THREE.Color(PALETTE.land);
   const sandColor = new THREE.Color(PALETTE.sand);
   const sandRings = beachRings();
   const edgeKey = (start: THREE.Vector3, end: THREE.Vector3) => {
@@ -808,12 +814,13 @@ function buildFacetedLand() {
       * PLANET_TERRAIN.facetLightnessVariation * 2;
     const ring = sandRings.get(facetKey(facetCentroid.clone().normalize()));
     const facetColor = baseColor.clone().lerp(sandColor, ring === 0 ? 1 : ring === 1 ? 0.45 : 0).offsetHSL(0, 0, variation);
-    for (let vertex = 0; vertex < 3; vertex++) topColors.push(facetColor.r, facetColor.g, facetColor.b);
+    for (let vertex = 0; vertex < 3; vertex++) { topColors.push(facetColor.r, facetColor.g, facetColor.b); topSlots.push(ring === 0 ? sandSlot : landSlot); }
     registerEdge(q0, q1, facetCentroid); registerEdge(q1, q2, facetCentroid); registerEdge(q2, q0, facetCentroid);
   });
   const top = new THREE.BufferGeometry();
   top.setAttribute('position', new THREE.Float32BufferAttribute(topPositions, 3));
   top.setAttribute('color', new THREE.Float32BufferAttribute(topColors, 3));
+  top.setAttribute('themeSlot', new THREE.Float32BufferAttribute(topSlots, 1));
   top.computeVertexNormals();
 
   // Coast walls get a sloped bevel strip at the top so the shoreline isn't a hard 90-degree edge.
@@ -908,7 +915,11 @@ function Ocean() {
     };
     return material;
   }, [uniforms]);
-  useFrame(state => { uniforms.uTime.value = state.clock.elapsedTime; });
+  const shallowVersion = useRef(-1);
+  useFrame(state => {
+    uniforms.uTime.value = state.clock.elapsedTime;
+    if (shallowVersion.current !== themeState.version) { shallowVersion.current = themeState.version; themedColour('oceanShallow', uniforms.uShallow.value); }
+  });
   useEffect(() => () => { geometry.dispose(); material.dispose(); }, [geometry, material]);
   return <mesh position={[0, -GLOBE_RADIUS, 0]} geometry={geometry} material={material} receiveShadow />;
 }
@@ -923,7 +934,7 @@ function Terrain() {
         <meshStandardMaterial vertexColors roughness={0.94} flatShading />
       </mesh>
       <mesh geometry={geometry.walls} receiveShadow castShadow>
-        <meshStandardMaterial color={PLANET_TERRAIN.coastWallColor} roughness={1} flatShading side={THREE.DoubleSide} />
+        <meshStandardMaterial color={PALETTE.coastWall} roughness={1} flatShading side={THREE.DoubleSide} />
       </mesh>
     </group>
   </>;
@@ -2682,9 +2693,9 @@ function StaticBatch({ children }: { children: React.ReactNode }) {
     let undo: (() => void) | undefined;
     // A frame later, once every child has placed itself.
     const frame = requestAnimationFrame(() => {
-      const result = batchStatic(group.current, new THREE.Vector3(0, -GLOBE_RADIUS, 0));
+      const result = batchStatic(group.current, new THREE.Vector3(0, -GLOBE_RADIUS, 0), { lightweight: ACTIVE_QUALITY.lightweightShading, retint: RETINT });
       undo = result.undo;
-      if (import.meta.env.DEV) console.info(`[wander] merged ${result.stats.meshes} static meshes into ${result.stats.batches}`);
+      if (import.meta.env.DEV) console.info(`[wander] merged ${result.stats.meshes} static meshes (and part of ${result.stats.trimmed}) into ${result.stats.batches}`);
     });
     return () => { cancelAnimationFrame(frame); undo?.(); };
   }, []);
@@ -2694,8 +2705,29 @@ function StaticBatch({ children }: { children: React.ReactNode }) {
 // The plane's position in world space, updated every frame (read by the scene for the plane's sound).
 export const airplaneState = { position: new THREE.Vector3(0, 1e4, 0) };
 
+// Themes (themes.ts): once the world has been built and merged, everything left unmerged is noted, and retinted
+// whenever the theme moves on (the merged scenery retints itself in its shader).
+function useRetint(root: RefObject<THREE.Group | null>) {
+  const tracked = useRef<ReturnType<typeof trackRetint> | null>(null);
+  const applied = useRef(-1);
+  useEffect(() => {
+    // After the static batching (a frame after mount), and a frame more for anything placed late.
+    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
+      if (root.current) tracked.current = trackRetint(root.current, object => !object.visible || object.name === 'static-batches');
+    }); });
+    return () => cancelAnimationFrame(frame);
+  }, [root]);
+  useFrame(() => {
+    if (!tracked.current || applied.current === themeState.version) return;
+    applied.current = themeState.version;
+    applyRetint(tracked.current);
+  });
+}
+
 export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
-  return <group>
+  const root = useRef<THREE.Group>(null);
+  useRetint(root);
+  return <group ref={root}>
     <StaticBatch>
       <Terrain />
       <JapaneseBridgeGarden />

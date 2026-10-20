@@ -42,7 +42,8 @@ export function addEntry(board: Entry[], entry: Entry) {
   return { board: next, rank: next.indexOf(entry) };
 }
 export const sanitizeName = (name: string) => name.replace(/[^a-z ]/gi, '').replace(/\s+/g, ' ').trim().slice(0, 8).trim();
-export const cleanName = (name: string) => sanitizeName(name) || 'Driver';
+// No default name: an entry without one (an old row that was saved as "Driver", or a blank) shows no name at all.
+export const cleanName = (name: string) => { const clean = sanitizeName(name); return clean === 'Driver' ? '' : clean; };
 
 const KEY = 'wander.leaderboard', NAME_KEY = 'wander.name';
 export function loadBoard(): Entry[] {
@@ -57,7 +58,8 @@ export function loadBoard(): Entry[] {
   } catch { return []; }
 }
 export function saveBoard(board: Entry[]) { try { localStorage.setItem(KEY, JSON.stringify(board)); } catch { /* storage unavailable */ } }
-export function loadName() { try { return sanitizeName(localStorage.getItem(NAME_KEY) ?? ''); } catch { return ''; } }
+// The last name typed on this device, or nothing.
+export function loadName() { try { return cleanName(localStorage.getItem(NAME_KEY) ?? ''); } catch { return ''; } }
 export function saveName(name: string) { try { localStorage.setItem(NAME_KEY, cleanName(name)); } catch { /* storage unavailable */ } }
 
 // Best score of a run, kept in the browser.

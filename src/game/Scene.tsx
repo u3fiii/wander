@@ -1,4 +1,4 @@
-import { Suspense, memo, useEffect, useMemo, useRef } from 'react';
+import { Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
@@ -25,6 +25,12 @@ import { warmLight } from './warmLight';
 import { nightLook } from './nightLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
+import { cullBehindGlobe } from './horizonCull';
+import { advanceTheme, currentThemes, setTheme, themeSunWarmth, themedColour, themeState } from './themes';
+import type { Weather as WeatherKind } from './themes';
+import { roadLayoutFor } from './roadLayouts';
+import { currentPad } from './gamepad';
+import Weather from './Weather';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
 import type { PaletteKey } from './palette';
 import { bakeRoles, jitterAmount, kenneyCarKey, logMaterials, resolveKenneyCar, roleMaterials, textureSampler } from './recolor';
@@ -53,19 +59,17 @@ const ATMOSPHERE = {
 
 export type Telemetry = { speed: number; distance: number; x: number; z: number; heading: number; offroad?: boolean; throttle?: number; boost?: number; boosting?: number };
 
-// Standard gamepad mapping: right trigger = throttle, left trigger = brake/reverse, left stick X = steering.
+// Standard gamepad mapping (see gamepad.ts): right trigger = throttle, left trigger = brake/reverse, left stick X =
+// steering, A handbrake, X / RB boost, LB gentle throttle, Y back to the road.
 function readGamepad() {
-  const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
   const shape = (value: number) => {
     const magnitude = Math.abs(value);
     if (magnitude < CAR_CONFIG.gamepadDeadzone) return 0;
     return Math.sign(value) * ((magnitude - CAR_CONFIG.gamepadDeadzone) / (1 - CAR_CONFIG.gamepadDeadzone)) ** CAR_CONFIG.gamepadCurve;
   };
-  for (const pad of pads) {
-    if (!pad) continue;
-    return { throttle: shape(pad.buttons[7]?.value ?? 0), brake: shape(pad.buttons[6]?.value ?? 0), steer: -shape(pad.axes[0] ?? 0), recover: !!pad.buttons[3]?.pressed };
-  }
-  return { throttle: 0, brake: 0, steer: 0, recover: false };
+  const pad = currentPad();
+  if (!pad) return { throttle: 0, brake: 0, steer: 0, recover: false, handbrake: false, boost: false, gentle: false };
+  return { throttle: shape(pad.throttle), brake: shape(pad.brake), steer: -shape(pad.steer), recover: pad.recover, handbrake: pad.handbrake, boost: pad.boost, gentle: pad.gentle };
 }
 export type SceneProps = {
   started: boolean; paused: boolean; mapView?: boolean; trafficEnabled?: boolean; tutorialDriving?: boolean; tutorialCamera?: boolean; mobileCamera?: boolean; boostEnabled?: boolean; vehicleId: VehicleId;
@@ -73,6 +77,9 @@ export type SceneProps = {
   finale?: boolean;
   // Only one heart is left: the warning and its heartbeat (see cinematicState.danger / pulse).
   danger?: boolean; cameraMode: number; resetKey: number;
+  // The look to ease into (themes.ts; a change blends over a few seconds, nothing is rebuilt), and which road
+  // layout the run drives (roadLayouts.ts; a new one rebuilds the world, so it only changes between runs).
+  theme?: number; road?: number;
   controls: React.RefObject<Controls>; car: React.RefObject<CarState>;
   onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void; onDriftCinematic?: () => void;
 };
@@ -762,6 +769,17 @@ function DrivingScene(props: SceneProps) {
   const [neutralMoon, coolMoon, nightMoonColour, nightHazeColour, nightFogColour] = useMemo(() => [
     new THREE.Color('#e8eeff'), new THREE.Color('#8fb2ff'), new THREE.Color(), new THREE.Color('#5a6f88'), new THREE.Color(),
   ], []);
+  // The road layout is set before the world (below) is built along it.
+  const road = props.road ?? 0;
+  useMemo(() => roadLayoutFor(road), [road]);
+  // The first theme is there from the start; later ones ease in (advanced every frame below).
+  // A new run starting over at an earlier look switches straight back.
+  const lastTheme = useRef(-1);
+  useEffect(() => {
+    const next = props.theme ?? 0;
+    setTheme(next, lastTheme.current < 0 || next < lastTheme.current);
+    lastTheme.current = next;
+  }, [props.theme]);
   const lightColors = useMemo(() => {
     const c = (hex: string) => new THREE.Color(hex);
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
@@ -776,6 +794,16 @@ function DrivingScene(props: SceneProps) {
       dayFog: c(PALETTE.haze), nightFog: c(night.fogColor),
     };
   }, []);
+  // The theme's colours for the light from the sky, the ground and the haze, kept up as it changes.
+  const themedVersion = useRef(-1);
+  useFrame((_, delta) => {
+    advanceTheme(Math.min(delta, 0.1));
+    if (themedVersion.current === themeState.version) return;
+    themedVersion.current = themeState.version;
+    themedColour('land', lightColors.dayGround);
+    themedColour('lightDaySkyFill', lightColors.daySky);
+    themedColour('haze', lightColors.dayFog);
+  });
   const pedals = useRef({ throttle: 0, brake: 0 });
   const bodyRoll = useRef(0);
   const fovKick = useRef(0);
@@ -855,7 +883,38 @@ function DrivingScene(props: SceneProps) {
     gl.toneMapping = THREE.ACESFilmicToneMapping;
     gl.outputColorSpace = THREE.SRGBColorSpace;
     gl.shadowMap.type = THREE.PCFShadowMap;
+    // Weaker devices redraw the shadow map only every few frames (see `shadowInterval`).
+    gl.shadowMap.autoUpdate = ACTIVE_QUALITY.shadowInterval <= 1;
   }, [gl]);
+  const shadowFrame = useRef(0);
+  // Horizon culling (see horizonCull.ts): the planet's far side is skipped, in the colour and shadow passes alike.
+  const cullEye = useMemo(() => new THREE.Vector3(), []);
+  const cullCentre = useMemo(() => new THREE.Vector3(), []);
+  const cullCentreRef = useRef(cullCentre);
+  // Weather shows while driving (not over the start screen's globe).
+  // Weather shows while driving (not over the start screen's globe). Through a theme change the old weather thins
+  // out over the first half and the new one gathers over the second.
+  const weatherAmount = useRef(0);
+  const [weather, setWeather] = useState<WeatherKind>(() => currentThemes().to.weather);
+  useFrame((_, delta) => {
+    const { from, to, mix } = currentThemes();
+    const showing = mix < 0.5 ? from.weather : to.weather;
+    if (showing !== weather) setWeather(showing);
+    const blend = from.weather === to.weather ? 1 : Math.abs(1 - 2 * mix);
+    weatherAmount.current = THREE.MathUtils.damp(weatherAmount.current, props.started && !props.mapView ? blend : 0, 2, Math.min(delta, 0.05));
+  });
+  const cullFrame = useRef(0);
+  useFrame(({ camera }) => {
+    // Every other frame is plenty: the margins cover what the camera moves in between.
+    if (!scaleGroup.current || cullFrame.current++ % 2) return;
+    camera.getWorldPosition(cullEye);
+    scaleGroup.current.localToWorld(cullCentre.set(0, -GLOBE_RADIUS, 0));
+    cullBehindGlobe(scaleGroup.current, cullEye, cullCentre, GLOBE_RADIUS * scaleGroup.current.matrixWorld.getMaxScaleOnAxis());
+  });
+  useFrame(() => {
+    if (ACTIVE_QUALITY.shadowInterval <= 1) return;
+    if (shadowFrame.current++ % ACTIVE_QUALITY.shadowInterval === 0) gl.shadowMap.needsUpdate = true;
+  });
   useEffect(() => {
     scene.fog = fog;
     sun.current.target = sunTarget;
@@ -1088,10 +1147,12 @@ function DrivingScene(props: SceneProps) {
       cruise.current = THREE.MathUtils.damp(cruise.current, THREE.MathUtils.clamp(waves * bend, 0.55, 1), 1.5, realDt);
       throttle = Math.max(throttle, RAILS.autoThrottle * cruise.current);
     }
-    if (keys.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
+    if (keys.gentle || pad.gentle) throttle = Math.min(throttle, CAR_CONFIG.gentleThrottleCap);
     const keySteer = Number(keys.left) - Number(keys.right);
     const driveControls = {
       ...keys,
+      brake: keys.brake || pad.handbrake,
+      boost: keys.boost || pad.boost,
       throttle,
       reverse: Math.max(pedals.current.brake, pad.brake),
       steer: [pad.steer, keySteer, keys.steer ?? 0].reduce((best, value) => (Math.abs(value) > Math.abs(best) ? value : best), 0),
@@ -1261,7 +1322,7 @@ function DrivingScene(props: SceneProps) {
     carFillLight.current.visible = n > 0.001;
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
     // Daytime values come from the Day look panel (dayLook); night keeps its own.
-    daySunColour.copy(neutralSun).lerp(amberSun, dayLook.sunWarmth);
+    daySunColour.copy(neutralSun).lerp(amberSun, dayLook.sunWarmth * themeSunWarmth());
     dayFogColour.copy(lightColors.dayFog).lerp(hazeColour, dayLook.haze * 0.5);
     // Night values come from the Night tab of the same panel (nightLook).
     nightMoonColour.copy(neutralMoon).lerp(coolMoon, nightLook.moonCool);
@@ -1526,10 +1587,10 @@ function DrivingScene(props: SceneProps) {
       shadow-mapSize={[ACTIVE_QUALITY.shadowMapSize, ACTIVE_QUALITY.shadowMapSize]}
       shadow-camera-near={ART_DIRECTION.shadows.near}
       shadow-camera-far={ART_DIRECTION.shadows.far}
-      shadow-camera-left={-ART_DIRECTION.shadows.extent}
-      shadow-camera-right={ART_DIRECTION.shadows.extent}
-      shadow-camera-top={ART_DIRECTION.shadows.extent}
-      shadow-camera-bottom={-ART_DIRECTION.shadows.extent}
+      shadow-camera-left={-ACTIVE_QUALITY.shadowExtent}
+      shadow-camera-right={ACTIVE_QUALITY.shadowExtent}
+      shadow-camera-top={ACTIVE_QUALITY.shadowExtent}
+      shadow-camera-bottom={-ACTIVE_QUALITY.shadowExtent}
       shadow-bias={ART_DIRECTION.shadows.bias}
       shadow-normalBias={ART_DIRECTION.shadows.normalBias}
       shadow-radius={ATMOSPHERE.light.shadowRadius}
@@ -1540,11 +1601,12 @@ function DrivingScene(props: SceneProps) {
     <spotLight ref={carFillLight} target={carFillTarget} intensity={0} decay={2} castShadow={false} />
     <directionalLight ref={bounceLight} position={[18, -38, -62]} target-position={[0, -GLOBE_RADIUS, 0]} intensity={0.24} color={ART_DIRECTION.day.bounceColor} />
     <primitive object={speedLines.group} />
+    <Weather weather={weather} globeCentre={cullCentreRef} intensity={weatherAmount} />
     <Meteors />
     <group ref={globeGroup} position={[0, -GLOBE_RADIUS, 0]}>
       <AtmosphereGlow amount={glowAmount} night={nightBlend} />
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
-        <MiniatureWorld zoom={zoomProgress} />
+        <MiniatureWorld key={road} zoom={zoomProgress} />
         <Suspense fallback={null}><Traffic paused={props.paused} enabled={props.trafficEnabled !== false} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} /></Suspense>
         <group ref={vehicle}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
@@ -1621,6 +1683,11 @@ function AdaptiveResolution({ active }: { active: boolean }) {
 // passes: shadows, depth, colour), pixel density and quality tier. For measuring on real devices.
 function RenderStats() {
   const gl = useThree(state => state.gl);
+  const scene = useThree(state => state.scene);
+  const camera = useThree(state => state.camera);
+  // For inspecting the scene from the browser console while measuring.
+  const get = useThree(state => state.get);
+  useEffect(() => { (window as unknown as { __wander: unknown }).__wander = { gl, scene, camera, THREE, get }; }, [gl, scene, camera, get]);
   const panel = useRef<HTMLDivElement | null>(null);
   const totals = useRef({ frames: 0, time: 0, calls: 0, triangles: 0 });
   useEffect(() => {

@@ -1,4 +1,5 @@
-// The only place scene colors are defined. Everything 3D picks from here.
+// The only place scene colors are defined. Everything 3D picks from here. A theme (themes.ts) retints some of
+// them as they are drawn; the world itself is always built in these.
 export const PALETTE = {
   // Base (~60%)
   land: '#aebc70',

@@ -1,5 +1,5 @@
 import { IcosahedronGeometry } from 'three';
-import { FULL_TURN, GLOBE_RADIUS, roadLatitude, sphereNormal, spherePoint } from './globe.ts';
+import { FULL_TURN, GLOBE_RADIUS, roadLatitude, roadLayoutVersion, sphereNormal, spherePoint } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain.ts';
 
@@ -143,6 +143,8 @@ export const MOUNTAIN_SITES = [
 // The land is drawn as flat icosahedron facets, so ground items must sit on the facet plane, not the sphere.
 type Facet = { normal: Vec3; offset: number; edges: [Vec3, Vec3, Vec3]; centroid: Vec3; land?: boolean };
 let facetCache: Facet[] | null = null;
+// Whether each facet is land depends on where the road runs: worked out again for a new road layout.
+let facetLayout = -1;
 const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const normalize3 = (a: Vec3): Vec3 => { const l = Math.hypot(...a); return [a[0] / l, a[1] / l, a[2] / l]; };
@@ -172,6 +174,7 @@ function facetAt(direction: Vec3) {
     if (margin > bestMargin) { best = facet; bestMargin = margin; }
     if (margin >= 0) break;
   }
+  if (facetLayout !== roadLayoutVersion) { facetLayout = roadLayoutVersion; for (const facet of landFacets()) facet.land = undefined; }
   if (best.land === undefined) {
     best.land = isLandAt(Math.asin(Math.max(-1, Math.min(1, best.centroid[1]))), Math.atan2(best.centroid[0], best.centroid[2]));
   }

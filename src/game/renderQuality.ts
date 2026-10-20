@@ -1,19 +1,20 @@
 export type VisualQuality = 'low' | 'mobile' | 'high';
 
 // Image clarity and scenery cost are separate budgets. Touch devices keep sharp
-// pixels, but spend less on small decorations, their shadows and depth of field.
+// pixels, but spend less on small decorations, their shadows and depth of field. The shadow pass redraws every
+// scenery caster again, so weaker devices also cover a smaller area and refresh it every `shadowInterval` frames.
 export const QUALITY_PROFILES = {
   low: {
-    shadowMapSize: 512, minDpr: 0.8, initialDpr: 1, maxDpr: 1.15,
-    depthOfField: false, msaa: 0, decorationDensity: 0.2, decorativeShadows: false, simpleSwimRings: true,
+    shadowMapSize: 512, shadowExtent: 26, shadowInterval: 2, minDpr: 0.8, initialDpr: 1, maxDpr: 1.15,
+    depthOfField: false, lightweightShading: true, msaa: 0, decorationDensity: 0.2, decorativeShadows: false, simpleSwimRings: true,
   },
   mobile: {
-    shadowMapSize: 512, minDpr: 0.9, initialDpr: 1.3, maxDpr: 2,
-    depthOfField: false, msaa: 0, decorationDensity: 0.28, decorativeShadows: false, simpleSwimRings: true,
+    shadowMapSize: 512, shadowExtent: 30, shadowInterval: 2, minDpr: 0.9, initialDpr: 1.3, maxDpr: 2,
+    depthOfField: false, lightweightShading: true, msaa: 0, decorationDensity: 0.28, decorativeShadows: false, simpleSwimRings: true,
   },
   high: {
-    shadowMapSize: 2048, minDpr: 0.9, initialDpr: 1.5, maxDpr: 1.5,
-    depthOfField: true, msaa: 4, decorationDensity: 1, decorativeShadows: true, simpleSwimRings: false,
+    shadowMapSize: 2048, shadowExtent: 42, shadowInterval: 1, minDpr: 0.9, initialDpr: 1.5, maxDpr: 1.5,
+    depthOfField: true, lightweightShading: false, msaa: 4, decorationDensity: 1, decorativeShadows: true, simpleSwimRings: false,
   },
 } as const;
 export type QualityProfile = typeof QUALITY_PROFILES[VisualQuality];

@@ -21,7 +21,7 @@ export function paletteColor(key: PaletteKey, jitter = 0, hueJitter = 0) {
 }
 
 export function paletteMaterial(key: PaletteKey, options: { jitter?: number; hueJitter?: number; roughness?: number; vertexColors?: boolean; side?: THREE.Side } = {}) {
-  return new THREE.MeshStandardMaterial({
+  const material = new THREE.MeshStandardMaterial({
     color: paletteColor(key, options.jitter ?? 0, options.hueJitter ?? 0),
     roughness: options.roughness ?? 0.9,
     metalness: 0,
@@ -29,6 +29,9 @@ export function paletteMaterial(key: PaletteKey, options: { jitter?: number; hue
     vertexColors: options.vertexColors ?? false,
     side: options.side ?? THREE.FrontSide,
   });
+  // Which palette colour it is, for the themes (themes.ts).
+  material.userData.paletteKey = key;
+  return material;
 }
 
 type Sampler = (u: number, v: number, out: THREE.Color) => void;

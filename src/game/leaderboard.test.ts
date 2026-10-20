@@ -21,7 +21,8 @@ test('the board keeps the best ten, best first, and says where a new run landed'
 
 test('names are tidied, and stages come every so many seconds', () => {
   assert.equal(cleanName('   Road   Runner  '), 'Road Run');
-  assert.equal(cleanName(''), 'Driver');
+  assert.equal(cleanName(''), '', 'no default name');
+  assert.equal(cleanName('Driver'), '', 'the old default is not a name either');
   assert.equal(cleanName('x'.repeat(40)).length, 8);
   assert.equal(stageFor(0), 1);
   assert.equal(stageFor(STAGE_SECONDS - 1), 1);

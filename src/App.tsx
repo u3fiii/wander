@@ -209,6 +209,8 @@ import RunOver from './RunOver';
 import Leaderboard from './Leaderboard';
 import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { cycle, goTo, headingToNight, mixHex, nightAmount, resetToDay, skyAt, twilight } from './game/dayCycle';
+import { chapterFor, currentThemes, THEMES } from './game/themes';
+import { useGamepadMenu } from './useGamepadMenu';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
 const TITLE = 'take a spin.';
@@ -245,6 +247,9 @@ const DISTANCE_POINTS = 0.5;
 // Hits slower than this (m/s) still score, but without a note.
 const QUIET_HIT_SPEED = 7;
 const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
+const urlNumber = (name: string) => (typeof window === 'undefined' ? 0 : Math.max(0, Math.floor(Number(new URLSearchParams(window.location.search).get(name)) || 0)));
+const FIRST_THEME = urlNumber('theme') % THEMES.length;
+const FIRST_ROAD = urlNumber('road');
 class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
   static getDerivedStateFromError() { return { error: true }; }
@@ -269,6 +274,18 @@ function Help({ close, rails }: { close: () => void; rails: boolean }) {
       <div className="help-row"><span>Change camera</span><kbd>C</kbd></div>
       <div className="help-row"><span>Restart</span><kbd>R</kbd></div>
       <div className="help-row"><span>Pause / resume</span><kbd>Esc</kbd></div>
+      <div className="help-row"><span>Map</span><kbd>M</kbd></div>
+      <p className="help-pad"><b>Xbox controller</b></p>
+      <div className="help-row"><span>Accelerate / brake & reverse</span><span><kbd>RT</kbd> <kbd>LT</kbd></span></div>
+      <div className="help-row"><span>Steer</span><kbd>Left stick</kbd></div>
+      <div className="help-row"><span>Handbrake drift</span><kbd>A</kbd></div>
+      <div className="help-row"><span>Boost</span><span><kbd>X</kbd> or <kbd>RB</kbd></span></div>
+      <div className="help-row"><span>Gentle throttle</span><kbd>LB</kbd></div>
+      <div className="help-row"><span>Back to road when stuck</span><kbd>Y</kbd></div>
+      <div className="help-row"><span>Change camera</span><span><kbd>B</kbd> or <kbd>R3</kbd></span></div>
+      <div className="help-row"><span>Map</span><kbd>View</kbd></div>
+      <div className="help-row"><span>Pause / resume</span><kbd>Menu</kbd></div>
+      <div className="help-row"><span>In menus: move, press, back</span><span><kbd>D-pad</kbd> <kbd>A</kbd> <kbd>B</kbd></span></div>
       <p>The car rolls on its own once you start; you choose the line. Lift off for corners, hold back to reverse. Weave through traffic, drift the bends, and bank your hearts for a bigger run.</p>
     </>}
     <button className="primary" onClick={close}>Got it <Check size={18} /></button>
@@ -440,7 +457,12 @@ export default function App() {
     let frame = 0;
     const written: Record<string, string> = {};
     const tick = () => {
-      const sky = skyAt({ top: dayLook.skyTop, horizon: dayLook.skyHorizon }, { top: nightLook.skyTop, horizon: nightLook.skyHorizon });
+      // The day sky follows the theme, blended through a change.
+      const themes = currentThemes();
+      const plain = { top: dayLook.skyTop, horizon: dayLook.skyHorizon };
+      const from = themes.from.sky ?? plain, to = themes.to.sky ?? plain;
+      const daySky = { top: mixHex(from.top, to.top, themes.mix), horizon: mixHex(from.horizon, to.horizon, themes.mix) };
+      const sky = skyAt(daySky, { top: nightLook.skyTop, horizon: nightLook.skyHorizon });
       const n = nightAmount();
       // Written only when a value changes: each write repaints the whole sky gradient.
       // The pale sun glow in the sky is a daytime thing only: gone as soon as sunset colours start.
@@ -486,6 +508,7 @@ export default function App() {
   const [revealed, setRevealed] = useState(false);
   const [data, setData] = useState<Telemetry>(initialLoopCar);
   const [gamepad, setGamepad] = useState(false);
+  useGamepadMenu({ started, ready, mapView, paused });
   const [muted, setMutedState] = useState(true);
   // Smooth-driving streak: grows while staying on the road at speed, resets off-road or when slowing right down.
   const streak = useRef({ time: 0, last: 0 });
@@ -570,6 +593,17 @@ export default function App() {
     saveBest(score);
     if (!beatBest.current && bestAtRunStart.current > 0) { beatBest.current = true; showNote('newBest', 0, false, formatNumber(score)); }
   }, [score]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Themes (themes.ts): each score milestone eases the planet into its next look over a few seconds, while the
+  // run goes on. Each new run after one has ended gets a new road layout (roadLayouts.ts; the world is rebuilt
+  // for it then, between runs). `?theme=N` / `?road=N` start with another look or road, for checking them.
+  const [theme, setThemeIndex] = useState(FIRST_THEME);
+  const [road, setRoad] = useState(FIRST_ROAD);
+  // Dev only: lets the console jump the score to a milestone (`__setScore(3000)`).
+  useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __setScore: typeof setScore }).__setScore = setScore; }, []);
+  useEffect(() => {
+    const target = FIRST_THEME + chapterFor(score);
+    if (started && target > theme) setThemeIndex(target);
+  }, [score, started, theme]);
   // Distance: half a point a metre, added as the car drives (not while held, and not across a reset).
   const lastDistance = useRef(0);
   const distanceCarry = useRef(0);
@@ -801,6 +835,7 @@ export default function App() {
     setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats();
     stageRef.current = 1; setDifficultyLevel(1);
     nextMobileCelebration.current = 0;
+    setThemeIndex(FIRST_THEME);
     if (touchQuery?.matches) resetToDay();
   }, []);
   // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.
@@ -906,7 +941,7 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onDriftCinematic={handleDriftCinematic} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -1049,8 +1084,8 @@ export default function App() {
     {help && <Help rails={!!RAILS} close={() => setHelp(false)} />}
     {boardOpen && <Leaderboard close={() => setBoardOpen(false)} />}
     {finale && <div className="letterbox" aria-hidden="true"><i /><i /></div>}
-    {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={reset}
-      onHome={() => { reset(); returnToHero(); }} />}
+    {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={() => { setRoad(r => r + 1); reset(); }}
+      onHome={() => { setRoad(r => r + 1); reset(); returnToHero(); }} />}
     <LoadingScreen ready={ready} onLeave={() => setRevealed(true)} />
   </main>;
 }

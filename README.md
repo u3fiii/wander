@@ -25,6 +25,7 @@ Open the local URL printed by Vite. To make a production build: `npm run build`.
 - Escape: pause / resume
 - Toolbar: day/night, camera, help, pause
 - Touch screens: on-screen driving controls
+- Xbox / standard gamepad: RT gas, LT brake and reverse, left stick steer, A handbrake drift, X or RB boost, LB gentle throttle, Y back to the road, B or R3 camera, View map, Menu pause. In menus the d-pad or left stick moves between buttons, A presses, B goes back (`src/game/gamepad.ts`, `src/useGamepadMenu.ts`)
 
 Follow the roads around the globe or explore freely. Steering controls the car's heading everywhere; it does not automatically switch road loops. Ease off the accelerator to coast and slow down for corners. The game pauses when you switch away from its window.
 
@@ -51,6 +52,12 @@ The previous player vehicle (kept for reference, no longer loaded) uses [Low pol
 The town uses varied buildings and planters from the supplied Kenney city assets in `src/assets/kenny city`. Lighting, atmosphere, material palette and visual quality live in `ART_DIRECTION` at the top of `src/game/artDirection.ts`. Planet detail, land threshold and shell height live in `PLANET_TERRAIN` at the top of `src/game/planetTerrain.ts`; road, bridge and region settings live in `WORLD_SETTINGS` at the top of `src/game/worldMap.ts`.
 
 Rendering budgets live in `src/game/renderQuality.ts`. Touch devices use the `mobile` profile: DPR starts at 1.75 and adapts between 1.25 and 2 (capped by the screen's native density), with FXAA for smooth edges, smaller shadows and no depth-of-field pass. Small garden/meadow decorations and fireflies are halved, tiny decorative shadows are skipped, and swim rings use a lightweight mesh. Roads, bridges, buildings, collidable trees/rocks, traffic and driving rules stay the same. Constrained devices use `low`; desktop retains `high`. Use `?quality=mobile&stats`, `?quality=low&stats` or `?quality=high&stats` to compare FPS, rendered pixel dimensions and scene workload on the same device. Check portrait/landscape, day/night and a sustained drive on an actual phone; desktop emulation does not measure mobile GPU performance.
+
+## Themes and road layouts
+
+As a run's score passes each milestone (`MILESTONES` in `src/game/themes.ts`: 3000, 7000, 12000, then every 6000) the planet eases into its next look over a few seconds while the player drives on: meadow, blossom, amber, frost, round again. Nothing is rebuilt: the world is always built in the base palette, and themed colours are retinted as they are drawn (merged scenery in its shader, everything else on the CPU). Each theme also has its own daytime sky, sun warmth and a light sprinkle of weather. Each new run after one has ended gets a new road layout (`src/game/roadLayouts.ts`: a few seeded waves added to the loop, kept clear of the bridge and checked to be drivable); that rebuilds the world, so it only happens between runs. `?theme=N` and `?road=N` start with another look or road.
+
+Weaker devices (the `mobile` and `low` profiles) also get horizon culling (`src/game/horizonCull.ts`: the far side of the planet is skipped, shadows included), Lambert shading on the merged scenery, smaller and less frequent shadows.
 
 ## Future model workflow
 
