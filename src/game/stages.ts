@@ -23,7 +23,7 @@ export const STAGES: Stage[] = [
 // top corner (`corner`) and its border (`border`), each 0..1.
 export const cardLook = { tint: 0.38, corner: 0.28, border: 0.6 };
 export const STAGE_POINTS = 3000;
-export const HOME_STAGE_SECONDS = 20;
+export const HOME_STAGE_SECONDS = 30;
 
 export const stageAt = (index: number) => STAGES[((index % STAGES.length) + STAGES.length) % STAGES.length];
 // Each stage has its own theme, and the theme number counts on with the stage, round after round of the loop, so

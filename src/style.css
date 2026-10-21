@@ -1633,3 +1633,25 @@
 .stage-delete:hover:not(:disabled){background:#b94b4625}
 .stage-delete:disabled{opacity:.4;cursor:not-allowed}
 .stage-delete-row>span{font-size:11px;opacity:.65}
+
+/* Desktop has room for the podium and the remaining places side by side. */
+@media (min-width:900px) and (pointer:fine) {
+  .modal.leaderboard{width:min(1000px,calc(100vw - 64px));height:auto;max-height:calc(100dvh - 48px);padding:28px;overflow-y:auto}
+  .leaderboard h2{margin-bottom:14px}
+  .leaderboard .podium-board{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);align-items:center;gap:28px;flex:none;overflow:visible;margin:8px 0 0;padding:0}
+  .leaderboard .podium-arena{margin:0;padding:28px 0;background:radial-gradient(ellipse at center,#f4b54416,transparent 70%)}
+  .leaderboard .podium{gap:10px}
+  .leaderboard .podium-block{min-height:174px;padding:13px 11px 10px}
+  .leaderboard .p1 .podium-block{min-height:204px;padding-top:17px}
+  .leaderboard .podium-name{margin-top:19px;font-size:15px}
+  .leaderboard .p1 .podium-name{font-size:17px;margin-top:28px}
+  .leaderboard .podium-score{font-size:26px}
+  .leaderboard .p1 .podium-score{font-size:30px}
+  .leaderboard .podium-stats{margin-top:auto}
+  .leaderboard .podium-rest{display:grid;gap:5px;min-width:0;padding-left:24px;border-left:1px solid #ffffff12}
+  .leaderboard .podium-rest li{min-height:46px;margin:0;padding:6px 10px}
+  .leaderboard .podium-rest li.personal-outside-topten{margin-top:3px}
+}
+@media (min-width:900px) and (min-height:650px) and (pointer:fine) {
+  .modal.leaderboard{overflow:visible}
+}
