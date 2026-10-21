@@ -7,5 +7,5 @@ import * as THREE from 'three';
 // `driftCut` (0..1) is the drift cut-in (overhead camera, slow motion); it drives its purple grade.
 // `finale` (0..1) is the end-of-run shot; it drives its steel-blue end grade.
 // `danger` (0..1) is the last-heart warning and `pulse` (0..1) its heartbeat; they drive its grade.
-export const cinematicState = { crash: 0, cool: 0, focus: new THREE.Vector3(), preview: false, drift: 0, driftCut: 0, finale: 0, danger: 0, pulse: 0, milestone: 0 };
+export const cinematicState = { crash: 0, cool: 0, focus: new THREE.Vector3(), preview: false, drift: 0, driftCut: 0, finale: 0, danger: 0, pulse: 0 };
 // `drift` (0..1) is how far into the drift camera the player is; the output pass deepens the frame a touch with it.

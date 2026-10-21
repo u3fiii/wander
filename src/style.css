@@ -1187,31 +1187,6 @@
 /* On the curb: a quiet notice (not an alarm), where the off-road warning would be. */
 .curb-hint{position:absolute;left:50%;translate:-50% 0;top:calc(100% + 38px);z-index:3;display:flex;align-items:center;gap:8px;padding:8px 15px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffd8;font-size:12.5px;font-weight:600;white-space:nowrap;pointer-events:none;animation:coach-in .4s cubic-bezier(.3,1.5,.5,1) both}
 
-/* ===== The milestone moment =====
-   Letterbox bars slide in, a wash of the new look's colour blooms over the frame, and the title slams in letter by
-   letter, all over the scene's own slow motion and camera swing; then everything slides away as the camera whips back. */
-.moment{--accent:#9fe07a;--ink:#1d3b14;position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
-.moment-amber{--accent:#ffb347;--ink:#4a2405}
-.moment-blossom{--accent:#ff9cc8;--ink:#5a1634}
-.moment-frost{--accent:#bfe6ff;--ink:#16344d}
-.moment-bar{position:absolute;left:0;right:0;height:11vh;background:#0b1014;animation:moment-bar var(--moment-time) cubic-bezier(.6,0,.2,1) both}
-.moment-bar.top{top:0;transform-origin:top}
-.moment-bar.bottom{bottom:0;transform-origin:bottom}
-@keyframes moment-bar{0%{transform:scaleY(0)}10%,62%{transform:scaleY(1)}76%,100%{transform:scaleY(0)}}
-.moment-wash{position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 50% 45%,color-mix(in srgb,var(--accent) 70%,#fff) 0%,var(--accent) 45%,transparent 100%);mix-blend-mode:soft-light;animation:moment-wash var(--moment-time) ease-in-out both}
-@keyframes moment-wash{0%{opacity:0}15%{opacity:.85}55%{opacity:.6}75%,100%{opacity:0}}
-.moment-title{position:absolute;left:0;right:0;top:20%;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;animation:moment-title var(--moment-time) both}
-@keyframes moment-title{0%,8%{opacity:0}12%,60%{opacity:1;transform:none}74%,100%{opacity:0;transform:translateY(-24px) scale(1.04)}}
-.moment-title small{padding:5px 14px;border-radius:30px;background:#0b1014cc;color:var(--accent);font-size:12px;font-weight:800;letter-spacing:3px;text-transform:uppercase;animation:moment-rise .17s cubic-bezier(.3,1.5,.5,1) .12s both}
-.moment-title b{display:block;font-size:clamp(44px,8.5vw,110px);font-weight:900;letter-spacing:-2px;line-height:1;color:#fff;filter:drop-shadow(0 6px 0 var(--ink)) drop-shadow(0 18px 40px #0007)}
-.moment-title b span{display:inline-block;background:linear-gradient(180deg,#fff 0%,#fff 35%,var(--accent) 100%);-webkit-background-clip:text;background-clip:text;color:transparent;animation:moment-letter .2s cubic-bezier(.2,1.6,.4,1) both;animation-delay:calc(.15s + var(--i) * 15ms)}
-@keyframes moment-letter{from{opacity:0;transform:translateY(40px) scale(.4) rotate(-8deg)}to{opacity:1;transform:none}}
-.moment-title em{font-style:normal;font-size:clamp(15px,1.8vw,20px);font-weight:700;color:#fff;text-shadow:0 2px 10px #000a;animation:moment-rise .2s ease-out .33s both}
-@keyframes moment-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-/* While it plays the side controls step back. */
-.moment~*  .controls-dock{opacity:0}
-@media(prefers-reduced-motion:reduce){.moment *{animation-duration:.01s!important;animation-delay:0s!important}}
-
 /* Party mode: the lobby, the scoreboard, and the big round calls. */
 .party-button{display:flex;align-items:center;gap:9px;margin-top:12px;padding:10px 18px;border-radius:999px;border:1px solid #11111126;background:#fbf8ebcc;font-size:13px;font-weight:700;color:#173e3c;transition:transform .3s,background .2s}
 .party-button:hover{background:#fffdf4;transform:translateY(-1px)}
@@ -1334,3 +1309,321 @@
   .garage-ratings{grid-template-columns:repeat(2,1fr);gap:14px 18px}
   .garage-go{min-width:0;width:100%}
 }
+
+/* The leaderboard is a destination on the home screen and a quiet goal under
+   the score in play. Gold belongs to first place; other positions stay muted. */
+.leader-spotlight{display:block;width:100%;max-width:390px;margin:0 0 20px;padding:12px 14px 10px;border:1px solid #ffffff2b;border-radius:22px;background:linear-gradient(145deg,#253438e8,#152126ed);box-shadow:0 12px 32px #05141825,inset 0 1px #ffffff12;color:#fff;text-align:left;cursor:pointer;transition:transform .2s,border-color .2s;backdrop-filter:blur(16px)}
+.leader-spotlight:hover{transform:translateY(-2px);border-color:#f4b54488}
+.leader-spotlight:focus-visible,.rank-chase:focus-visible{outline:2px solid var(--gold);outline-offset:4px}
+.leader-heading{display:flex;justify-content:space-between;align-items:center;color:#f6ce83}
+.leader-heading>span{display:flex;align-items:center;gap:7px;font-size:9px;font-weight:800;letter-spacing:1.6px}
+.leader-trio{display:grid;grid-template-columns:1fr 1.16fr 1fr;align-items:end;gap:7px;margin-top:9px}
+.leader-mini{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0;padding:7px 5px 8px;border:1px solid #ffffff13;border-radius:12px;background:#ffffff05;animation:leader-arrive .65s cubic-bezier(.2,.8,.2,1) both;animation-delay:var(--arrival)}
+.leader-mini-1{padding-top:10px;background:linear-gradient(155deg,#f4b54424,#f4b54409);border-color:#f4b54470;box-shadow:0 0 24px #f4b5440e}
+.leader-medal{display:grid;place-items:center;width:22px;height:22px;color:#cbd8de;font-size:12px;font-weight:800}
+.leader-mini-1 .leader-medal{color:var(--gold);filter:drop-shadow(0 2px 6px #f4b54450)}
+.leader-mini-3 .leader-medal{color:#dba77c}
+.leader-mini strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:750;line-height:1.2}
+.leader-mini small{font-size:10px;color:#c4cdd1;font-variant-numeric:tabular-nums}
+.leader-mini-1 small{color:#f6ce83}
+.leader-invite{display:block;margin-top:8px;text-align:center;font-size:10px;font-weight:500;color:#c4cdd1;line-height:1.3}
+/* Compact arcade badge: eight bright cells count a short, labelled sprint. */
+.rank-chase{position:absolute;left:50%;top:calc(100% + 8px);translate:-50% 0;display:flex;flex-direction:column;width:224px;max-width:calc(100vw - 40px);padding:8px 11px 7px;border:2px solid #fff2;border-bottom:4px solid #0a141b;border-radius:15px;background:linear-gradient(145deg,#263b47,#17252f);color:#fff;box-shadow:0 5px 0 #07141c33,0 8px 18px #08131824;pointer-events:auto;cursor:pointer;text-align:left;transition:border-color .2s}
+.rank-chase:hover{border-color:#f4b54480}
+.rank-chase-line{display:flex;align-items:center;gap:8px;height:28px}
+.rank-emblem{display:grid;place-items:center;width:27px;height:27px;flex:none;border-radius:9px;background:var(--gold);color:#342309;box-shadow:inset 0 2px #fff5,0 2px 0 #ad742d;rotate:-7deg}
+.rank-position{font-size:21px;font-weight:900;line-height:1;letter-spacing:-.8px;font-variant-numeric:tabular-nums}
+.rank-sprint{margin-left:auto;display:flex;align-items:baseline;gap:5px;white-space:nowrap}
+.rank-sprint>b{font-size:23px;font-weight:900;color:#ffe1a3;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.8px}
+.rank-sprint small{font-size:9px;font-weight:900;color:#b9c8cb}
+.rank-sprint em{display:inline-block;font-style:normal;color:#fff;animation:rank-digit .32s cubic-bezier(.2,1.7,.5,1)}
+.rank-segments{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin:8px 0 5px;transform:skewX(-14deg)}
+.rank-segments>span{height:7px;border-radius:1px;background:#07141b99;overflow:hidden;box-shadow:inset 0 1px 1px #0005}
+.rank-segments i{display:block;height:100%;width:100%;transform-origin:left;background:linear-gradient(0deg,#f4ad40,#ffe39b);transition:transform .18s ease-out;box-shadow:0 0 6px #ffc65e77}
+.rank-segments.running{animation:rank-checkpoint .4s ease-out}
+.rank-chase-detail{display:flex;justify-content:space-between;gap:6px;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9px;line-height:1.3;font-weight:900;letter-spacing:.65px;color:#c2d1d4;text-transform:uppercase}
+.rank-chase-detail svg{flex:none;color:#f4b544}
+.rank-chase.celebrating{border-color:#f4b544;background:linear-gradient(135deg,#4b4327,#25362e);animation:rank-arrive .4s cubic-bezier(.2,1.7,.5,1)}
+.rank-shout{font-size:17px;font-weight:900;font-style:italic;color:#ffe1a3;letter-spacing:-.6px;white-space:nowrap;animation:rank-digit .3s cubic-bezier(.2,1.7,.5,1)}
+.rank-chase.leading .rank-emblem{box-shadow:0 0 13px #f4b54455,inset 0 2px #fff5}
+@keyframes rank-digit{from{transform:translateY(3px) scale(.8);opacity:.2}to{transform:none;opacity:1}}
+@keyframes rank-checkpoint{0%{filter:brightness(2.2);transform:skewX(-14deg) scaleY(1.65)}100%{filter:brightness(1);transform:skewX(-14deg) scaleY(1)}}
+@keyframes leader-arrive{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes rank-arrive{from{transform:translateY(-4px);opacity:.3}to{transform:translateY(0);opacity:1}}
+@media(min-width:901px){.intro .intro-card{height:auto}.leader-spotlight{margin-top:0}}
+@media(max-width:900px){.leader-spotlight{max-width:360px;margin-left:auto;margin-right:auto}}
+@media(max-width:600px){
+  .intro .intro-card{bottom:max(24px,env(safe-area-inset-bottom));}
+  .leader-spotlight{margin-bottom:14px;padding:10px 12px 9px;border-radius:18px}
+  .leader-mini{padding:5px 4px 6px}.leader-mini-1{padding-top:8px}
+  .leader-mini strong{font-size:13px}.leader-invite{font-size:9px}
+  .rank-chase{width:210px;top:calc(100% + 7px);padding:7px 10px 6px}
+  .rank-position{font-size:20px}.rank-shout{font-size:16px}
+}
+@media(max-height:700px) and (max-width:600px){
+  .intro .intro-card{bottom:16px}.intro .intro-howto{margin-top:10px}
+  .leader-spotlight{margin-bottom:10px}.leader-trio{margin-top:5px}.leader-invite{display:none}
+}
+@media(max-height:580px) and (min-width:601px){.leader-mini{padding:3px}.leader-invite{display:none}.leader-spotlight{margin-bottom:8px}.intro .intro-card{top:52%;transform:translateY(-50%)}}
+@media(prefers-reduced-motion:reduce){.leader-mini,.rank-chase.celebrating{animation:none}.leader-spotlight,.rank-chase,.rank-chase-track i{transition:none}}
+
+.rank-chase[hidden]{display:none}
+.rank-announcement{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.run-rank-goal{font-size:12px!important;line-height:1.5!important;color:#ffffffb3;margin:0 0 8px!important}.run-rank-goal strong{color:var(--gold)}
+
+/* Chunky miniature podium, with the same warm gold as the driving badge. */
+.leader-heading>span{font-size:11px;font-weight:900;letter-spacing:.9px}
+.leader-spotlight{border-width:2px;border-bottom-width:4px;border-bottom-color:#0a141b;background:linear-gradient(145deg,#293e47,#17252f)}
+.leader-mini{border-radius:10px;border-bottom:3px solid #07141b55}
+.leader-mini strong{font-size:17px;font-weight:900;letter-spacing:-.4px}
+.leader-mini-1{background:linear-gradient(155deg,#f4b54440,#f4b54414);border-color:#f4b54470;border-bottom-color:#a87c35}
+.leader-mini-1 .leader-medal{rotate:-9deg}
+.leader-invite{font-weight:900;font-size:9px;letter-spacing:.9px}
+@media(prefers-reduced-motion:reduce){.rank-shout,.rank-sprint em,.rank-segments.running{animation:none}.rank-segments i{transition:none}}
+
+/* ===== The driving header: the score in the middle with the road to the next stage under it; the run's clock,
+   the hearts and the combo on the right, beside the buttons. ===== */
+.topbar-right{display:flex;align-items:center;gap:12px}
+.hud-right{display:flex;align-items:center;gap:10px;pointer-events:none}
+.hud-right .hearts-bar{position:static;translate:none;height:44px;align-items:center;padding:0 14px}
+.run-clock{display:flex;align-items:center;gap:7px;height:44px;padding:0 16px 0 13px;border-radius:40px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#fff}
+.run-clock svg{width:17px;height:17px;color:var(--gold)}
+.run-clock b{min-width:42px;font-size:19px;font-weight:900;letter-spacing:-.3px;font-variant-numeric:tabular-nums}
+
+/* The stage card under the score: the current stage's colours (`--stage-accent`, `--stage-glow`), one bar that
+   fills toward the next stage, and a surge when a big score lands: the stretch just gained flares white into the
+   stage's glow, a shine sweeps the bar, the head pops and the card swells for a beat. */
+.rank-chase{width:262px;border-color:color-mix(in srgb,var(--stage-accent) 35%,#ffffff22);background:linear-gradient(145deg,color-mix(in srgb,var(--stage-accent) 20%,#263b47),#17252f);transition:border-color .6s,background .6s}
+.rank-sprint small{display:flex;align-items:baseline;gap:4px}
+.rank-sprint em{font-size:10px;letter-spacing:.4px;white-space:nowrap}
+.stage-bar{position:relative;display:block;height:9px;margin:9px 2px 7px;border-radius:999px;background:#07141b99;box-shadow:inset 0 1px 2px #0007}
+.stage-fill{position:absolute;left:0;top:0;bottom:0;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--stage-accent) 65%,#0b161a),var(--stage-accent) 70%,var(--stage-glow));box-shadow:0 0 9px color-mix(in srgb,var(--stage-accent) 55%,transparent);transition:width .4s cubic-bezier(.2,.9,.3,1)}
+.stage-head{position:absolute;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;border-radius:50%;background:var(--stage-glow);box-shadow:0 0 10px var(--stage-glow),0 0 2px #fff;transition:left .4s cubic-bezier(.2,.9,.3,1)}
+.stage-gain{position:absolute;top:-2px;bottom:-2px;border-radius:999px;background:linear-gradient(90deg,#ffffff00,#fff 45%,var(--stage-glow));box-shadow:0 0 14px var(--stage-glow),0 0 28px var(--stage-accent);pointer-events:none;animation:stage-gain 1.1s ease-out both}
+.stage-shine{position:absolute;inset:0;border-radius:999px;background:linear-gradient(100deg,transparent 35%,#ffffffd0 50%,transparent 65%);background-size:260% 100%;mix-blend-mode:screen;pointer-events:none;animation:stage-shine .8s ease-out both}
+.rank-chase.surging{border-color:var(--stage-glow);box-shadow:0 0 0 2px color-mix(in srgb,var(--stage-glow) 40%,transparent),0 0 28px color-mix(in srgb,var(--stage-accent) 60%,transparent),0 5px 0 #07141c33;animation:stage-surge .6s cubic-bezier(.2,1.6,.4,1)}
+.rank-chase.surging .stage-head{animation:stage-head .6s cubic-bezier(.2,1.8,.4,1)}
+.rank-chase.surging .rank-sprint>b{color:var(--stage-glow)}
+.rank-chase.celebrating{border-color:var(--stage-accent);background:linear-gradient(135deg,color-mix(in srgb,var(--stage-accent) 45%,#1d2b33),#17252f)}
+.rank-chase.celebrating .rank-shout{color:var(--stage-glow)}
+@keyframes stage-gain{0%{opacity:0;transform:scaleY(.4)}12%{opacity:1;transform:scaleY(1.7)}35%{transform:scaleY(1)}100%{opacity:0}}
+@keyframes stage-shine{from{background-position:120% 0}to{background-position:-20% 0}}
+@keyframes stage-surge{0%{scale:1}30%{scale:1.07}100%{scale:1}}
+@keyframes stage-head{0%{scale:1}35%{scale:1.9}100%{scale:1}}
+@media(prefers-reduced-motion:reduce){.stage-gain,.stage-shine,.rank-chase.surging,.rank-chase.surging .stage-head{animation:none}.stage-fill,.stage-head{transition:none}}
+
+/* Phones: one header row (home, score, hearts, sound); under it the stage card in the middle, the clock under the
+   home button on the left and the combo under the hearts on the right. */
+@media(max-width:600px){
+  .playing .topbar-right{gap:10px}
+  .hud-right{gap:8px}
+  .hud-right .hearts-bar{flex:none;height:44px;padding:0 10px;gap:5px}
+  .hud-right .hearts-bar .heart-icon{width:20px;height:20px}
+  .hud-right .run-clock{position:absolute;top:calc(100% - 6px);left:16px;height:34px;padding:0 10px 0 8px;gap:4px}
+  .hud-right .run-clock svg{width:13px;height:13px}
+  .hud-right .run-clock b{min-width:32px;font-size:14px}
+  .rank-chase{width:196px;top:calc(100% - 6px)}
+  .rank-chase-line{gap:6px}
+  .rank-position{font-size:18px}
+  .rank-sprint{gap:3px}
+  .rank-sprint small{gap:3px}
+  .rank-sprint>b{font-size:17px}
+  .rank-sprint em{font-size:8.5px;letter-spacing:.2px}
+}
+
+/* ===== The stage card holds the score now (no score pill): the stage's emblem, the score, the rank chip, the bar
+   and a caption, all dressed in the stage's own colours. ===== */
+.playing .hud-center{top:16px}
+.hud-center .rank-chase{position:relative;left:auto;top:auto;translate:none}
+.rank-chase{width:300px;padding:9px 13px 8px;border:2px solid color-mix(in srgb,var(--stage-accent) 70%,#ffffff33);border-bottom:4px solid color-mix(in srgb,var(--stage-accent) 40%,#05080a);background:radial-gradient(120% 150% at 0% 0%,color-mix(in srgb,var(--stage-glow) 40%,transparent),transparent 58%),linear-gradient(145deg,color-mix(in srgb,var(--stage-accent) 62%,#1b2730),color-mix(in srgb,var(--stage-accent) 24%,#10181e));box-shadow:0 5px 0 #07141c33,0 10px 26px color-mix(in srgb,var(--stage-accent) 30%,#08131800);text-shadow:0 1px 2px #0006}
+.rank-chase:hover{border-color:var(--stage-glow)}
+.rank-chase-line{height:36px;gap:10px}
+/* The emblem: flips over to the new stage's with a ring of light, idles in its own way, and hops on a surge. */
+.stage-emblem{position:relative;display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:11px;background:linear-gradient(160deg,var(--stage-glow),var(--stage-accent));color:#1b1405;box-shadow:inset 0 2px #ffffff88,0 3px 0 color-mix(in srgb,var(--stage-accent) 50%,#000),0 0 16px color-mix(in srgb,var(--stage-glow) 55%,transparent);rotate:-6deg;animation:emblem-in .55s cubic-bezier(.2,1.6,.4,1) both}
+.stage-emblem svg{width:20px;height:20px;stroke-width:2.4}
+.emblem-ring{position:absolute;inset:-3px;border-radius:14px;border:2px solid var(--stage-glow);opacity:0;pointer-events:none;animation:emblem-ring .9s ease-out .15s both}
+.emblem-meadow svg{animation:emblem-spin 9s linear infinite}
+.emblem-dusk svg{animation:emblem-bob 2.4s ease-in-out infinite}
+.emblem-amber svg{transform-origin:50% 85%;animation:emblem-sway 2.2s ease-in-out infinite}
+.emblem-night svg{animation:emblem-tilt 3s ease-in-out infinite}
+.emblem-blossom svg{animation:emblem-spin 12s linear infinite,emblem-breathe 2s ease-in-out infinite}
+.emblem-frost svg{animation:emblem-spin 6s linear infinite}
+.rank-chase.surging .stage-emblem{animation:emblem-hop .45s cubic-bezier(.2,1.8,.4,1)}
+@keyframes emblem-in{0%{transform:perspective(120px) rotateY(180deg) scale(.6);opacity:0}60%{transform:perspective(120px) rotateY(-14deg) scale(1.12);opacity:1}100%{transform:none}}
+@keyframes emblem-ring{0%{opacity:.9;scale:1}100%{opacity:0;scale:2}}
+@keyframes emblem-spin{to{rotate:360deg}}
+@keyframes emblem-bob{50%{translate:0 -2.5px}}
+@keyframes emblem-sway{0%,100%{rotate:-14deg}50%{rotate:14deg}}
+@keyframes emblem-tilt{0%,100%{rotate:-12deg}50%{rotate:8deg}}
+@keyframes emblem-breathe{50%{scale:1.14}}
+@keyframes emblem-hop{40%{scale:1.28;translate:0 -2px}}
+.chase-score{position:relative;display:flex;align-items:center;min-width:0}
+.chase-score .score-value{color:#fff;font-size:28px;font-weight:900;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums;text-shadow:0 2px 0 #0005}
+.chase-score .score-float{left:100%;top:50%;translate:6px -50%;z-index:2}
+.rank-chase .rank-position{margin-left:auto;display:flex;align-items:center;gap:4px;height:24px;padding:0 9px;border-radius:999px;background:#0b141a66;color:var(--gold);font-size:13px;font-weight:900;letter-spacing:0}
+.rank-chase .rank-position svg{flex:none}
+.rank-chase-detail{gap:8px;font-size:9.5px;color:#ffffffd6}
+.rank-chase-detail .rank-sprint{margin:0;display:inline-flex;align-items:baseline;gap:4px;font-weight:900;flex:none}
+.rank-chase-detail .rank-sprint>b{font-size:12px;color:#fff;letter-spacing:0}
+.rank-chase-detail .rank-sprint em{font-style:normal;font-size:inherit;animation:none}
+.rank-goal{margin-left:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;opacity:.75}
+.rank-chase-detail .rank-shout{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:9.5px;font-style:normal;letter-spacing:.6px;color:#fff}
+.rank-chase-detail .rank-shout b{margin-right:4px;font-size:12px;font-style:italic;color:var(--stage-glow)}
+.stage-bar{background:#05080a80}
+/* The guide and the hints sit under the card. */
+.playing .coach,.playing .coach-goal{top:132px}
+.playing .topbar .road-warning,.playing .topbar .curb-hint{top:calc(100% + 30px)}
+@media(prefers-reduced-motion:reduce){.stage-emblem,.stage-emblem svg,.emblem-ring{animation:none}}
+@media(max-width:600px){
+  .playing .hud-center{position:absolute;left:50%;top:calc(100% - 4px);translate:-50% 0;flex:none}
+  .rank-chase{width:228px;padding:7px 10px 6px}
+  .rank-chase-line{height:32px;gap:8px}
+  .stage-emblem{width:30px;height:30px;border-radius:10px}
+  .stage-emblem svg{width:17px;height:17px}
+  .chase-score .score-value{font-size:23px}
+  .rank-chase .rank-position{height:22px;padding:0 7px;font-size:12px}
+  .rank-goal{display:none}
+  .hud-right .run-clock{top:14px;left:70px;height:44px;padding:0 12px 0 10px}
+  .hud-right .run-clock b{font-size:16px}
+  .playing .coach,.playing .coach-goal{top:172px}
+  .playing .topbar .road-warning,.playing .topbar .curb-hint{top:calc(100% + 100px)}
+}
+
+/* ===== Driving header, final pass. What the driver needs, in order: the score and its multiplier (the one central
+   focus), the hearts (status, always on the right), the road to the next stage (a slim bar under the score), and
+   then the clock and the rank (small). The level and XP stay off the road (they are in the pause menu). Every corner
+   piece is the same 44 px glass capsule; the stage card lines up with them and carries the stage's colours. ===== */
+.playing .topbar-left .level-badge{display:none}
+.playing .hud-center{top:27px}
+.rank-chase{width:340px;padding:10px 14px 9px;border-radius:18px;border:1.5px solid color-mix(in srgb,var(--stage-accent) 60%,#ffffff1f);border-bottom:3px solid color-mix(in srgb,var(--stage-accent) 35%,#05080a);background:radial-gradient(110% 140% at 0% 0%,color-mix(in srgb,var(--stage-glow) 28%,transparent),transparent 60%),linear-gradient(160deg,color-mix(in srgb,var(--stage-accent) 38%,#1a252d),color-mix(in srgb,var(--stage-accent) 14%,#121b21));box-shadow:0 10px 28px #0b161a55,inset 0 1px 0 #ffffff26}
+.rank-chase-line{height:38px;gap:11px}
+.stage-emblem{width:36px;height:36px;border-radius:12px}
+.stage-emblem svg{width:20px;height:20px}
+.chase-score{gap:9px}
+.chase-score .score-value{font-size:30px}
+.chase-score .combo-pill{height:26px;padding:0 10px;border-radius:999px;box-shadow:0 3px 12px #ff8a3d55,inset 0 1px 0 #ffffff77}
+.chase-score .combo-pill b{font-size:15px}
+.rank-chase .rank-position{height:26px;padding:0 10px;font-size:13px;background:#05080a55;border:1px solid #f4b54444}
+.stage-bar{height:8px;margin:10px 1px 8px}
+.stage-head{width:12px;height:12px;margin:-6px 0 0 -6px}
+.rank-chase-detail{font-size:10px;letter-spacing:.7px}
+.rank-chase-detail .rank-sprint>b{font-size:12.5px}
+.rank-goal{color:#ffffffb3;opacity:1}
+.hud-right{gap:10px}
+.run-clock,.hud-right .hearts-bar{height:44px}
+.playing .coach,.playing .coach-goal{top:146px}
+.playing .topbar .road-warning,.playing .topbar .curb-hint{top:calc(100% + 44px)}
+@media(max-width:600px){
+  .playing .hud-center{top:calc(100% - 2px)}
+  .rank-chase{width:calc(100vw - 32px);max-width:360px;padding:8px 12px 8px;border-radius:16px}
+  .rank-chase-line{height:34px;gap:9px}
+  .stage-emblem{width:32px;height:32px;border-radius:11px}
+  .stage-emblem svg{width:18px;height:18px}
+  .chase-score .score-value{font-size:26px}
+  .chase-score .combo-pill{height:24px;padding:0 8px}
+  .chase-score .combo-pill b{font-size:14px}
+  .rank-goal{display:block}
+  .playing .coach,.playing .coach-goal{top:178px}
+  .playing .topbar .road-warning,.playing .topbar .curb-hint{top:calc(100% + 104px)}
+}
+/* Inside the card the bonus floats up and away from the bar, beside the score. */
+.chase-score .score-float{animation-name:chase-float}
+@keyframes chase-float{0%{opacity:0;transform:translateY(4px) scale(.6)}20%{opacity:1;transform:translateY(-2px) scale(1.1)}70%{opacity:1}100%{opacity:0;transform:translateY(-16px) scale(.95)}}
+/* The curb warning: plain words for a new driver, with a warning sign; wraps on narrow screens. */
+.curb-hint svg{flex:none;color:var(--gold)}
+.curb-hint b{margin-right:3px;color:#fff;font-weight:800}
+@media(max-width:600px){.curb-hint{width:max-content;max-width:calc(100vw - 32px);white-space:normal;text-align:left;line-height:1.35}}
+
+/* The stage card's look, from the Stages tab (stages.ts cardLook): how much of the stage's colour, corner glow and
+   border colour it takes. */
+.rank-chase{border-color:color-mix(in srgb,var(--stage-accent) calc(var(--card-border,.6) * 100%),#ffffff1f);border-bottom-color:color-mix(in srgb,var(--stage-accent) calc(var(--card-border,.6) * 58%),#05080a);background:radial-gradient(110% 140% at 0% 0%,color-mix(in srgb,var(--stage-glow) calc(var(--card-corner,.28) * 100%),transparent),transparent 60%),linear-gradient(160deg,color-mix(in srgb,var(--stage-accent) calc(var(--card-tint,.38) * 100%),#1a252d),color-mix(in srgb,var(--stage-accent) calc(var(--card-tint,.38) * 37%),#121b21))}
+
+/* ===== The driving header's side pieces, in the stage card's own material so the header reads as one set:
+   rounded tiles (not circles) with a fine light rim, a darker lip underneath, a soft gradient and highlight; a
+   little taller than before, with bigger icons and numbers. Buttons lift on hover and press down onto their lip;
+   the clock's icon sits in a tilted gold tile like the stage emblem. ===== */
+.playing .home-button,.playing .topbar .toolbar button,.playing .run-clock,.playing .hud-right .hearts-bar{height:50px;border-radius:16px;border:1.5px solid #ffffff2b;border-bottom:3px solid #05080a;background:linear-gradient(160deg,#2b3b45,#16222a);box-shadow:0 8px 22px #0b161a40,inset 0 1px 0 #ffffff26;color:#fff;backdrop-filter:none}
+.playing .home-button,.playing .topbar .toolbar button{width:50px;place-items:center;transition:transform .14s cubic-bezier(.3,1.6,.5,1),background .2s,border-bottom-width .1s}
+.playing .home-button svg,.playing .topbar .toolbar button svg{width:22px;height:22px;stroke-width:2.3}
+.playing .home-button:hover,.playing .topbar .toolbar button:hover{transform:translateY(-2px);background:linear-gradient(160deg,#34474f,#1b2a33)}
+.playing .home-button:active,.playing .topbar .toolbar button:active{transform:translateY(2px);border-bottom-width:1px}
+.playing .topbar .toolbar{gap:10px}
+.playing .run-clock{gap:10px;padding:0 16px 0 8px}
+.playing .run-clock svg{box-sizing:content-box;width:17px;height:17px;padding:6px;border-radius:10px;background:linear-gradient(160deg,#ffe08a,#f4b544);color:#3a2408;stroke-width:2.6;rotate:-6deg;box-shadow:inset 0 2px #ffffff88,0 2px 0 #a8742a}
+.playing .run-clock b{min-width:46px;font-size:22px;font-weight:900;letter-spacing:-.5px;text-shadow:0 2px 0 #0005}
+.playing .hud-right .hearts-bar{gap:6px;padding:0 14px}
+.playing .hud-right .hearts-bar .heart-icon{width:24px;height:24px}
+.playing .hud-right .hearts-bar .full{filter:drop-shadow(0 0 6px #ff4f4588) drop-shadow(0 2px 0 #0006)}
+.playing .hud-right{gap:10px}
+@media(max-width:600px){
+  .playing .home-button,.playing .topbar .toolbar button,.playing .run-clock,.playing .hud-right .hearts-bar{height:46px;border-radius:14px}
+  .playing .home-button,.playing .topbar .toolbar button{width:46px}
+  .playing .home-button svg,.playing .topbar .toolbar button svg{width:20px;height:20px}
+  .playing .hud-right .run-clock{top:14px;left:72px;height:46px;padding:0 12px 0 6px;gap:7px}
+  .playing .run-clock svg{width:14px;height:14px;padding:5px;border-radius:9px}
+  .playing .run-clock b{min-width:38px;font-size:18px}
+  .playing .hud-right .hearts-bar{padding:0 11px;gap:5px}
+  .playing .hud-right .hearts-bar .heart-icon{width:21px;height:21px}
+}
+
+/* The look panel's before/after tick, and the Stages tab's tools (which design, and the loop). */
+.day-look-fields{margin:0;padding:0;border:0;min-width:0}
+.day-look-fields:disabled{opacity:.55}
+.day-look-compare{display:flex;align-items:center;gap:8px;margin:2px 0 10px;padding:8px 10px;border-radius:10px;background:#1e595414;font-size:12px;font-weight:700;color:#1e5954;cursor:pointer}
+.day-look-compare.on{background:#f4b54433;color:#7a4d0a}
+.day-look-compare input{width:16px;height:16px;accent-color:#1e5954}
+.stage-tools{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
+.stage-view,.stage-loop{display:flex;gap:6px}
+.stage-view button,.stage-loop button,.stage-own{flex:1;padding:7px 6px;border:1px solid #1e5954;border-radius:8px;background:transparent;color:#1e5954;font-size:12px;font-weight:700}
+.stage-view button.on,.stage-own.on{background:#1e5954;color:#fff8dd}
+.stage-loop button{font-size:11px;padding:6px 4px;border-style:dashed}
+.stage-loop button:disabled{opacity:.35}
+.day-look-choices{flex-wrap:wrap}
+
+/* ===== The start screen in the same game material as the driving header: the same layout, but every piece a chunky
+   tile with a fine light rim, a darker lip underneath and a soft highlight; buttons lift on hover and press down onto
+   their lip. "Start driving" is the gold one, the party button a cream one. ===== */
+.intro .topbar .brand,.intro .toolbar button,.intro .mode-toggle,.intro-howto>span,.intro-level{border:1.5px solid #ffffff2b;border-bottom:3px solid #05080a;background:linear-gradient(160deg,#2b3b45,#16222a);box-shadow:0 8px 22px #0b161a40,inset 0 1px 0 #ffffff26;color:#fff}
+.intro .topbar .brand{height:50px;border-radius:16px}
+.intro .toolbar{gap:10px}
+.intro .toolbar button,.intro .mode-toggle{width:48px;height:48px;border-radius:15px;transition:transform .14s cubic-bezier(.3,1.6,.5,1),background .2s,border-bottom-width .1s}
+.intro .toolbar button svg{width:21px;height:21px;stroke-width:2.3}
+.intro .toolbar button:hover,.intro .mode-toggle:hover{transform:translateY(-2px);background:linear-gradient(160deg,#34474f,#1b2a33)}
+.intro .toolbar button:active,.intro .mode-toggle:active{transform:translateY(2px);border-bottom-width:1px}
+.intro-howto>span{border-radius:15px;height:46px}
+.intro-howto>span>svg,.intro-howto .heart-icon{border-radius:10px}
+.intro-level{border-radius:13px;color:#fff}
+.night .intro-level{color:#fff}
+.start-button.primary{border:1.5px solid #ffe7a8;border-bottom:5px solid #b37a22;border-radius:18px;background:linear-gradient(170deg,#ffd06a,#f4ad3b);box-shadow:0 10px 26px #f4b54455,inset 0 2px 0 #fff6;transition:transform .14s cubic-bezier(.3,1.6,.5,1),border-bottom-width .1s,filter .2s}
+.start-button.primary:hover{transform:translateY(-2px);filter:brightness(1.05)}
+.start-button.primary:active{transform:translateY(3px);border-bottom-width:2px}
+.party-button{border:1.5px solid #ffffff;border-bottom:3px solid #b9b19a;border-radius:15px;background:linear-gradient(170deg,#fffdf3,#efe8d4);box-shadow:0 8px 20px #0b161a26,inset 0 1px 0 #fff;transition:transform .14s cubic-bezier(.3,1.6,.5,1),border-bottom-width .1s}
+.party-button:hover{transform:translateY(-2px);background:linear-gradient(170deg,#fff,#f4eedc)}
+.party-button:active{transform:translateY(2px);border-bottom-width:1px}
+.night .party-button{border-color:#ffffff2b;border-bottom-color:#05080a;background:linear-gradient(160deg,#2b3b45,#16222a);color:#fff}
+@media(max-width:600px){
+  .intro .topbar .brand{height:44px;border-radius:14px}
+  .intro .toolbar button,.intro .mode-toggle{width:44px;height:44px;border-radius:14px}
+  .intro-howto>span{height:40px;border-radius:13px}
+}
+
+/* The start screen's colours come from the stage (Stages tab, each stage's Home colours), blended through a stage
+   change: --home-title, -text, -dot, -button (and -button-text), -second (and -second-text), -tile (and -tile-text). */
+.intro-card h1,.intro-card h1 .ch,.night .intro-card h1,.night .intro-card h1 .ch{color:var(--home-title,#111)}
+.intro-card p,.intro-card .eyebrow,.intro-controls,.intro-caption,.night .intro-card p,.night .intro-card .eyebrow,.night .intro-controls,.night .intro-caption{color:var(--home-text,#111)}
+.intro-card h1 .ch.dot,.night .intro-card h1 .ch.dot{color:var(--home-dot,#e07a3c)}
+.start-button.primary{border-color:color-mix(in srgb,var(--home-button,#f4b544) 55%,#fff);border-bottom-color:color-mix(in srgb,var(--home-button,#f4b544) 62%,#000);background:linear-gradient(170deg,color-mix(in srgb,var(--home-button,#f4b544) 78%,#fff),var(--home-button,#f4b544));color:var(--home-button-text,#2a1d05);box-shadow:0 10px 26px color-mix(in srgb,var(--home-button,#f4b544) 35%,transparent),inset 0 2px 0 #fff6}
+.party-button,.night .party-button{border-color:color-mix(in srgb,var(--home-second,#f6f0de) 60%,#fff);border-bottom-color:color-mix(in srgb,var(--home-second,#f6f0de) 70%,#000);background:linear-gradient(170deg,color-mix(in srgb,var(--home-second,#f6f0de) 82%,#fff),var(--home-second,#f6f0de));color:var(--home-second-text,#173e3c)}
+.party-button:hover{background:linear-gradient(170deg,color-mix(in srgb,var(--home-second,#f6f0de) 70%,#fff),var(--home-second,#f6f0de))}
+.intro .topbar .brand,.intro .toolbar button,.intro .mode-toggle,.intro-howto>span,.intro-level,.night .intro-level,.leader-spotlight{background:linear-gradient(160deg,color-mix(in srgb,var(--home-tile,#20303a) 88%,#fff),color-mix(in srgb,var(--home-tile,#20303a) 78%,#000));color:var(--home-tile-text,#fff)}
+.intro .toolbar button:hover,.intro .mode-toggle:hover{background:linear-gradient(160deg,color-mix(in srgb,var(--home-tile,#20303a) 78%,#fff),color-mix(in srgb,var(--home-tile,#20303a) 85%,#000))}
+.intro .topbar .brand strong,.intro .topbar .brand small,.intro-howto small,.leader-mini strong{color:var(--home-tile-text,#fff)}
+/* (Above the older gold rule, which forces its colours with !important.) */
+.app .intro-card .start-button.primary{border:1.5px solid color-mix(in srgb,var(--home-button,#f4b544) 55%,#fff)!important;border-bottom:5px solid color-mix(in srgb,var(--home-button,#f4b544) 62%,#000)!important;border-radius:18px;background:linear-gradient(170deg,color-mix(in srgb,var(--home-button,#f4b544) 78%,#fff),var(--home-button,#f4b544))!important;color:var(--home-button-text,#2a1d05)!important;box-shadow:0 10px 26px color-mix(in srgb,var(--home-button,#f4b544) 35%,transparent),inset 0 2px 0 #fff6!important}
+.app .intro-card .start-button.primary:hover{background:linear-gradient(170deg,color-mix(in srgb,var(--home-button,#f4b544) 68%,#fff),var(--home-button,#f4b544))!important;transform:translateY(-2px)}
+.app .intro-card .start-button.primary:active{transform:translateY(3px);border-bottom-width:2px!important}
+
+.stage-more{align-self:flex-start;padding:4px 2px;border:0;background:none;color:#1e5954;font-size:12px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.stage-editing{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:0;font-size:12px;color:#55625c}
+.stage-editing b{color:#1e5954}
+.stage-editing button{padding:0;border:0;background:none;color:#1e5954;font-size:11.5px;font-weight:700;text-decoration:underline;text-underline-offset:3px}

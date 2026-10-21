@@ -57,7 +57,9 @@ export function drainNearMisses(): NearMiss[] { return nearMisses.splice(0); }
 // static things (trees, poles, rocks, houses: threading past them off the road) are tracked separately.
 // How close and how fast a pass must be come from the difficulty (generous at low levels); `gap` here is only
 // the scale the reported gap is given on, for scoring.
-export const NEAR_MISS = { watch: 1.6, gap: 0.65, minPlayerSpeed: 6 };
+// `fling` (an experiment): a traffic car passed in a near miss is thrown aside as if by the boost's wake, untouched,
+// at `flingPower` × the player's speed (no hit, no penalty: it's the near miss's reward).
+export const NEAR_MISS = { watch: 1.6, gap: 0.65, minPlayerSpeed: 6, fling: true, flingPower: 0.85 };
 type Pass = { obstacle: Obstacle; closest: number; touched: boolean; boosted: boolean; speed: number; playerSpeed: number; side: number };
 function passTracker(gapLimit: () => number, source: NearMiss['source']) {
   let pass: Pass | undefined;
@@ -72,6 +74,14 @@ function passTracker(gapLimit: () => number, source: NearMiss['source']) {
           && pass.closest <= maxGap && pass.speed >= difficulty.nearMissSpeed && playerSpeed >= NEAR_MISS.minPlayerSpeed) {
           nearMisses.push({ speed: pass.speed, gap: pass.closest / maxGap * NEAR_MISS.gap, side: pass.side,
             playerSpeed: pass.playerSpeed, clearance: pass.closest, source });
+          if (NEAR_MISS.fling && pass.obstacle.movable) {
+            const car = pass.obstacle;
+            car.impact = Math.max(car.impact ?? 0, pass.playerSpeed * NEAR_MISS.flingPower);
+            car.impactPower = 1;
+            car.hitKind = 'side';
+            car.boostHit = true;
+            car.ramCooldown = 0.5;
+          }
         }
         pass = undefined;
         return;

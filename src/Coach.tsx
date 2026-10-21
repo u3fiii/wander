@@ -28,9 +28,9 @@ const seen = loadSeen();
 const markSeen = (tip: Tip) => { seen.add(tip); try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen])); } catch { /* storage unavailable */ } };
 const used = { boost: false, drift: false, views: false };
 
-export default function Coach({ rails = false, lesson, active, controls, speed, offroad, boostReady, trafficOn, device, onComplete, onSkip }: {
+export default function Coach({ rails = false, lesson, active, controls, speed, offroad, boostReady, trafficOn, device, onComplete, onSkip, onShowingChange }: {
   rails?: boolean; lesson: boolean; active: boolean; controls: RefObject<Controls>; speed: number; offroad: boolean; boostReady: boolean;
-  trafficOn: boolean; device: InputDevice; onComplete: () => void; onSkip?: () => void;
+  trafficOn: boolean; device: InputDevice; onComplete: () => void; onSkip?: () => void; onShowingChange?: (showing: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>(lesson ? (rails ? 'steer' : 'wait') : 'free');
   const [tip, setTip] = useState<{ kind: Tip; ticked: boolean } | null>(null);
@@ -110,6 +110,9 @@ export default function Coach({ rails = false, lesson, active, controls, speed, 
     return () => window.clearTimeout(timer);
   }, [tip]);
 
+  const showing = active && (phase === 'steer' || phase === 'speed' || !!tip);
+  useEffect(() => { onShowingChange?.(showing); }, [showing, onShowingChange]);
+  useEffect(() => () => onShowingChange?.(false), [onShowingChange]);
   if (!active) return null;
   const tick = <b className="coach-tick" aria-hidden="true">✓</b>;
   const skip = onSkip && (phase === 'steer' || phase === 'speed') && !done

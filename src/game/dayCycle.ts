@@ -26,7 +26,12 @@ const DAWN_SKY: Keys = [
 // `jump` is the button's cross-fade: from one time of day to another, `progress` 0..1.
 // `day` counts whole turns of the clock.
 // `speed` scales how fast the clock runs (phones run it a little faster).
-export const cycle = { time: 20, day: 0, speed: 1, jump: null as { from: number; to: number; progress: number } | null };
+// `glide` runs the clock forward to a time over a few seconds (a quick sunset or sunrise), see settleAt.
+export const cycle = {
+  time: 20, day: 0, speed: 1,
+  jump: null as { from: number; to: number; progress: number; seconds?: number } | null,
+  glide: null as { from: number; distance: number; progress: number; seconds: number } | null,
+};
 // Back to the middle of the morning, for a run that should start in daylight.
 export function resetToDay() { cycle.time = 20; cycle.jump = null; }
 
@@ -103,10 +108,16 @@ function skyAtTime(day: Sky, night: Sky, time: number): Sky {
 // Runs the clock at its own slow pace while `running`; the button's cross-fade runs regardless and, when it
 // ends, the clock carries on from the time it went to.
 export function advanceCycle(dt: number, running: boolean) {
-  const jump = cycle.jump;
+  const jump = cycle.jump, glide = cycle.glide;
   if (jump) {
-    jump.progress += dt / JUMP_SECONDS;
+    jump.progress += dt / (jump.seconds ?? JUMP_SECONDS);
     if (jump.progress >= 1) { if (jump.to < jump.from) cycle.day++; cycle.time = jump.to; cycle.jump = null; }
+  } else if (glide) {
+    glide.progress = Math.min(1, glide.progress + dt / glide.seconds);
+    const next = glide.from + glide.distance * smooth(glide.progress);
+    if (next >= TOTAL && cycle.time > wrap(next)) cycle.day++;
+    cycle.time = wrap(next);
+    if (glide.progress >= 1) cycle.glide = null;
   } else if (running) {
     const next = cycle.time + dt * cycle.speed;
     if (next >= TOTAL) cycle.day++;
@@ -116,6 +127,7 @@ export function advanceCycle(dt: number, running: boolean) {
 
 // The sun/moon button: cross-fade straight to full night or full day. Pressed again mid-fade, it turns round.
 export function goTo(phase: 'day' | 'night') {
+  cycle.glide = null;
   const to = phase === 'night' ? NIGHT_START + 2 : 2;
   const jump = cycle.jump;
   if (jump) {
@@ -132,3 +144,24 @@ export function headingToNight() {
   const { name } = part(cycle.time);
   return name === 'night' || name === 'dusk';
 }
+
+// The world's stages (stages.ts) each set a time of day instead of the clock running on its own: full day, the
+// purple sky of late dusk, or the middle of the night.
+export type TimeOfDay = 'day' | 'dusk' | 'night';
+export const TIME_OF_DAY: Record<TimeOfDay, number> = { day: 20, dusk: DUSK_START + CYCLE.dusk * 0.6, night: NIGHT_START + CYCLE.night * 0.5 };
+// A whole turn of the clock (s): a stage's time of day is a share of it.
+export const CYCLE_LENGTH = TOTAL;
+// Moves to a stage's time of day over `seconds`. When it lies not far ahead (`GLIDE_AHEAD` s of clock time) the
+// clock runs forward to it, a quick sunset or sunrise; otherwise the two looks cross-fade.
+const GLIDE_AHEAD = 100;
+export function settleAt(when: number, seconds: number) {
+  if (cycle.jump) { cycle.time = cycle.jump.to; cycle.jump = null; }
+  cycle.glide = null;
+  const to = wrap(when);
+  const ahead = wrap(to - cycle.time);
+  if (ahead < 0.5 || ahead > TOTAL - 0.5) return;
+  if (ahead <= GLIDE_AHEAD) cycle.glide = { from: cycle.time, distance: ahead, progress: 0, seconds };
+  else cycle.jump = { from: cycle.time, to, progress: 0, seconds };
+}
+// Straight there, for the start of a run.
+export function jumpTo(when: number) { cycle.jump = null; cycle.glide = null; cycle.time = wrap(when); }

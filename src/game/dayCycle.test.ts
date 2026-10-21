@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CYCLE, advanceCycle, cycle, goTo, nightAmount, skyAt, twilight } from './dayCycle.ts';
+import { CYCLE, TIME_OF_DAY, advanceCycle, cycle, goTo, nightAmount, settleAt, skyAt, twilight } from './dayCycle.ts';
 
 const day = { top: '#6ecff2', horizon: '#e6f7f3' }, night = { top: '#111118', horizon: '#0a0a0b' };
 const dusk = CYCLE.day, nightStart = CYCLE.day + CYCLE.dusk, dawn = nightStart + CYCLE.night;
@@ -54,3 +54,21 @@ test('the button back to day ends in full day, and turns round if pressed mid-fa
   assert.equal(nightAmount(), 0);
 });
 
+
+test('a stage\'s time of day: a short way ahead the clock runs forward to it, further it cross-fades, and then it holds', () => {
+  cycle.time = TIME_OF_DAY.day; cycle.jump = null; cycle.glide = null;
+  settleAt(TIME_OF_DAY.dusk, 3);
+  assert.ok(cycle.glide && !cycle.jump, 'day to dusk: a quick sunset');
+  let warm = 0;
+  for (let i = 0; i < 60 * 3.2; i++) { advanceCycle(1 / 60, false); warm = Math.max(warm, twilight()); }
+  assert.ok(warm > 0.8, 'through golden hour on the way');
+  assert.ok(Math.abs(cycle.time - TIME_OF_DAY.dusk) < 1e-6 && !cycle.glide);
+  settleAt(TIME_OF_DAY.day, 3);
+  assert.ok(cycle.jump && !cycle.glide, 'dusk back to day: a cross-fade, not a whole night in three seconds');
+  for (let i = 0; i < 60 * 3.2; i++) advanceCycle(1 / 60, false);
+  assert.equal(cycle.time, TIME_OF_DAY.day);
+  assert.equal(nightAmount(), 0);
+  const time = cycle.time;
+  advanceCycle(5, false);
+  assert.equal(cycle.time, time, 'holds there');
+});

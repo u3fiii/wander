@@ -26,8 +26,6 @@ export type CarState = {
   curb: number;
   // Seconds spent riding the curb lately (it grows on the curb and drains off it).
   curbTime: number;
-  // While above 0 (the milestone moment, see Scene) the car passes through traffic untouched.
-  ghost: number;
   // Seconds left of the stronger road assist that follows a head-on hit (so the car settles back on the road).
   hitAssist?: number;
   // Seconds of boost left in the current burst, and cooldown progress (1 = ready).
@@ -41,7 +39,7 @@ export type Controls = {
 export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost';
 const steerInput = (controls: Controls) => controls.steer ?? (Number(controls.left) - Number(controls.right));
 export const emptyControls = (): Controls => ({ forward: false, back: false, left: false, right: false, brake: false });
-export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, handsOff: 0, cruiseLane: 0, curb: 0, curbTime: 0, ghost: 0, boostTime: 0, boostCharge: 0 });
+export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, handsOff: 0, cruiseLane: 0, curb: 0, curbTime: 0, boostTime: 0, boostCharge: 0 });
 export const initialLoopCar = (): CarState => ({ ...initialCar(), x: 0, z: 0, heading: 0 });
 const toward = (n: number, target: number, amount: number) => n < target ? Math.min(n + amount, target) : Math.max(n - amount, target);
 
@@ -340,7 +338,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   let closingSpeed = 0;
   const capsuleAt = (point: typeof movement) => trafficContact(point.latitude, point.longitude,
     facingEastNorth(point.facing, point.latitude, point.longitude), CAR_CONFIG.collisionHalfLength, CAR_CONFIG.trafficRadius);
-  let contact = car.ghost > 0 ? undefined : capsuleAt(movement);
+  let contact = capsuleAt(movement);
   {
     // Both cars' velocities as [east, north], for the closing speed of a hit and the pace of a near miss.
     const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
@@ -352,7 +350,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   }
   // Boost is so strong that even passing close to a car throws it aside: every car within `boostWakeReach` m of the
   // car's sides (not only the one it touches) is hit by the wake, without slowing or turning the player.
-  if (car.boosting > 0 && car.speed > 6 && car.ghost <= 0) {
+  if (car.boosting > 0 && car.speed > 6) {
     const facing = facingEastNorth(movement.facing, movement.latitude, movement.longitude);
     for (const near of trafficNear(movement.latitude, movement.longitude, facing, CAR_CONFIG.collisionHalfLength, CAR_CONFIG.trafficRadius, CAR_CONFIG.boostWakeReach)) {
       const swept = near.obstacle;

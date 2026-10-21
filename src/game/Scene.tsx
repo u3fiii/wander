@@ -276,16 +276,19 @@ const NPC = {
   pushTransfer: 0.75, spinTransfer: 0.2, maxPush: 9, shoveForward: 0.7, hitCooldown: 0.4,
   laneReturn: 2.2, pushDamping: 3.2, spinStiffness: 14, spinDamping: 3.2,
 };
-// Positive side hits throw the struck traffic car aside without interrupting the player.
+// A good side hit (no boost, not head-on) throws the struck car aside like a lighter boost hit, without interrupting
+// the player: thrown sideways at between `minLateralVelocity` and `maxLateralVelocity` m/s, spun by `spin`, hopping
+// and rolling. The harder the hit (full at `fullImpact`), the closer to the top of that range; a slow scrape is
+// still just a nudge.
 const SIDE_HIT = {
-  fling: 1.15, hop: 0.65, roll: 0.65,
-  maxLateralVelocity: 3.4, maxSpinVelocity: 1.5,
+  fling: 1.4, hop: 1.1, roll: 0.8,
+  minLateralVelocity: 4, maxLateralVelocity: 6.5, spin: 1.1, maxSpinVelocity: 2.4, fullImpact: 10,
 };
 // How hard the camera reacts to ramming a car under boost.
 const BOOST_IMPACT = { shake: 0.5, fov: 9, tilt: 2.2 };
 // A car hit by a boosting player is thrown clear of the lane, whatever the angle: hard to the side, up in the
 // air with a big spin, and (hit from behind) punted forward, so it is out of the player's way at once.
-const BOOST_HIT = { fling: 2.4, minLateralVelocity: 10, maxLateralVelocity: 15, hop: 2.2, spin: 2.5, punt: 0.8 };
+const BOOST_HIT = { fling: 2, minLateralVelocity: 7.5, maxLateralVelocity: 11, hop: 1.8, spin: 1.9, punt: 0.65 };
 // Negative hits (nose or tail into traffic) get a clean cinematic cut-in, all on real time: the camera snaps
 // in toward the crash on an extreme ease-out, holds while time crawls, then glides back. The aim swings onto
 // the crash, the lens tightens, the frame tilts a touch, and the depth of field locks on (see cinematic.ts).
@@ -322,12 +325,12 @@ export const scoreDrift = (drift: DriftScore) => Math.round(drift.time * drift.s
 // The shot's turn and climb ease out exponentially: quick at first, then slower and slower, never quite stopping, so
 // the last frame (behind the run-over card) is still creeping round by a hair. `spinEase`/`climbEase` are their time
 // constants (s): most of `turn` is done in about three of them.
-// The milestone moment, when the world takes a new look (themes.ts): no pause, the car drives itself (and passes
-// through traffic) while time slows to `slowScale`, and the camera, staying where it is, rises `lift` (a share of its
-// height) as the colours change, then settles back with a burst of fast motion (`fastScale`, from `fastFrom` to
-// `fastUntil` s) and hands the wheel back at `returnEnd`. Quick: the whole thing is over in under a second and a half.
-// The words and the letterbox are the HUD's (App). All on real time.
-export const MILESTONE = { duration: 1.4, rise: 0.18, holdUntil: 0.77, returnEnd: 1.08, slowScale: 0.35, fastScale: 1.7, fastFrom: 0.92, fastUntil: 1.2, lift: 0.4 };
+// Riding the curb is no place to stay, and the camera says so, without fuss for a moment's brush: after `delay` s on
+// it the protest starts, building over `ramp` s on a gentle curve (smootherstep: barely there at first, firm by the
+// end) to full: the frame leans toward the curb's side (`lean`, rad), dips (`dip`), and rocks slowly and softly, far
+// gentler than the boost's quick nod (`rock` rad either way, `rockRate` rad/s, with a slower roll beside it). Back on
+// the road it all settles away at `release`.
+const CURB_CAM = { delay: 0.6, ramp: 3, lean: 0.08, dip: 0.04, rock: 0.012, rockRate: 6.5, release: 2.5 };
 const FINALE = { duration: 3.4, rise: 0.7, slowScale: 0.12, startHeight: 8, height: 34, turn: Math.PI * 0.55, spinEase: 1.1, climbEase: 1.3 };
 const driftCutEnvelope = (time: number) => {
   if (time < 0 || time > DRIFT_CINE.duration) return 0;
@@ -468,9 +471,11 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
       m.pushVelocity += away * obstacle.impact * NPC.pushTransfer * Math.max(sideways, 0.35) * fling;
       m.spinVelocity += away * obstacle.impact * NPC.spinTransfer * fling;
       if (side) {
-        // Cap the initial shove so high-speed overlaps read as a firm nudge, not a launch.
-        m.pushVelocity = THREE.MathUtils.clamp(m.pushVelocity, -SIDE_HIT.maxLateralVelocity * power, SIDE_HIT.maxLateralVelocity * power);
-        m.spinVelocity = THREE.MathUtils.clamp(m.spinVelocity, -SIDE_HIT.maxSpinVelocity * power, SIDE_HIT.maxSpinVelocity * power);
+        // Thrown aside, more the harder it was hit, never past the cap.
+        const firm = THREE.MathUtils.clamp(obstacle.impact / SIDE_HIT.fullImpact, 0.35, 1);
+        const direction = m.pushVelocity === 0 ? away : Math.sign(m.pushVelocity);
+        m.pushVelocity = direction * THREE.MathUtils.clamp(Math.abs(m.pushVelocity), SIDE_HIT.minLateralVelocity * firm * power, SIDE_HIT.maxLateralVelocity * power);
+        m.spinVelocity = THREE.MathUtils.clamp(m.spinVelocity + direction * SIDE_HIT.spin * firm * power, -SIDE_HIT.maxSpinVelocity * power, SIDE_HIT.maxSpinVelocity * power);
       }
       if (front) {
         // A frontal hit should clear the lane without stopping either car abruptly.
@@ -769,19 +774,9 @@ function DrivingScene(props: SceneProps) {
   const lastTheme = useRef(-1);
   useEffect(() => {
     const next = props.theme ?? 0;
-    const moment = lastTheme.current >= 0 && next > lastTheme.current && props.started;
     setTheme(next, lastTheme.current < 0 || next < lastTheme.current);
     lastTheme.current = next;
-    // A new look mid-run is a milestone: play the moment (the HUD shows its words at the same time).
-    if (moment) startMilestone();
-  }, [props.theme]); // eslint-disable-line react-hooks/exhaustive-deps
-  const startMilestone = () => {
-    milestoneTime.current = 0;
-    milestoneSpeed.current = Math.max(Math.abs(props.car.current.speed), CAR_CONFIG.cruiseSpeed);
-    playSlowMoWhoosh(0.8);
-  };
-  // Dev only: `__milestone()` plays the moment at once.
-  if (import.meta.env.DEV) (window as unknown as { __milestone?: () => void }).__milestone = startMilestone;
+  }, [props.theme]);
   const lightColors = useMemo(() => {
     const c = (hex: string) => new THREE.Color(hex);
     const day = ART_DIRECTION.day, night = ART_DIRECTION.night;
@@ -846,11 +841,6 @@ function DrivingScene(props: SceneProps) {
   const driftApplied = useMemo(() => new THREE.Vector3(), []);
   const driftTop = useMemo(() => new THREE.Vector3(), []);
   const finaleTime = useRef(-1);
-  // The milestone moment (see MILESTONE): its clock (-1 when not playing), the camera blend, and the speed it holds.
-  const milestoneTime = useRef(-1);
-  const milestoneLevel = useRef(0);
-  const milestoneSpeed = useRef(0);
-  const milestoneApplied = useMemo(() => new THREE.Vector3(), []);
   // The last-heart warning: eases in and out with `danger`, and its heartbeat is a double beat ("lub-dub") every
   // 0.9 s on real time, so it is the same on every device.
   const dangerLevel = useRef(0);
@@ -889,6 +879,10 @@ function DrivingScene(props: SceneProps) {
   const soilClods = useMemo(createSoilClods, []);
   useEffect(() => () => { tireMarks.dispose(); speedLines.dispose(); dust.dispose(); soilClods.dispose(); }, [tireMarks, speedLines, dust, soilClods]);
   const roughShake = useRef(0);
+  // How long the car has been riding the curb (s), and the camera's protest at it (0..1, see CURB_CAM).
+  const curbRide = useRef(0);
+  const curbProtest = useRef(0);
+  const curbSide = useRef(1);
   const wasOnRoad = useRef<boolean | null>(null);
   const telemetryTime = useRef(0);
   const padRecoverHeld = useRef(false);
@@ -1063,21 +1057,6 @@ function DrivingScene(props: SceneProps) {
     cinematicState.finale = finaleLevel.current;
     // No slow motion while boosting, even if a cut-in started just before: the boost never pauses.
     gameTime.scale = props.car.current.boosting > 0 ? 1 : Math.min(THREE.MathUtils.lerp(1, CRASH_CAM.slowScale, crashLevel.current), THREE.MathUtils.lerp(1, DRIFT_CINE.slowScale, driftCutLevel.current));
-    // The milestone moment: slow while the camera swings round, then a burst of fast motion as it whips back.
-    if (milestoneTime.current >= 0) {
-      const mt = (milestoneTime.current += realDt);
-      if (mt > MILESTONE.duration) milestoneTime.current = -1;
-      const up = 1 - Math.pow(1 - Math.min(1, mt / MILESTONE.rise), 3);
-      const down = mt < MILESTONE.holdUntil ? 1 : 1 - easeInOutCubic(Math.min(1, (mt - MILESTONE.holdUntil) / (MILESTONE.returnEnd - MILESTONE.holdUntil)));
-      milestoneLevel.current = milestoneTime.current < 0 ? 0 : up * down;
-      if (mt < MILESTONE.fastFrom) gameTime.scale = Math.min(gameTime.scale, THREE.MathUtils.lerp(1, MILESTONE.slowScale, up));
-      else if (mt < MILESTONE.fastUntil) {
-        const p = (mt - MILESTONE.fastFrom) / (MILESTONE.fastUntil - MILESTONE.fastFrom);
-        if (mt - realDt < MILESTONE.fastFrom) playWhoosh();
-        gameTime.scale = THREE.MathUtils.lerp(1, MILESTONE.fastScale, Math.sin(Math.PI * p));
-      }
-    } else milestoneLevel.current = 0;
-    cinematicState.milestone = milestoneLevel.current;
     // The finale slows time whatever else is going on (a boost included).
     if (finaleLevel.current > 0) gameTime.scale = Math.min(gameTime.scale, THREE.MathUtils.lerp(1, FINALE.slowScale, finaleLevel.current));
     cinematicState.crash = crashLevel.current;
@@ -1228,15 +1207,7 @@ function DrivingScene(props: SceneProps) {
       reverse: Math.max(pedals.current.brake, pad.brake, cruiseBrake),
       steer: [pad.steer, keySteer, keys.steer ?? 0].reduce((best, value) => (Math.abs(value) > Math.abs(best) ? value : best), 0),
     };
-    // During the milestone moment the car drives itself: it holds its pace and its lane, and passes through traffic.
     if (party) Object.assign(driveControls, slotDrive(party.players[0].slot));
-    const inMoment = milestoneTime.current >= 0 && milestoneTime.current < MILESTONE.returnEnd;
-    car.ghost = milestoneTime.current >= 0 ? 1 : 0;
-    if (inMoment) {
-      Object.assign(driveControls, { forward: false, back: false, left: false, right: false, brake: false, boost: false, steer: 0, reverse: 0,
-        throttle: THREE.MathUtils.clamp((milestoneSpeed.current - car.speed) * 0.9, 0, 1) });
-      car.cruise = 1;
-    }
     const intro = !props.started && zoomProgress.current < 0.02;
     if (party) {
       // Everyone drives (held: countdown, the cars brake to a stop), then the collision pass: a car rammed hard is
@@ -1468,8 +1439,8 @@ function DrivingScene(props: SceneProps) {
     surfaceUp.copy(vehicleUp).applyQuaternion(globeQuat);
     // Time of day: one slow clock (dayCycle.ts) that runs while driving. Every light, the fog and the exposure
     // follow its night blend, and the sun turns warm and low-feeling around sunset and sunrise.
-    // The clock runs on the start screen too, and while driving unless paused.
-    advanceCycle(realDt, !props.started || !props.paused);
+    // The time of day is the stage's (stages.ts): the clock only moves to get there, never on its own.
+    advanceCycle(realDt, false);
     nightBlend.current = nightAmount();
     const golden = twilight();
     const n = nightBlend.current;
@@ -1633,7 +1604,6 @@ function DrivingScene(props: SceneProps) {
     camera.position.sub(crashApplied);
     camera.position.sub(driftApplied);
     camera.position.sub(finaleApplied);
-    camera.position.sub(milestoneApplied);
     camera.position.lerp(desiredCamera, ease);
     // Never let the smoothed camera cut through the planet.
     cameraOffset.copy(camera.position).sub(globeCenter);
@@ -1663,6 +1633,13 @@ function DrivingScene(props: SceneProps) {
     if (offRoadDriving) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
     // Riding the curb: a light, steady judder (the rumble strip), a little less than off the road.
     else if (driving && car.curb > 0.4) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * 0.6 * car.curb * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
+    // And staying on it, the camera's protest builds (CURB_CAM).
+    const riding = driving && !party && car.curb > 0.4 && Math.abs(car.speed) > 2;
+    curbRide.current = riding ? curbRide.current + realDt : Math.max(0, curbRide.current - realDt * 2);
+    if (riding) curbSide.current = Math.sign(car.z) || 1;
+    const built = THREE.MathUtils.clamp((curbRide.current - CURB_CAM.delay) / CURB_CAM.ramp, 0, 1);
+    const protest = built * built * built * (built * (built * 6 - 15) + 10);
+    curbProtest.current = protest >= curbProtest.current ? protest : THREE.MathUtils.damp(curbProtest.current, protest, CURB_CAM.release, realDt);
     fovKick.current = THREE.MathUtils.damp(fovKick.current, 0, JUICE_CONFIG.fovKickDecay, dt);
     const shake = trauma.current * trauma.current * JUICE_CONFIG.shakeMax * zoom;
     const t = arrivalTime.current;
@@ -1697,11 +1674,6 @@ function DrivingScene(props: SceneProps) {
     finaleSpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, THREE.MathUtils.lerp(FINALE.startHeight, FINALE.height, climb)).addScaledVector(finaleOffset, -0.05);
     finaleApplied.copy(finaleSpot).sub(camera.position).multiplyScalar(finale);
     camera.position.add(finaleApplied);
-    // The milestone moment's rise: straight up from where the camera already is, by a share of its height.
-    const moment = milestoneLevel.current * zoom;
-    const cameraHeight = Math.max(0, milestoneApplied.copy(camera.position).sub(groundVehiclePosition).dot(surfaceUp));
-    milestoneApplied.copy(surfaceUp).multiplyScalar(cameraHeight * MILESTONE.lift * moment);
-    camera.position.add(milestoneApplied);
     // Side-hit glance toward the thrown car.
     lookSwing.current = THREE.MathUtils.damp(lookSwing.current, 0, SIDE_HIT_CAMERA.swingDecay, realDt);
     desiredLook.addScaledVector(vehicleRight, lookSwing.current * zoom);
@@ -1720,6 +1692,13 @@ function DrivingScene(props: SceneProps) {
     camera.rotateZ(-crashSide.current * crash * crashStrength.current * CRASH_CAM.dutch * zoom);
     // Boost tremor: a quick nodding tilt, layered with a finer, faster one.
     camera.rotateX((Math.sin(t * BOOST_FEEL.tiltRate) * BOOST_FEEL.tilt + Math.sin(t * BOOST_FEEL.tiltFineRate + 1.1) * BOOST_FEEL.tiltFine) * boostHold.current * zoom);
+    // The curb protest: a lean toward the curb, a dip, and a slow, soft rocking.
+    const curbFelt = curbProtest.current * zoom;
+    if (curbFelt > 0.001) {
+      camera.rotateZ(curbSide.current * CURB_CAM.lean * curbFelt);
+      camera.rotateX((-CURB_CAM.dip + Math.sin(t * CURB_CAM.rockRate) * CURB_CAM.rock) * curbFelt);
+      camera.rotateZ(Math.sin(t * CURB_CAM.rockRate * 0.55 + 0.8) * CURB_CAM.rock * 0.7 * curbFelt);
+    }
     dutchVelocity.current += (-dutch.current * SIDE_HIT_CAMERA.dutchStiffness - dutchVelocity.current * SIDE_HIT_CAMERA.dutchDamping) * realDt;
     dutch.current = THREE.MathUtils.clamp(dutch.current + dutchVelocity.current * realDt, -SIDE_HIT_CAMERA.maxDutch, SIDE_HIT_CAMERA.maxDutch);
     camera.rotateZ(dutch.current * zoom);

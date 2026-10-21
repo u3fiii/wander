@@ -21,8 +21,9 @@ export const CAR_CONFIG = {
   boostSpeedFactor: 1.1,
   boostAccelFactor: 1.8,
   boostDuration: 5,
-  // Boost throws aside every car within this gap (m) of the car's sides as it passes, touched or not.
-  boostWakeReach: 2.2,
+  // Boost throws aside every car within this gap (m) of the car's sides as it passes, touched or not. Very close:
+  // it takes all but a touch to throw one, not a car in the next lane.
+  boostWakeReach: 0.2,
   boostCooldown: 5,
   boostOverspeedDecel: 8,
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.
@@ -64,11 +65,11 @@ export const CAR_CONFIG = {
   // m/s². Nothing scores while riding it (see App), so the edge is safe but not a free lane.
   curbStart: 2.35,
   curbFull: 2.85,
-  curbSpeedFactor: 0.64,
+  curbSpeedFactor: 0.42,
   // Riding it on and on drags harder: after `curbLongAfter` s on the curb the top speed is down to `curbSpeedFactorLong`
   // (it eases back once the car is off the curb a while).
-  curbSpeedFactorLong: 0.58,
-  curbLongAfter: 1.2,
+  curbSpeedFactorLong: 0.25,
+  curbLongAfter: 1.5,
   curbScrub: 18,
   roadAssist: 3,
   roadEdgeHalfWidth: 3.04, // asphalt (2.88) plus the curb, a hair inside the bridge railing posts (3.08) so the wall never snags on them

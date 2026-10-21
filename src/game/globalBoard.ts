@@ -48,3 +48,25 @@ export async function submitRun(entry: Omit<Entry, 'date'>) {
   if (!board) return null;
   return { board, rank: board.findIndex(row => row.id === saved[0].id) };
 }
+
+export type Standing = { rank: number; score: number; next: Entry | null };
+// Count all other drivers ahead, not just the visible top ten. An equal, older
+// record stays ahead until this run beats it. The one returned row is the next rival.
+export async function fetchStanding(score: number, deviceId = loadDeviceId()): Promise<Standing | null> {
+  if (!sharedBoard) return null;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const points = Math.max(0, Math.floor(score));
+  try {
+    const response = await fetch(`${URL}/rest/v1/scores?select=id,device_id,name,score,distance,seconds,created_at&device_id=neq.${encodeURIComponent(deviceId)}&score=gte.${points}&order=score.asc,created_at.desc&limit=1`, {
+      signal: controller.signal,
+      headers: { apikey: KEY!, Authorization: `Bearer ${KEY}`, Prefer: 'count=exact' },
+    });
+    if (!response.ok) return null;
+    const count = response.headers.get('content-range')?.split('/')[1];
+    if (!count || !/^\d+$/.test(count)) return null;
+    const rows = await response.json() as Row[];
+    if (!Array.isArray(rows)) return null;
+    return { rank: Number(count) + 1, score: points, next: rows[0] ? toEntry(rows[0]) : null };
+  } catch { return null; } finally { window.clearTimeout(timer); }
+}

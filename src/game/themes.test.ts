@@ -2,21 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { PALETTE } from './palette.ts';
-import { MILESTONES, THEMES, advanceTheme, applyRetint, chapterFor, setTheme, slotForColour, themeFor, themeSlotOf, themeState, themeUniforms, themedColour, trackRetint } from './themes.ts';
+import { THEMES, advanceTheme, applyRetint, setTheme, slotForColour, themeSlotOf, themeState, themeUniforms, themedColour, trackRetint } from './themes.ts';
+const FROST = THEMES.findIndex(theme => theme.id === 'frost');
 
-test('the look changes rarely: only at big score milestones, then round the themes', () => {
-  assert.equal(chapterFor(0), 0);
-  assert.equal(chapterFor(MILESTONES[0] - 1), 0);
-  assert.ok(MILESTONES[0] >= 2000, 'the first change is well into a run');
-  assert.equal(chapterFor(MILESTONES[0]), 1);
-  assert.equal(themeFor(THEMES.length).id, THEMES[0].id);
-});
 
 test('a change eases over a few seconds instead of snapping', () => {
   setTheme(0, true);
   const land = new THREE.Color(PALETTE.land);
-  const frost = new THREE.Color(THEMES[3].colours.land!);
-  setTheme(3);
+  const frost = new THREE.Color(THEMES[FROST].colours.land!);
+  setTheme(FROST);
   assert.ok(themedColour('land', new THREE.Color()).equals(land), 'nothing has moved yet');
   advanceTheme(1);
   const partway = themedColour('land', new THREE.Color());
@@ -37,9 +31,9 @@ test('retinting multiplies each tracked colour by its slot factor, and the base 
   root.add(new THREE.Mesh(new THREE.BoxGeometry(), material), new THREE.Mesh(new THREE.BoxGeometry(), other));
   const tracked = trackRetint(root, () => false);
   assert.equal(tracked.materials.length, 1, 'only colours a theme changes are tracked');
-  setTheme(3, true);
+  setTheme(FROST, true);
   applyRetint(tracked);
-  const frost = new THREE.Color(THEMES[3].colours.land!);
+  const frost = new THREE.Color(THEMES[FROST].colours.land!);
   assert.ok(Math.abs(material.color.r - frost.r) < 1e-6 && Math.abs(material.color.b - frost.b) < 1e-6);
   assert.ok(other.color.equals(new THREE.Color('#123456')));
   setTheme(0, true);
@@ -55,8 +49,8 @@ test('only an exact themed colour is matched; a near miss of two colours is left
 test('theme tuning: strength scales how far a theme departs from the base, and edits show up live', async () => {
   const { applyThemeTuning, currentThemeTuning, themeSettings } = await import('./themes.ts');
   const before = currentThemeTuning();
-  setTheme(3, true);
-  const frost = new THREE.Color(THEMES[3].colours.land!);
+  setTheme(FROST, true);
+  const frost = new THREE.Color(THEMES[FROST].colours.land!);
   const base = new THREE.Color(PALETTE.land);
   applyThemeTuning({ ...before, strength: 0 }, true);
   assert.ok(themedColour('land', new THREE.Color()).equals(base), 'at strength 0 the world keeps its base colours');
@@ -73,7 +67,7 @@ test('theme tuning: strength scales how far a theme departs from the base, and e
 test('a group slider touches only its own colours: the trees\' hue leaves the ground alone', async () => {
   const { applyThemeTuning, currentThemeTuning } = await import('./themes.ts');
   const before = currentThemeTuning();
-  setTheme(1, true);
+  setTheme(THEMES.findIndex(theme => theme.id === 'amber'), true);
   const ground = themedColour('land', new THREE.Color()), tree = themedColour('mainTree', new THREE.Color());
   applyThemeTuning({ ...before, themes: { ...before.themes, amber: { ...before.themes.amber, treesHue: 0.3 } } }, true);
   assert.ok(themedColour('land', new THREE.Color()).equals(ground), 'the ground did not move');

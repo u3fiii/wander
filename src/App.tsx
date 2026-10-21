@@ -1,8 +1,8 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Users, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
-import Scene, { MILESTONE, scoreDrift } from './game/Scene';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Timer, Users, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import Scene, { scoreDrift } from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
 import type { VehicleId } from './game/vehicles';
@@ -209,11 +209,13 @@ import { rampFor } from './game/difficulty';
 import { HEARTS, HEART_GRACE_MS, emptyRunStats, loadBest, saveBest, stageFor } from './game/leaderboard';
 import RunOver from './RunOver';
 import Leaderboard from './Leaderboard';
+import { LeaderboardChase, LeaderboardSpotlight } from './LeaderboardChase';
 import { difficulty, setDifficultyLevel } from './game/difficulty';
-import { cycle, goTo, headingToNight, mixHex, nightAmount, resetToDay, skyAt, twilight } from './game/dayCycle';
-import { THEMES, THEME_CHOICES, THEME_COLOURS, THEME_TUNING_SLIDERS, applyThemeTuning, chapterFor, currentThemeTuning, currentThemes, readThemeEdit, setTheme as previewTheme, themeSettings, themeState, writeThemeEdit } from './game/themes';
+import { goTo, jumpTo, mixHex, nightAmount, settleAt, skyAt, twilight } from './game/dayCycle';
+import { HOME_STAGE_SECONDS, STAGES, cardLook, nextMorning, stageTime, stagesReached, themeForStage } from './game/stages';
+import { THEMES, THEME_COLOURS, STAGE_SIMPLE_COLOURS, STAGE_SIMPLE_SLIDERS, uiOf, addStage, moveStage, removeStage, setSeparateHome, setViewMode, themeChoices, THEME_TUNING_SLIDERS, applyThemeTuning, currentThemeTuning, currentThemes, readThemeEdit, setTheme as previewTheme, themeSettings, themeState, writeThemeEdit } from './game/themes';
 import type { ThemeEdit } from './game/themes';
-import { THEME_TUNING_SAVED } from './game/themeTuning';
+import { markThemeTuningSaved, savedThemeTuning } from './game/themeTuning';
 import { useGamepadMenu } from './useGamepadMenu';
 import { useInputDevice } from './inputDevice';
 import { setCssVar } from './cssVar';
@@ -226,13 +228,6 @@ import type { InputDevice } from './inputDevice';
 import { AUDIO_CONFIG, AUDIO_RANGES, holdWorld, playEngineStart, setMuted, startAudio } from './game/audio';
 
 const TITLE = 'take a spin.';
-// The milestone moment's words for each look the world turns to.
-const MOMENT_TEXT: Record<string, { title: string; line: string }> = {
-  meadow: { title: 'GREEN AGAIN', line: 'The loop starts over — keep it going' },
-  amber: { title: 'GOLDEN ROAD', line: 'The world turns amber' },
-  blossom: { title: 'IN FULL BLOOM', line: 'Petals on the wind' },
-  frost: { title: 'FIRST FROST', line: 'Snow on the hills' },
-};
 // Traffic note wording, kept to a word or two, and which notes win when two land close together.
 const NOTE_TEXT = {
   // A hard knock that costs points (a crash that costs a heart is the big one below).
@@ -274,11 +269,25 @@ const COMBO = { window: 8, step: 0.5, max: 4 };
 const comboMultiplier = (count: number) => Math.min(COMBO.max, 1 + COMBO.step * Math.max(0, count - 1));
 // Hits slower than this (m/s) still score, but without a note.
 const QUIET_HIT_SPEED = 7;
+// Whether a colour is light enough that dark words read on it.
+const lightHex = (hex: string) => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.299 * r + 0.587 * g + 0.114 * b > 0.55;
+};
+// A colour drained toward the finale's cold steel-blue grey (by `amount`, 0..1), as the picture is.
+const steelHex = (hex: string, amount: number) => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+  const steel = [luma * 0.86, luma * 0.95 + 0.01, luma * 1.08 + 0.03].map(v => Math.min(1, Math.max(0, (v - 0.45) * 1.3 + 0.45)));
+  return `#${[r, g, b].map((v, i) => Math.round((v + (steel[i] * 0.88 + v * 0.12 - v) * amount) * 255).toString(16).padStart(2, '0')).join('')}`;
+};
 // One formatter for every number on screen (`toLocaleString` would build a new one on each call, several a frame).
 const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
 const formatNumber = (n: number) => NUMBER_FORMAT.format(Math.round(n));
 const urlNumber = (name: string) => (typeof window === 'undefined' ? 0 : Math.max(0, Math.floor(Number(new URLSearchParams(window.location.search).get(name)) || 0)));
-const FIRST_THEME = urlNumber('theme') % THEMES.length;
+const FIRST_STAGE = urlNumber('stage');
+// The run's clock as m:ss.
+const clockText = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 const FIRST_ROAD = urlNumber('road');
 class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
@@ -338,18 +347,32 @@ function NightSky() {
 type LookValues = Record<string, number | string>;
 type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
 type LookMode = 'day' | 'night' | 'car' | 'drift' | 'theme' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
-function LookPanel({ mode, onMode, look, sliders, colours, choices, saved, endpoint, serialize, onChange, onClose }: {
+function LookPanel({ mode, onMode, look, sliders, colours, choices, extra, saved, endpoint, serialize, onChange, onSaved, onClose }: {
   mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
   // A row of buttons choosing one value (the theme to edit).
   choices?: { key: string; options: Array<{ value: number; label: string }> };
-  endpoint: string; serialize?: () => unknown; onChange: (look: LookValues) => void; onClose: () => void;
+  // Anything more the tab needs under its choices (the Stages tab's view switch and loop tools).
+  extra?: ReactNode;
+  // `onSaved`: after a successful Apply (the tab's saved version is now what was applied).
+  endpoint: string; serialize?: () => unknown; onChange: (look: LookValues) => void; onSaved?: () => void; onClose: () => void;
 }) {
   const [status, setStatus] = useState('');
+  // Before and after: while ticked, the tab shows its saved values (and can't be edited); unticked, the edits return.
+  const [comparing, setComparing] = useState(false);
+  const edits = useRef<LookValues | null>(null);
+  const compare = (on: boolean) => {
+    if (on) { edits.current = look; onChange({ ...saved }); }
+    else if (edits.current) { onChange(edits.current); edits.current = null; }
+    setComparing(on);
+  };
+  // Leaving the tab (or another stage, in the Stages tab) ends a comparison as it was.
+  useEffect(() => { edits.current = null; setComparing(false); }, [mode]);
   const set = (key: string, value: number | string) => { onChange({ ...look, [key]: value }); setStatus(''); };
   const apply = async () => {
     setStatus('Saving…');
     try {
       const response = await fetch(endpoint, { method: 'POST', body: JSON.stringify(serialize ? serialize() : look) });
+      if (response.ok) onSaved?.();
       setStatus(response.ok ? 'Saved — tell Claude to use it' : 'Could not save');
     } catch { setStatus('Could not save (dev server only)'); }
   };
@@ -360,7 +383,7 @@ function LookPanel({ mode, onMode, look, sliders, colours, choices, saved, endpo
         <button className={mode === 'night' ? 'on' : ''} onClick={() => { onMode('night'); setStatus(''); }}>Night</button>
         <button className={mode === 'car' ? 'on' : ''} onClick={() => { onMode('car'); setStatus(''); }}>Car</button>
         <button className={mode === 'drift' ? 'on' : ''} onClick={() => { onMode('drift'); setStatus(''); }}>Drift</button>
-        <button className={mode === 'theme' ? 'on' : ''} onClick={() => { onMode('theme'); setStatus(''); }}>Theme</button>
+        <button className={mode === 'theme' ? 'on' : ''} onClick={() => { onMode('theme'); setStatus(''); }}>Stages</button>
         <button className={mode === 'camera' ? 'on' : ''} onClick={() => { onMode('camera'); setStatus(''); }}>Camera</button>
         <button className={mode === 'boost' ? 'on' : ''} onClick={() => { onMode('boost'); setStatus(''); }}>Boost</button>
         <button className={mode === 'nearMiss' ? 'on' : ''} onClick={() => { onMode('nearMiss'); setStatus(''); }}>Near miss</button>
@@ -369,9 +392,13 @@ function LookPanel({ mode, onMode, look, sliders, colours, choices, saved, endpo
       </div>
       <button aria-label="Close" onClick={onClose}><X size={14} /></button>
     </div>
+    <label className={`day-look-compare${comparing ? ' on' : ''}`}><input type="checkbox" checked={comparing} onChange={event => compare(event.target.checked)} />
+      <span>{comparing ? 'Showing the saved version (before)' : 'Compare with the saved version'}</span></label>
+    <fieldset className="day-look-fields" disabled={comparing}>
     {choices && <div className="day-look-choices" role="group">
       {choices.options.map(option => <button key={option.value} className={Number(look[choices.key]) === option.value ? 'on' : ''} onClick={() => set(choices.key, option.value)}>{option.label}</button>)}
     </div>}
+    {extra}
     {colours && <div className="day-look-colours">
       {colours.map(colour => <label key={colour.key}><span>{colour.label}</span><input type="color" value={String(look[colour.key])} onChange={event => set(colour.key, event.target.value)} /></label>)}
     </div>}
@@ -380,13 +407,14 @@ function LookPanel({ mode, onMode, look, sliders, colours, choices, saved, endpo
       <input type="range" min={slider.min} max={slider.max} step={slider.step} value={Number(look[slider.key])}
         onChange={event => set(slider.key, Number(event.target.value))} />
     </label></Fragment>)}
-    {'skyTop' in look && !colours?.some(colour => colour.key === 'skyTop') && <div className="day-look-colours">
+    {'skyTop' in look && mode !== 'theme' && !colours?.some(colour => colour.key === 'skyTop') && <div className="day-look-colours">
       <label><span>Sky top</span><input type="color" value={String(look.skyTop)} onChange={event => set('skyTop', event.target.value)} /></label>
       <label><span>Sky horizon</span><input type="color" value={String(look.skyHorizon)} onChange={event => set('skyHorizon', event.target.value)} /></label>
     </div>}
+    </fieldset>
     <div className="day-look-actions">
-      <button onClick={() => { onChange({ ...saved }); setStatus(''); }}>Reset</button>
-      <button className="apply" onClick={apply}>Apply</button>
+      <button disabled={comparing} onClick={() => { onChange({ ...saved }); setStatus(''); }}>Reset</button>
+      <button className="apply" disabled={comparing} onClick={apply}>Apply</button>
     </div>
     {status && <p className="day-look-status">{status}</p>}
   </div>;
@@ -398,6 +426,7 @@ export default function App() {
   const boostElapsed = useRef(0);
   const [firstDrive, setFirstDrive] = useState(() => localStorage.getItem('wander:first-drive-complete') !== 'yes');
   const [coachThisRun, setCoachThisRun] = useState(false);
+  const [coachShowing, setCoachShowing] = useState(false);
   const [coachTransitioning, setCoachTransitioning] = useState(false);
   const RAILS = useRails();
   const coachTimers = useRef<number[]>([]);
@@ -422,10 +451,6 @@ export default function App() {
     }, 3000));
   }, [clearCoachTimers]);
   const [paused, setPaused] = useState(false);
-  // Phones: the run starts in whichever time of day was picked on the start screen; going home resets to daylight.
-  useEffect(() => { if (!started && RAILS) resetToDay(); }, [started, RAILS]);
-  // Phones: the day and night come round a little faster, and every run starts in daylight (below).
-  useEffect(() => { cycle.speed = (RAILS ? 1.3 : 1) * 1.2; }, [RAILS]);
   // Map view: mid-drive, the camera pulls back to the globe (which can be turned by dragging) and the game holds
   // still until the player goes back to the road. M, the map button, or Esc to return.
   const [mapView, setMapView] = useState(false);
@@ -458,60 +483,138 @@ export default function App() {
   const [nightValues, setNightValues] = useState<NightLook>({ ...nightLook });
   const changeNightLook = (next: NightLook) => { Object.assign(nightLook, next); setNightValues(next); };
   const [lookMode, setLookMode] = useState<LookMode>('day');
-  // The Theme tab edits one theme at a time (`theme`: 1 amber, 2 blossom, 3 frost), shown live as it is changed;
-  // the strength, speed and weather amount are shared. Apply saves every theme.
-  const themeFlat = (index: number, base: { strength: number; seconds: number; weather: number }): LookValues => ({ theme: index, strength: base.strength, seconds: base.seconds, weather: base.weather, ...readThemeEdit(index) });
-  const [theme, setThemeIndex] = useState(FIRST_THEME);
-  // The look a run starts from (its milestones count on from there): the one the start screen was showing.
-  const themeBase = useRef(FIRST_THEME);
-  // How many mornings the day cycle has come round to (dayCycle.ts): new looks arrive with the sunrise, so each one is
-  // first seen in daylight.
-  const [morning, setMorning] = useState(cycle.day);
-  // The start screen lives through the same cycle as a drive: the day turns (the scene runs the clock) and every new
-  // morning the world eases into its next look, quietly (the moment is for runs only).
-  const homeMorning = useRef(cycle.day);
+  // The Stages tab edits one stage at a time (`theme`: its index, Green 0 … Snow 5), shown live as it is changed,
+  // time of day included; the stage card's look, the strength, speed and weather amount are shared. Apply saves all.
+  // The simple tab's key colours, read from the detailed ones they stand for, and (in changeTheme) written back to
+  // them all: trees set the dark and light trees too, water the shallows, sky its horizon, the card its glow, the home
+  // button its words (dark or light, whichever reads), and the home text both the heading and the copy.
+  const withSimple = (edit: ThemeEdit) => ({ ...edit, simpleGround: edit.land, simpleTrees: edit.treeMain, simpleWater: edit.sea, simpleSky: edit.skyTop,
+    simpleCard: edit.accent ?? '#8fd16a', simpleButton: edit.homeButton ?? '#f4b544', simpleHomeText: edit.homeTitle ?? '#111111' });
+  const fromSimple = (next: LookValues, before: LookValues) => {
+    const changed = (key: string) => next[key] !== undefined && next[key] !== before[key];
+    const out: LookValues = { ...next };
+    const c = (key: string) => String(next[key]);
+    if (changed('simpleGround')) out.land = c('simpleGround');
+    if (changed('simpleTrees')) Object.assign(out, { treeMain: c('simpleTrees'), treeDark: mixHex(c('simpleTrees'), '#000000', 0.28), treeLight: mixHex(c('simpleTrees'), '#ffffff', 0.24) });
+    if (changed('simpleWater')) Object.assign(out, { sea: c('simpleWater'), seaShallow: mixHex(c('simpleWater'), '#ffffff', 0.38) });
+    if (changed('simpleSky')) Object.assign(out, { skyTop: c('simpleSky'), skyHorizon: mixHex(c('simpleSky'), '#ffffff', 0.65) });
+    if (changed('simpleCard')) Object.assign(out, { accent: c('simpleCard'), glow: mixHex(c('simpleCard'), '#ffffff', 0.55) });
+    if (changed('simpleButton')) Object.assign(out, { homeButton: c('simpleButton'), homeButtonText: lightHex(c('simpleButton')) ? '#1d1405' : '#ffffff' });
+    if (changed('simpleHomeText')) Object.assign(out, { homeTitle: c('simpleHomeText'), homeText: c('simpleHomeText') });
+    return out;
+  };
+  // Simple first: five sliders and a few colours; everything else behind "More settings".
+  const [stageDetail, setStageDetail] = useState(false);
+  // `view`: 0 edits the road's design, 1 the start screen's (`separate` 1 when the stage has its own; with 0 the start
+  // screen shows the road's design, and editing it edits that).
+  const themeFlat = (index: number, base: { strength: number; seconds: number; weather: number }, view = 0): LookValues => {
+    const separate = !!THEMES[index]?.home;
+    return { theme: index, view, separate: separate ? 1 : 0, strength: base.strength, seconds: base.seconds, weather: base.weather,
+      cardTint: cardLook.tint, cardCorner: cardLook.corner, cardBorder: cardLook.border, ...withSimple(readThemeEdit(index, view && separate ? 'home' : 'drive')) };
+  };
+  // The world's stage (stages.ts): it sets the planet's look and its time of day together. A run moves on a stage
+  // with every STAGE_POINTS points, always starting on a fresh morning (`stageBase`); the start screen moves on by
+  // itself every HOME_STAGE_SECONDS. The theme number follows the stage and only ever goes up.
+  const [stage, setStage] = useState(FIRST_STAGE);
+  const theme = themeForStage(stage);
+  const stageBase = useRef(FIRST_STAGE);
+  const stageNow = useRef(stage);
+  stageNow.current = stage;
+  // Each stage's time of day: straight there at first, then over the same few seconds the look takes to change.
+  // The start screen and the road each show their own design of the stage when it has one (Stages tab, Home view):
+  // starting a run or going home eases from one to the other, colours and time of day alike.
+  const timeSet = useRef(false);
   useEffect(() => {
-    if (started) { homeMorning.current = morning; return; }
-    if (morning > homeMorning.current) setThemeIndex(t => t + 1);
-    homeMorning.current = morning;
-  }, [morning, started]);
-  // The milestone moment's words and letterbox (the camera and the slow motion are the scene's, see MILESTONE).
-  const [moment, setMoment] = useState<{ id: number; theme: string; score: number } | null>(null);
-  const celebrate = (index: number, points: number) => setMoment(m => ({ id: (m?.id ?? 0) + 1, theme: THEMES[index % THEMES.length].id, score: points }));
+    const home = !started;
+    setViewMode(home ? 'home' : 'drive', !timeSet.current);
+    if (!timeSet.current) { timeSet.current = true; jumpTo(stageTime(stage, home)); return; }
+    settleAt(stageTime(stage, home), themeSettings.seconds);
+  }, [stage, started]);
+  // While the Stages tab is open the world holds its stage, so the one being edited stays on screen.
+  const stagesHeld = showLook && lookMode === 'theme';
   useEffect(() => {
-    if (!moment) return;
-    const timer = window.setTimeout(() => setMoment(null), MILESTONE.duration * 1000);
-    return () => window.clearTimeout(timer);
-  }, [moment]);
-  // Dev only: `__nextTheme()` moves to the next look now, with its moment.
-  useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __nextTheme: () => void }).__nextTheme = () => setThemeIndex(t => { celebrate(t + 1, 0); return t + 1; }); });
+    if (started || stagesHeld) return;
+    const timer = window.setInterval(() => setStage(s => s + 1), HOME_STAGE_SECONDS * 1000);
+    return () => window.clearInterval(timer);
+  }, [started, stagesHeld]);
+  // Dev only: `__nextStage()` moves to the next stage now.
+  useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __nextStage: () => void }).__nextStage = () => { stageBase.current++; setStage(s => s + 1); }; });
   const [road, setRoad] = useState(FIRST_ROAD);
-  const themeSaved = (index: number): LookValues => ({ theme: index, strength: THEME_TUNING_SAVED.strength, seconds: THEME_TUNING_SAVED.seconds, weather: THEME_TUNING_SAVED.weather, ...THEME_TUNING_SAVED.themes[THEMES[index].id] });
-  const [themeValues, setThemeValues] = useState<LookValues>(() => themeFlat(1, themeSettings));
+  const savedDrive = (id: string) => { const edit = savedThemeTuning.current.themes[id]; if (!edit) return undefined; const { home: _home, ...drive } = edit; return drive; };
+  // The saved values of stage `index` in the view being edited (its own start-screen design, if it has one saved).
+  const themeSaved = (index: number, view = 0): LookValues => {
+    const saved = savedThemeTuning.current, card = saved.card ?? cardLook;
+    const id = THEMES[index].id, home = view === 1 && THEMES[index].home;
+    const edit = home ? saved.themes[id]?.home ?? saved.themes[id] ?? readThemeEdit(index, 'home') : savedDrive(id) ?? readThemeEdit(index);
+    return { theme: index, strength: saved.strength, seconds: saved.seconds, weather: saved.weather,
+      cardTint: card.tint, cardCorner: card.corner, cardBorder: card.border, view, separate: THEMES[index].home ? 1 : 0, ...edit };
+  };
+  const [themeValues, setThemeValues] = useState<LookValues>(() => themeFlat(0, themeSettings, 1));
+  // Shows stage `index` as the tab edits it: its road design (`viewing` 0) or its start-screen one (1).
+  const showStage = (index: number, viewing: number) => {
+    setViewMode(viewing === 1 ? 'home' : 'drive', true);
+    previewTheme(index, true);
+    jumpTo(stageTime(index, viewing === 1));
+  };
+  // The loop itself, from the tab: a stage of its own on the start screen, a new stage, a move, a stage taken out.
+  const editLoop = (action: 'separate' | 'add' | 'earlier' | 'later' | 'remove') => {
+    const index = Number(themeValues.theme), viewing = Number(themeValues.view);
+    let next = index;
+    if (action === 'separate') setSeparateHome(index, !THEMES[index].home);
+    if (action === 'add') {
+      const name = window.prompt('Name for the new stage (a copy of this one)', `${STAGES[index].name} 2`)?.trim();
+      if (!name) return;
+      next = addStage(index, name);
+    }
+    if (action === 'earlier' || action === 'later') next = moveStage(index, action === 'earlier' ? -1 : 1);
+    if (action === 'remove' && window.confirm(`Take ${STAGES[index].name} out of the loop?`)) next = removeStage(index);
+    showStage(next, viewing);
+    setThemeValues(themeFlat(next, themeSettings, viewing));
+  };
   const changeTheme = (next: LookValues) => {
     const index = Number(next.theme);
-    if (index !== Number(themeValues.theme)) {
-      // Another theme to edit: show it, with its own values.
-      previewTheme(index, true);
-      setThemeValues(themeFlat(index, next as { strength: number; seconds: number; weather: number }));
+    // What's being edited follows where the game is: the start screen's design there, the road's while driving.
+    const viewing = started ? 0 : 1;
+    if (index !== Number(themeValues.theme) || viewing !== Number(themeValues.view)) {
+      // Another stage or view to edit: show it, at its time of day, with its own values.
+      showStage(index, viewing);
+      setThemeValues(themeFlat(index, next as { strength: number; seconds: number; weather: number }, viewing));
       return;
     }
     Object.assign(themeSettings, { strength: Number(next.strength), seconds: Number(next.seconds), weather: Number(next.weather) });
-    writeThemeEdit(index, next as unknown as ThemeEdit);
+    Object.assign(cardLook, { tint: Number(next.cardTint), corner: Number(next.cardCorner), border: Number(next.cardBorder) });
+    // On the start screen the first change gives the stage its own start-screen design (a copy of the road's).
+    if (viewing === 1 && !THEMES[index].home) setSeparateHome(index, true);
+    writeThemeEdit(index, fromSimple(next, themeValues) as unknown as ThemeEdit, viewing === 1 ? 'home' : 'drive');
     applyThemeTuning(currentThemeTuning(), true);
-    setThemeValues(next);
+    showStage(index, viewing);
+    setThemeValues(themeFlat(index, themeSettings, viewing));
   };
   // While the Theme tab is open the theme's weather shows even over the start screen.
-  // Opening the tab shows the theme being edited; leaving it puts the run's own theme back.
+  // Opening the tab shows the stage being edited (its look and time of day); leaving it puts the run's own back.
   const themeRef = useRef(theme);
   themeRef.current = theme;
   const editedTheme = useRef(1);
   editedTheme.current = Number(themeValues.theme);
+  const editedView = useRef(0);
+  editedView.current = Number(themeValues.view);
+  const startedRef = useRef(started);
+  startedRef.current = started;
+  // The Stages tab edits the design of wherever the game is (start screen or road), and follows it when that changes.
+  useEffect(() => {
+    if (!showLook || lookMode !== 'theme') return;
+    const viewing = started ? 0 : 1;
+    setThemeValues(values => (Number(values.view) === viewing ? values : themeFlat(Number(values.theme), themeSettings, viewing)));
+  }, [started, showLook, lookMode]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const previewing = showLook && lookMode === 'theme';
     themeSettings.preview = previewing;
-    if (previewing) previewTheme(editedTheme.current, true);
-    else if (themeState.progress >= 1) previewTheme(themeRef.current, true);
+    if (previewing) showStage(editedTheme.current, editedView.current);
+    else if (themeState.progress >= 1) {
+      setViewMode(startedRef.current ? 'drive' : 'home', true);
+      previewTheme(themeRef.current, true);
+      jumpTo(stageTime(stageNow.current, !startedRef.current));
+    }
     return () => { themeSettings.preview = false; };
   }, [showLook, lookMode]);
   const [driftValues, setDriftValues] = useState<DriftTuning>(currentDriftTuning);
@@ -555,15 +658,20 @@ export default function App() {
       const tinted = (theme: typeof themes.from) => ({ top: mixHex(plain.top, theme.sky?.top ?? plain.top, strength), horizon: mixHex(plain.horizon, theme.sky?.horizon ?? plain.horizon, strength) });
       const from = tinted(themes.from), to = tinted(themes.to);
       const daySky = { top: mixHex(from.top, to.top, themes.mix), horizon: mixHex(from.horizon, to.horizon, themes.mix) };
-      const sky = skyAt(daySky, { top: nightLook.skyTop, horizon: nightLook.skyHorizon });
+      const lit = skyAt(daySky, { top: nightLook.skyTop, horizon: nightLook.skyHorizon });
+      // The end of a run drains the sky too, to the same cold steel-blue as the picture (IntroDepthOfField's finale).
+      const ending = cinematicState.finale;
+      const sky = ending > 0.001 ? { top: steelHex(lit.top, ending), horizon: steelHex(lit.horizon, ending) } : lit;
       const n = nightAmount();
       // Written only when a value changes: each write repaints the whole sky gradient.
       // The pale sun glow in the sky is a daytime thing only: gone as soon as sunset colours start.
       const next: Record<string, string> = { '--sky-top': sky.top, '--sky-horizon': sky.horizon, '--night-amount': n.toFixed(2), '--sun-glow': ((1 - n) * (1 - twilight()) ** 3).toFixed(2) };
+      // The start screen's colours (each stage's own, Stages tab), blended through a change like the world's.
+      const uiFrom = uiOf(themes.from), uiTo = uiOf(themes.to);
+      for (const key of Object.keys(uiTo) as Array<keyof typeof uiTo>) next[`--home-${key.replace(/[A-Z]/g, c => `-${c.toLowerCase()}`)}`] = mixHex(uiFrom[key], uiTo[key], themes.mix);
       const style = mainRef.current?.style;
       for (const key in next) if (style && written[key] !== next[key]) { style.setProperty(key, next[key]); written[key] = next[key]; }
       setNight(n > 0.5);
-      setMorning(cycle.day);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -711,19 +819,16 @@ export default function App() {
     saveBest(score);
     if (!beatBest.current && bestAtRunStart.current > 0) { beatBest.current = true; showNote('newBest', 0, false, formatNumber(score)); }
   }, [score]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Themes (themes.ts): each score milestone eases the planet into its next look over a few seconds at the next
-  // sunrise (see `morning`), while the run goes on. Each new run after one has ended gets a new road layout (roadLayouts.ts; the world is rebuilt
-  // for it then, between runs). `?theme=N` / `?road=N` start with another look or road, for checking them.
+  // Stages (stages.ts): every STAGE_POINTS points the world eases into its next stage over a few seconds while the
+  // run goes on. Each new run after one has ended gets a new road layout (roadLayouts.ts; the
+  // world is rebuilt for it then, between runs). `?stage=N` / `?road=N` start with another stage or road, for checking.
   // Dev only: lets the console jump the score to a milestone (`__setScore(3000)`).
   useEffect(() => { if (import.meta.env.DEV) (window as unknown as { __setScore: typeof setScore }).__setScore = setScore; }, []);
-  // A milestone reached waits for the next sunrise, then the new look comes in with its moment.
-  const themeWaitsFrom = useRef<number | null>(null);
   useEffect(() => {
-    const target = themeBase.current + chapterFor(score);
-    if (!started || partyOn || target <= theme) { themeWaitsFrom.current = null; return; }
-    if (themeWaitsFrom.current === null) themeWaitsFrom.current = morning;
-    else if (morning > themeWaitsFrom.current) { themeWaitsFrom.current = null; setThemeIndex(target); celebrate(target, score); }
-  }, [score, started, theme, partyOn, morning]);
+    if (!started || partyOn || stagesHeld) return;
+    const target = stageBase.current + stagesReached(score);
+    if (target > stage) setStage(target);
+  }, [score, started, stage, partyOn, stagesHeld]);
   // Distance: half a point a metre, added as the car drives (not while held, and not across a reset).
   const lastDistance = useRef(0);
   const distanceCarry = useRef(0);
@@ -768,16 +873,19 @@ export default function App() {
   // The run's clock: it counts only while driving, and every few seconds of it moves the run up a stage, which
   // makes the road harder (difficulty.ts: more and faster traffic, swaying cars...), with a note to say so.
   const stageRef = useRef(1);
+  // The same clock, on screen.
+  const [runSeconds, setRunSeconds] = useState(0);
   useEffect(() => {
     if (!started || halted) return;
     const timer = window.setInterval(() => {
       const stats = runStats.current;
       stats.seconds += 1;
+      setRunSeconds(stats.seconds);
       const next = stageFor(stats.seconds);
       if (next === stageRef.current) return;
       stageRef.current = next;
       setDifficultyLevel(next);
-      showNote('stage', 0, !!RAILS && next % 3 !== 0, `Stage ${next}`);
+      showNote('stage', 0, !!RAILS && next % 3 !== 0, '▲');
     }, 1000);
     return () => window.clearInterval(timer);
   }, [started, halted, showNote, RAILS]);
@@ -974,11 +1082,12 @@ export default function App() {
     controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
     // A new run: hearts, stage, stats, stars, clean driving and the best-score note start over.
     beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; comboRef.current = { count: 0, until: 0 }; setCombo({ count: 0, id: 0 }); shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
-    setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats();
+    setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats(); setRunSeconds(0);
     stageRef.current = 1; setDifficultyLevel(1);
     nextMobileCelebration.current = 0;
-    setThemeIndex(FIRST_THEME); themeBase.current = FIRST_THEME;
-    if (touchQuery?.matches) resetToDay();
+    // A new run starts on the next fresh morning.
+    const morning = nextMorning(stageNow.current);
+    stageBase.current = morning; setStage(morning);
   }, []);
   // The start screen stays mounted for a moment as the globe zooms in: its keys pill folds down to just the keys.
   const [introExit, setIntroExit] = useState(false);
@@ -990,7 +1099,9 @@ export default function App() {
   };
   const start = (asParty = false) => {
     if (introExit) return;
-    themeBase.current = theme;
+    // Every run starts on a fresh morning: the next one round the loop from what the start screen was showing.
+    const morning = nextMorning(stage);
+    stageBase.current = morning; setStage(morning);
     clearCoachTimers();
     boostElapsed.current = 0; setBoostUnlocked(false);
     setCoachTransitioning(false);
@@ -1087,11 +1198,23 @@ export default function App() {
       mode={lookMode}
       onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
       look={{ day: look, night: nightValues, car: carValues, drift: driftValues, theme: themeValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
-      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, drift: DRIFT_TUNING_SLIDERS, theme: THEME_TUNING_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
-      colours={lookMode === 'theme' ? THEME_COLOURS : lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
-      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, drift: DRIFT_TUNING_SAVED, theme: themeSaved(Number(themeValues.theme)), camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
+      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, drift: DRIFT_TUNING_SLIDERS, theme: stageDetail ? THEME_TUNING_SLIDERS : STAGE_SIMPLE_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
+      colours={lookMode === 'theme' ? stageDetail ? THEME_COLOURS : STAGE_SIMPLE_COLOURS : lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
+      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, drift: DRIFT_TUNING_SAVED, theme: themeSaved(Number(themeValues.theme), Number(themeValues.view)), camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
       serialize={lookMode === 'theme' ? currentThemeTuning : undefined}
-      choices={lookMode === 'theme' ? THEME_CHOICES : undefined}
+      onSaved={lookMode === 'theme' ? markThemeTuningSaved : undefined}
+      choices={lookMode === 'theme' ? themeChoices() : undefined}
+      extra={lookMode === 'theme' ? <div className="stage-tools">
+        <p className="stage-editing">Editing: <b>{Number(themeValues.view) === 1 ? 'home page design' : 'driving design'}</b>
+          {Number(themeValues.view) === 1 && !!themeValues.separate && <button onClick={() => editLoop('separate')}>use the driving design here</button>}</p>
+        <button className={`stage-more${stageDetail ? ' on' : ''}`} onClick={() => setStageDetail(d => !d)}>{stageDetail ? 'Back to simple' : 'More settings'}</button>
+        <div className="stage-loop" role="group" aria-label="The loop">
+          <button onClick={() => editLoop('earlier')} disabled={Number(themeValues.theme) === 0}>← Earlier</button>
+          <button onClick={() => editLoop('later')} disabled={Number(themeValues.theme) === STAGES.length - 1}>Later →</button>
+          <button onClick={() => editLoop('add')}>+ New stage</button>
+          <button onClick={() => editLoop('remove')} disabled={STAGES.length <= 2}>Remove</button>
+        </div>
+      </div> : undefined}
       endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', drift: '/__drift-tuning', theme: '/__theme-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
       onChange={values => {
         if (lookMode === 'day') changeLook(values as DayLook);
@@ -1108,15 +1231,6 @@ export default function App() {
       onClose={() => setShowLook(false)}
     />}
     <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive && !partyOn} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked && !partyOn} party={partyOn ? partyRun : undefined} partyCount={partyOn ? partyCount : 0} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
-    {/* The milestone moment: letterbox bars, a wash of the new look's colour, and its words. */}
-    {moment && started && <div key={moment.id} className={`moment moment-${moment.theme}`} role="status" aria-live="polite" style={{ '--moment-time': `${MILESTONE.duration}s` } as CSSProperties}>
-      <i className="moment-bar top" /><i className="moment-bar bottom" /><i className="moment-wash" />
-      <div className="moment-title">
-        {moment.score > 0 && <small>{formatNumber(moment.score)} points</small>}
-        <b aria-label={MOMENT_TEXT[moment.theme]?.title}>{[...(MOMENT_TEXT[moment.theme]?.title ?? '')].map((c, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</b>
-        <em>{MOMENT_TEXT[moment.theme]?.line}</em>
-      </div>
-    </div>}
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -1146,32 +1260,36 @@ export default function App() {
             </div>}
           </div>
         </>}
-      {/* Score and hearts side by side in the middle of the header. The score counts up smoothly (distance adds
-          to it all the time); a bonus makes it react in proportion to its size, with the amount floating off. */}
+      {/* The middle of the header is the score's, with the road to the next stage under it. The score counts up
+          smoothly (distance adds to it all the time); a bonus makes it react in proportion to its size, with the
+          amount floating off, and the combo beside it. The run's clock and the hearts sit on the right (below). */}
       {started && !partyOn && <div className="hud-center">
-        <div className="score-pill" aria-label={`Score ${score}, level ${level.level}`}>
-          {/* Phones have no room for the level badge: its number joins the score instead (style.css). */}
-          <span className="level-number score-level" aria-hidden="true">{level.level}</span>
-          <span>Score</span><b key={`score-${bonus?.id ?? 0}`} ref={scoreText} className={`score-value ${bonusTier(bonus?.amount ?? 0)}`}>{formatNumber(shownScore.current)}</b>
-          {bonus && <span key={`float-${bonus.id}`} className={`score-float ${bonusTier(bonus.amount)}`} aria-hidden="true">{bonus.amount > 0 ? '+' : ''}{formatNumber(bonus.amount)}</span>}
-        </div>
-        <div key={`hearts-${heartBreak?.id ?? 0}`} className={`hearts-bar${hearts === 1 ? ' last' : ''}${heartBreak ? ' hit' : ''}`} aria-label={`${hearts} of ${HEARTS} hearts left`}>
-          {Array.from({ length: HEARTS }, (_, i) => <HeartIcon key={i} className={i < hearts ? 'full' : i === hearts && heartBreak ? 'breaking' : 'lost'} />)}
-        </div>
-        {/* The near-miss combo: its multiplier, and a bar running down until it ends. */}
-        {combo.count > 1 && <div key={`combo-${combo.id}`} className="combo-pill" aria-label={`Score ×${comboMultiplier(combo.count)}`}>
-          <b>×{comboMultiplier(combo.count)}</b><i style={{ animationDuration: `${COMBO.window}s` } as CSSProperties} />
-        </div>}
+        <LeaderboardChase key={resetKey} score={score} stage={stage}
+          scoreSlot={<>
+            <b key={`score-${bonus?.id ?? 0}`} ref={scoreText} className={`score-value ${bonusTier(bonus?.amount ?? 0)}`}>{formatNumber(shownScore.current)}</b>
+            {bonus && <span key={`float-${bonus.id}`} className={`score-float ${bonusTier(bonus.amount)}`} aria-hidden="true">{bonus.amount > 0 ? '+' : ''}{formatNumber(bonus.amount)}</span>}
+            {/* The near-miss combo, beside the score it multiplies, with a bar running down until it ends. */}
+            {combo.count > 1 && <span key={`combo-${combo.id}`} className="combo-pill" aria-label={`Score ×${comboMultiplier(combo.count)}`}>
+              <b>×{comboMultiplier(combo.count)}</b><i style={{ animationDuration: `${COMBO.window}s` } as CSSProperties} />
+            </span>}
+          </>}
+          visible={!mapView}
+          active={!paused && !help && !boardOpen && !garageOpen && !mapView && !runOver && !finale}
+          busy={!!hitNote || !!heartBreak || streakShown || coachShowing || !!roadWarning || !!stuckHint}
+          open={() => setBoardOpen(true)} />
       </div>}
       {partyOn ? null : stuckHint
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <Keys action="recover" device={device} /> to hop back on the road</span></div>
         : roadWarning ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>
-        : curbHint && <div className="curb-hint" role="status"><span>On the curb — slowing down, no points</span></div>}
+        : curbHint && <div className="curb-hint" role="status"><TriangleAlert size={15} /><span><b>Back onto the road!</b> The curb slows you down and scores nothing</span></div>}
+      <div className="topbar-right">
+      {started && !partyOn && <div className="hud-right">
+        <div className="run-clock" aria-label={`${Math.floor(runSeconds / 60)} minutes ${runSeconds % 60} seconds`}><Timer aria-hidden="true" /><b>{clockText(runSeconds)}</b></div>
+        <div key={`hearts-${heartBreak?.id ?? 0}`} className={`hearts-bar${hearts === 1 ? ' last' : ''}${heartBreak ? ' hit' : ''}`} aria-label={`${hearts} of ${HEARTS} hearts left`}>
+          {Array.from({ length: HEARTS }, (_, i) => <HeartIcon key={i} className={i < hearts ? 'full' : i === hearts && heartBreak ? 'breaking' : 'lost'} />)}
+        </div>
+      </div>}
       <nav className="toolbar" aria-label="Game settings">
-        {/* Phones, on the start screen: pick day or night, and the run starts there. */}
-        {!started && <button className="mode-toggle" aria-label={night ? 'Start in daylight' : 'Start at night'} title={night ? 'Day' : 'Night'} onClick={() => goTo(night ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
-        {!started && <button className="desktop-only" aria-label={night ? 'Switch to evening' : 'Switch to night'} style={{ viewTransitionName: 'tool-night' } as CSSProperties} title={night ? 'Evening' : 'Night'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
-        {!started && <button className="mobile-home-theme" aria-label={night ? 'Switch to light mode' : 'Switch to dark mode'} title={night ? 'Light mode' : 'Dark mode'} onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}</button>}
         {import.meta.env.DEV && <button aria-label="Day look" style={{ viewTransitionName: 'tool-look' } as CSSProperties} title="Day look" className={`desktop-only${showLook ? ' active' : ''}`} onClick={() => setShowLook(value => !value)}><SlidersHorizontal /></button>}
         <button aria-label={muted ? 'Unmute sound' : 'Mute sound'} style={{ viewTransitionName: 'tool-sound' } as CSSProperties} title={muted ? 'Sound off' : 'Sound on'} onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}</button>
         {!started && <button className={`desktop-only${fullscreen ? ' active' : ''}`} aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'} style={{ viewTransitionName: 'tool-camera' } as CSSProperties} title={fullscreen ? 'Exit full screen' : 'Full screen'} onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}</button>}
@@ -1180,9 +1298,11 @@ export default function App() {
         {!started && <button className="desktop-only" aria-label="Controls and help" style={{ viewTransitionName: 'tool-help' } as CSSProperties} title="Controls and help" onClick={() => setHelp(true)}><CircleHelp /></button>}
         {started && !mapView && <button className="desktop-only" aria-label={paused ? 'Resume driving' : 'Pause game'} style={{ viewTransitionName: 'tool-pause' } as CSSProperties} title="Pause · Esc" onClick={() => setPaused(p => !p)}>{paused ? <Play /> : <Pause />}</button>}
       </nav>
+      </div>
     </header>
 
     {(!started || introExit) && party !== 'lobby' && <section className={`intro-card${introExit ? ' exiting' : ''}`}>
+      <LeaderboardSpotlight open={() => setBoardOpen(true)} />
       {/* The driver's level, like the badge in the game's header; a welcome back for returning players. */}
       <div className="intro-level rise" style={{ '--d': '800ms' } as CSSProperties}>
         <span className="level-number">{level.level}</span><strong>{level.title}</strong>{best > 0 ? <span className="intro-welcome">Best {formatNumber(best)}</span> : xp > 0 && <span className="intro-welcome">Welcome back</span>}
@@ -1216,7 +1336,7 @@ export default function App() {
         <strong>{heartBreak.left === 0 ? 'OUT OF HEARTS' : heartBreak.left === 1 ? 'LAST HEART' : `${heartBreak.left} LEFT`}</strong>
       </div>}
       {/* The guide: the first-drive lesson, then the goal and tips at the right moments (Coach.tsx). */}
-      <Coach key={`coach-${resetKey}-${coachThisRun}`} lesson={coachThisRun} rails={!!RAILS} device={device} trafficOn={!firstDrive} active={!paused && !help && !roadWarning && !stuckHint && !finale && !runOver} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={boostUnlocked && (data.boost ?? 0) >= 1 && !data.boosting} onComplete={RAILS ? finishRailsLesson : completeFirstDrive} onSkip={RAILS ? undefined : () => setCoachThisRun(false)} />
+      <Coach onShowingChange={setCoachShowing} key={`coach-${resetKey}-${coachThisRun}`} lesson={coachThisRun} rails={!!RAILS} device={device} trafficOn={!firstDrive} active={!paused && !help && !roadWarning && !stuckHint && !finale && !runOver} controls={controls} speed={data.speed} offroad={!!data.offroad} boostReady={boostUnlocked && (data.boost ?? 0) >= 1 && !data.boosting} onComplete={RAILS ? finishRailsLesson : completeFirstDrive} onSkip={RAILS ? undefined : () => setCoachThisRun(false)} />
       <div className="speedometer" ref={speedometer}>
         <svg className="speed-dial" viewBox="0 0 64 64" aria-hidden="true">
           <defs>
@@ -1271,7 +1391,6 @@ export default function App() {
       <div className="pause-actions" role="group" aria-label="More">
         <button onClick={() => { setPaused(false); morph(() => setMapView(true)); }}><MapIcon /><span>Map</span></button>
         <button onClick={() => setCameraMode(mode => 1 - mode)}><Video /><span>{cameraMode ? 'Chase view' : 'Top view'}</span></button>
-        <button onClick={() => goTo(headingToNight() ? 'day' : 'night')}>{night ? <Sun /> : <Moon />}<span>{night ? 'Day' : 'Night'}</span></button>
         <button onClick={openGarage}><CarFront /><span>Garage</span></button>
         <button onClick={() => setHelp(true)}><CircleHelp /><span>Controls</span></button>
         <button className="desktop-only" onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}<span>{fullscreen ? 'Window' : 'Full screen'}</span></button>

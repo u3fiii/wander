@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchDeviceEntry, fetchTop, sharedBoard, submitRun } from './game/globalBoard';
+import { fetchDeviceEntry, fetchStanding, fetchTop, sharedBoard, submitRun } from './game/globalBoard';
 import type { FormEvent } from 'react';
 import { ChevronLeft, RotateCcw, Route, Timer, Trophy, Wind } from 'lucide-react';
-import { addEntry, cleanName, loadBoard, loadDeviceId, loadName, qualifies, sanitizeName, saveBoard, saveName } from './game/leaderboard';
+import { addEntry, cleanName, loadBoard, loadDeviceId, loadName, qualifies, saveBoard, saveName } from './game/leaderboard';
 import type { Entry, RunStats } from './game/leaderboard';
 import { Podium } from './Leaderboard';
+import EnglishNameInput from './EnglishNameInput';
 
 const number = (n: number) => Math.round(n).toLocaleString('en-US');
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
@@ -22,6 +23,12 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
   const [name, setName] = useState(loadName);
   const [rank, setRank] = useState(-1);
   const saved = useRef(false);
+  const [projectedRank, setProjectedRank] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (sharedBoard && score > 0) fetchStanding(score).then(result => { if (live) setProjectedRank(result?.rank ?? null); });
+    return () => { live = false; };
+  }, [score]);
   useEffect(() => {
     if (!sharedBoard) return;
     Promise.all([fetchTop(), fetchDeviceEntry(deviceId)]).then(([top, personal]) => {
@@ -58,6 +65,7 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
   return <div className="modal-shade"><section className="modal run-over" role="dialog" aria-modal="true" aria-labelledby="run-over-title">
     <span className="eyebrow">RUN OVER</span>
     <h2 id="run-over-title" className="run-score">{number(score)}</h2>
+    {projectedRank !== null && step === 'name' && boardScope === 'everyone' && <p className="run-rank-goal">On pace for <strong>#{number(projectedRank)}</strong> · save your run to join the board</p>}
     {newBest && <span className="run-best">New best!</span>}
     <div className="run-stats">{tiles.map(tile => <div key={tile.label} aria-label={`${tile.label}: ${tile.value}`}>{tile.icon}<b>{tile.value}</b></div>)}</div>
     {step === 'loading' && <p className="board-empty">Loading the shared board…</p>}
@@ -65,9 +73,9 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     {step === 'name'
       ? <form className="run-name" onSubmit={save}>
         {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. This score can be saved on this device.' : 'The shared leaderboard is not connected yet. This score can be saved on this device.'}</p>}
-        <label htmlFor="run-name-input"><Trophy size={15} /> Save this device's high score</label>
+        <label htmlFor="run-name-input"><Trophy size={15} /> {boardScope === 'everyone' ? 'Put your name on the board' : 'Save your personal best'}</label>
         <div className="run-name-row">
-          <input id="run-name-input" autoFocus maxLength={8} pattern="[A-Za-z ]{1,8}" autoComplete="nickname" autoCapitalize="words" spellCheck={false} placeholder="Your name" value={name} onChange={event => setName(sanitizeName(event.target.value))} />
+          <EnglishNameInput value={name} onChange={setName} />
           <button type="submit" className="primary">Save</button>
         </div>
       </form>

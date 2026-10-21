@@ -204,7 +204,8 @@ test('in rails mode the car never leaves the road, even steering hard into the v
       // The same test the game uses for "on the road".
       worst = Math.max(worst, distanceToRoadNetwork(loopLatitude(car.x) + car.z / GLOBE_RADIUS, car.x));
     }
-    assert.ok(car.speed > 10, 'kept driving');
+    // Held on the curb this long it is slowed right down (CAR_CONFIG.curbSpeedFactorLong), but never stopped.
+    assert.ok(car.speed > 3, 'kept driving');
     assert.ok(worst < 0.7, `went ${worst.toFixed(2)} off the road`);
   } finally { DRIVE_MODE.rails = false; }
 });
@@ -232,7 +233,7 @@ function carBeside(car: ReturnType<typeof initialLoopCar>, aside: number, along:
 }
 test('a boosting car throws aside traffic it only passes close to, without touching it', () => {
   const car = { ...initialLoopCar(), speed: 14, boostTime: 3 };
-  const other = carBeside(car, 2.9, 2);
+  const other = carBeside(car, 1.35, 2);
   setObstacleGroup('wake', [other]);
   drainTrafficHits();
   for (let i = 0; i < 20; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
@@ -242,6 +243,14 @@ test('a boosting car throws aside traffic it only passes close to, without touch
   assert.ok(other.boostHit && (other.impact ?? 0) > 0, 'the car beside was hit by the wake');
   assert.ok(hits.some(hit => hit.wake && hit.boosted), 'and reported as a boosted, no-touch hit');
   assert.ok(car.speed > 10, 'the player kept its speed');
+});
+test('a boosting car passing at two or three metres no longer throws the car beside it', () => {
+  const car = { ...initialLoopCar(), speed: 14, boostTime: 3 };
+  const other = carBeside(car, 2.9, 2);
+  setObstacleGroup('wake', [other]);
+  for (let i = 0; i < 20; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
+  clearObstacleGroup('wake');
+  assert.ok(!other.boostHit && !other.impact, 'too far for the wake');
 });
 test('without boost a car passed at the same distance is left alone', () => {
   const car = { ...initialLoopCar(), speed: 14 };
@@ -260,16 +269,17 @@ test('a car further off than the wake reach is not touched even by a boosting ca
   clearObstacleGroup('wake');
   assert.ok(!other.boostHit && !other.impact);
 });
-test('during the milestone moment the car passes through traffic: no hit, no near miss', () => {
-  const car = { ...initialLoopCar(), speed: 12, ghost: 1 };
-  const other = carBeside(car, 0, 3); // dead ahead, in the way
-  setObstacleGroup('ghost', [other]);
-  drainTrafficHits(); resetNearMiss();
-  for (let i = 0; i < 40; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
-  const hits = drainTrafficHits(), misses = drainNearMisses();
-  clearObstacleGroup('ghost');
-  assert.equal(hits.length, 0);
-  assert.equal(misses.length, 0);
-  assert.ok(!other.impact, 'the other car was not touched');
-  assert.ok(car.speed > 10, 'and the car kept going');
+
+test('a near miss throws the car passed aside (no hit), unless the experiment is off', async () => {
+  const { NEAR_MISS, trackNearMiss, drainNearMisses, resetNearMiss } = await import('./obstacles.ts');
+  for (const fling of [true, false]) {
+    NEAR_MISS.fling = fling;
+    resetNearMiss();
+    const other: Obstacle = { latitude: 0, longitude: 0, radius: 0.6, movable: true, forward: [0, 1], halfLength: 0.9, velocity: 5 };
+    trackNearMiss({ obstacle: other, gap: 0.2, away: [1, 0], playerAlong: 0 }, 20, 15, 1, false);
+    trackNearMiss(undefined, 20, 15, 1, false);
+    assert.equal(drainNearMisses().length, 1, 'a near miss all the same');
+    assert.equal(!!other.boostHit && (other.impact ?? 0) > 0, fling, fling ? 'thrown aside' : 'left alone');
+  }
+  NEAR_MISS.fling = true;
 });
