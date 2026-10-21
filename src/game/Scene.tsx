@@ -25,8 +25,9 @@ import { warmLight } from './warmLight';
 import { nightLook } from './nightLook';
 import { nearMissLook } from './nearMissLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
-import { adaptResolution, createResolutionState, resolutionBounds } from './renderQuality';
+import { adaptPacing, adaptResolution, createPacingState, createResolutionState, resolutionBounds } from './renderQuality';
 import { cullBehindGlobe } from './horizonCull';
+import { setCssVar } from '../cssVar';
 import { advanceTheme, currentThemes, setTheme, themeSettings, themeSunWarmth, themedColour, themeState } from './themes';
 import type { Weather as WeatherKind } from './themes';
 import { roadLayoutFor } from './roadLayouts';
@@ -1098,9 +1099,9 @@ function DrivingScene(props: SceneProps) {
       const zoomT = easeInOutCubic(Math.min(introZoomClock.current / WHEEL_ZOOM.duration, 1));
       introZoom.current = THREE.MathUtils.lerp(introZoomFrom.current, introZoomTarget.current, zoomT);
     }
-    document.documentElement.style.setProperty('--intro-zoom', introZoom.current.toFixed(4));
+    setCssVar(document.documentElement, '--intro-zoom', introZoom.current.toFixed(4));
     introZoomCta.current = THREE.MathUtils.damp(introZoomCta.current, introZoom.current, 7, dt);
-    document.documentElement.style.setProperty('--intro-zoom-cta', introZoomCta.current.toFixed(4));
+    setCssVar(document.documentElement, '--intro-zoom-cta', introZoomCta.current.toFixed(4));
     const party = props.party?.current ?? null;
     if (party) props.car.current = party.players[0].car;
     const car = props.car.current;
@@ -1113,11 +1114,12 @@ function DrivingScene(props: SceneProps) {
     const sky = gl.domElement.parentElement;
     if (sky) {
       const boostStrength = boostAtmosphere.current;
-      sky.style.setProperty('--boost-violet', PALETTE.boostViolet);
-      sky.style.setProperty('--boost-pink', PALETTE.boostPink);
-      sky.style.setProperty('--boost-violet-strength', `${(boostStrength * 29).toFixed(1)}%`);
-      sky.style.setProperty('--boost-pink-strength', `${(boostStrength * 34).toFixed(1)}%`);
-      sky.style.setProperty('--boost-light-x', `${(50 + Math.sin(arrivalTime.current * 0.8) * 17).toFixed(1)}%`);
+      setCssVar(sky, '--boost-violet', PALETTE.boostViolet);
+      setCssVar(sky, '--boost-pink', PALETTE.boostPink);
+      setCssVar(sky, '--boost-violet-strength', `${(boostStrength * 29).toFixed(1)}%`);
+      setCssVar(sky, '--boost-pink-strength', `${(boostStrength * 34).toFixed(1)}%`);
+      // The light only drifts while there is a boost glow to see.
+      if (boostStrength > 0.002) setCssVar(sky, '--boost-light-x', `${(50 + Math.sin(arrivalTime.current * 0.8) * 17).toFixed(1)}%`);
     }
     const globeAlignmentError = globeQuat.angleTo(driveQuat);
     zoomProgress.current = THREE.MathUtils.damp(zoomProgress.current, props.started ? 1 : 0, props.started ? 1.45 : 1.2, dt);
@@ -1829,30 +1831,49 @@ function MapPin({ show }: { show: boolean }) {
 }
 
 // Frame pacing: frames are drawn on demand at most 60 times a second (30 while paused), so a 120 Hz screen
-// doesn't make the GPU do twice the work for no visible gain.
-function FrameLimiter({ fps }: { fps: number }) {
+// doesn't make the GPU do twice the work for no visible gain. A device that can't hold 60 is held at a steady 30
+// instead (`pacing`, see adaptPacing).
+const pacing = createPacingState();
+function FrameLimiter({ paused }: { paused: boolean }) {
   const invalidate = useThree(state => state.invalidate);
   useEffect(() => {
     let frame = 0, last = 0;
-    const interval = 1000 / fps;
     const tick = (now: number) => {
+      const interval = 1000 / (paused ? 30 : pacing.fps);
       if (now - last >= interval - 2) { last = now; invalidate(); }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [fps, invalidate]);
+  }, [paused, invalidate]);
   return null;
 }
 
 // Adaptive resolution: every couple of seconds of driving, if frames have been coming slowly the pixel density
-// steps down (to the quality profile's floor), and after a good while of smooth frames it steps back up. The
+// steps down (to the quality profile's floor), unless the main thread itself was the bottleneck (fewer pixels
+// wouldn't help then), and after a good while of smooth frames it steps back up. The
 // current value is kept outside React so a re-render of the canvas never resets it.
 const deviceResolution = () => resolutionBounds(ACTIVE_QUALITY, typeof window === 'undefined' ? 1 : window.devicePixelRatio);
 const resolution = { dpr: deviceResolution().initial };
 function AdaptiveResolution({ active }: { active: boolean }) {
   const setDpr = useThree(state => state.setDpr);
+  const gl = useThree(state => state.gl);
   const stats = useRef(createResolutionState());
+  // How long the main thread worked on the last frame: from the first frame callback to the end of its render.
+  const work = useRef({ start: 0, end: 0, last: 0 });
+  useEffect(() => {
+    const render = gl.render;
+    gl.render = function (...args: Parameters<typeof render>) {
+      render.apply(this, args);
+      work.current.end = performance.now();
+    };
+    return () => { gl.render = render; };
+  }, [gl]);
+  useFrame(() => {
+    const w = work.current;
+    w.last = w.end > w.start ? (w.end - w.start) / 1000 : 0;
+    w.start = performance.now();
+  }, -10000);
   const bounds = useRef(deviceResolution());
   useEffect(() => {
     const resize = () => {
@@ -1865,7 +1886,11 @@ function AdaptiveResolution({ active }: { active: boolean }) {
     return () => window.removeEventListener('resize', resize);
   }, [setDpr]);
   useFrame((_, delta) => {
-    const next = adaptResolution(stats.current, delta, active && !document.hidden, resolution.dpr, bounds.current);
+    const running = active && !document.hidden;
+    adaptPacing(pacing, delta, running, work.current.last);
+    // Held at 30 on purpose, a 33 ms frame is on time: frames are judged against the rate being aimed for.
+    const onTime = pacing.fps / 60;
+    const next = adaptResolution(stats.current, delta * onTime, running, resolution.dpr, bounds.current, work.current.last * onTime);
     if (Math.abs(next - resolution.dpr) > 0.01) { resolution.dpr = next; setDpr(next); }
   });
   return null;
@@ -1895,7 +1920,7 @@ function RenderStats() {
     const t = totals.current;
     t.frames++; t.time += delta; t.calls += gl.info.render.calls; t.triangles += gl.info.render.triangles;
     if (t.time < 1 || !panel.current) return;
-    panel.current.textContent = `${Math.round(t.frames / t.time)} fps · ${VISUAL_QUALITY} · dpr ${resolution.dpr.toFixed(2)}\n${gl.domElement.width} × ${gl.domElement.height} pixels\n${Math.round(t.calls / t.frames)} draw calls · ${Math.round(t.triangles / t.frames / 1000)}k triangles`;
+    panel.current.textContent = `${Math.round(t.frames / t.time)} fps (aim ${pacing.fps}) · ${VISUAL_QUALITY} · dpr ${resolution.dpr.toFixed(2)}\n${gl.domElement.width} × ${gl.domElement.height} pixels\n${Math.round(t.calls / t.frames)} draw calls · ${Math.round(t.triangles / t.frames / 1000)}k triangles`;
     Object.assign(t, { frames: 0, time: 0, calls: 0, triangles: 0 });
   }, 1000);
   return null;
@@ -1905,7 +1930,7 @@ const SHOW_STATS = typeof window !== 'undefined' && new URLSearchParams(window.l
 // Memoised: the HUD re-renders often (speed, score), and none of that should reach the 3D scene.
 export default memo(function Scene(props: SceneProps) {
   return <Canvas shadows frameloop="demand" dpr={resolution.dpr} camera={{ position: [0, 40, 94], fov: 48, near: 0.1, far: 400 }} gl={{ antialias: false, alpha: true, powerPreference: 'high-performance' }} onCreated={({ gl }) => gl.setClearAlpha(0)}>
-    <FrameLimiter fps={props.paused ? 30 : 60} />
+    <FrameLimiter paused={props.paused} />
     <AdaptiveResolution active={props.started && !props.paused && !props.tutorialDriving && !props.finale} />
     {SHOW_STATS && <RenderStats />}
     <Suspense fallback={null}><DrivingScene {...props} /></Suspense>

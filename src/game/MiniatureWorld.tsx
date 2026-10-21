@@ -2695,7 +2695,7 @@ function StaticBatch({ children }: { children: React.ReactNode }) {
     const frame = requestAnimationFrame(() => {
       const result = batchStatic(group.current, new THREE.Vector3(0, -GLOBE_RADIUS, 0), { lightweight: ACTIVE_QUALITY.lightweightShading, retint: RETINT });
       undo = result.undo;
-      if (import.meta.env.DEV) console.info(`[wander] merged ${result.stats.meshes} static meshes (and part of ${result.stats.trimmed}) into ${result.stats.batches}`);
+      if (import.meta.env.DEV) console.info(`[wander] merged ${result.stats.meshes} static meshes (and part of ${result.stats.trimmed}) into ${result.stats.batches}, took ${result.stats.detached} empty branches out`);
     });
     return () => { cancelAnimationFrame(frame); undo?.(); };
   }, []);

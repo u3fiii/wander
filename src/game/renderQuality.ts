@@ -33,13 +33,17 @@ export function resolutionBounds(profile: QualityProfile, deviceDpr: number) {
   return { min: Math.min(max, profile.minDpr), max, initial: Math.min(max, profile.initialDpr) };
 }
 
-const ADAPT = { window: 1.5, slow: 1 / 55, smooth: 1 / 58, down: 0.15, up: 0.1, slowWindows: 2, goodWindows: 2, warmup: 3, recoveryDelay: 20 };
-export const createResolutionState = () => ({ time: 0, frames: 0, good: 0, slow: 0, warmup: ADAPT.warmup, recovery: 0 });
+// `cpuBound`: frames this slow while the main thread's own work (the game's code and three.js preparing the frame)
+// takes up this share of the frame or more are the processor's fault, not the pixels': fewer pixels wouldn't help,
+// so the picture is left sharp.
+const ADAPT = { window: 1.5, slow: 1 / 55, smooth: 1 / 58, down: 0.15, up: 0.1, slowWindows: 2, goodWindows: 2, warmup: 3, recoveryDelay: 20, cpuBound: 0.5 };
+export const createResolutionState = () => ({ time: 0, frames: 0, cpu: 0, good: 0, slow: 0, warmup: ADAPT.warmup, recovery: 0 });
 
 // Sample active rendering only. Loading, tab switches and pause/resume must not
-// count as GPU overload or contribute old samples toward a quality increase.
+// count as GPU overload or contribute old samples toward a quality increase. `cpu` is how long the main thread
+// worked on this frame (s), when known.
 export function adaptResolution(state: ReturnType<typeof createResolutionState>, delta: number, active: boolean,
-  dpr: number, bounds: { min: number; max: number }) {
+  dpr: number, bounds: { min: number; max: number }, cpu = 0) {
   if (!active || !Number.isFinite(delta) || delta <= 0 || delta > 0.25) {
     Object.assign(state, createResolutionState());
     return dpr;
@@ -47,13 +51,20 @@ export function adaptResolution(state: ReturnType<typeof createResolutionState>,
   if (state.warmup > 0) { state.warmup -= delta; return dpr; }
   state.recovery = Math.max(0, state.recovery - delta);
   state.time += delta;
+  state.cpu += cpu;
   state.frames++;
   if (state.time < ADAPT.window) return dpr;
   const average = state.time / state.frames;
+  const cpuBound = state.cpu / state.frames >= average * ADAPT.cpuBound;
   state.time = 0;
   state.frames = 0;
+  state.cpu = 0;
   let next = dpr;
-  if (average > ADAPT.slow) {
+  if (average > ADAPT.slow && cpuBound) {
+    // Slow, but from the processor: leave the resolution be.
+    state.good = 0;
+    state.slow = 0;
+  } else if (average > ADAPT.slow) {
     state.good = 0;
     if (++state.slow >= ADAPT.slowWindows) {
       next -= ADAPT.down;
@@ -70,4 +81,30 @@ export function adaptResolution(state: ReturnType<typeof createResolutionState>,
     state.slow = 0;
   }
   return Math.max(bounds.min, Math.min(bounds.max, Math.round(next * 100) / 100));
+}
+
+// Frame pacing for devices that can't hold 60: a steady 30 feels smoother than a rate that wobbles between 35 and
+// 55. After `slowFor` s of driving slower than `slow`, the game draws at 30; once the work per frame has stayed
+// light enough to fit a 60 Hz frame with room to spare (`light` of it) for `lightFor` s, it tries 60 again, and if
+// that was too hopeful it waits longer each time before the next try (`retry`, doubling).
+const PACING = { slow: 1 / 45, slowFor: 4, light: 0.55, lightFor: 8, retry: 20, warmup: 3 };
+export const createPacingState = () => ({ fps: 60, slowTime: 0, lightTime: 0, wait: 0, retry: PACING.retry, warmup: PACING.warmup });
+export function adaptPacing(state: ReturnType<typeof createPacingState>, delta: number, active: boolean, cpu: number) {
+  if (!active || !Number.isFinite(delta) || delta <= 0 || delta > 0.25) {
+    state.slowTime = 0; state.lightTime = 0; state.warmup = PACING.warmup;
+    return state.fps;
+  }
+  if (state.warmup > 0) { state.warmup -= delta; return state.fps; }
+  state.wait = Math.max(0, state.wait - delta);
+  if (state.fps === 60) {
+    state.slowTime = delta > PACING.slow ? state.slowTime + delta : Math.max(0, state.slowTime - delta * 0.5);
+    if (state.slowTime >= PACING.slowFor) {
+      state.fps = 30; state.slowTime = 0; state.lightTime = 0;
+      state.wait = state.retry; state.retry *= 2;
+    }
+  } else {
+    state.lightTime = cpu < (1 / 60) * PACING.light ? state.lightTime + delta : 0;
+    if (state.lightTime >= PACING.lightFor && state.wait === 0) { state.fps = 60; state.lightTime = 0; state.warmup = PACING.warmup; }
+  }
+  return state.fps;
 }

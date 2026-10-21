@@ -216,6 +216,7 @@ import type { ThemeEdit } from './game/themes';
 import { THEME_TUNING_SAVED } from './game/themeTuning';
 import { useGamepadMenu } from './useGamepadMenu';
 import { useInputDevice } from './inputDevice';
+import { setCssVar } from './cssVar';
 import { PartyHud, PartyLobby } from './Party';
 import { PARTY, lineUp } from './game/party';
 import type { PartyPlayer, PartyRun } from './game/party';
@@ -273,7 +274,9 @@ const COMBO = { window: 8, step: 0.5, max: 4 };
 const comboMultiplier = (count: number) => Math.min(COMBO.max, 1 + COMBO.step * Math.max(0, count - 1));
 // Hits slower than this (m/s) still score, but without a note.
 const QUIET_HIT_SPEED = 7;
-const formatNumber = (n: number) => Math.round(n).toLocaleString('en-US');
+// One formatter for every number on screen (`toLocaleString` would build a new one on each call, several a frame).
+const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
+const formatNumber = (n: number) => NUMBER_FORMAT.format(Math.round(n));
 const urlNumber = (name: string) => (typeof window === 'undefined' ? 0 : Math.max(0, Math.floor(Number(new URLSearchParams(window.location.search).get(name)) || 0)));
 const FIRST_THEME = urlNumber('theme') % THEMES.length;
 const FIRST_ROAD = urlNumber('road');
@@ -885,8 +888,8 @@ export default function App() {
         // arrives just above it, leaving a little headroom for overspeed.
         const warm = Math.max(0, Math.min(1, (ratio - 0.4) / 0.65));
         const heat = warm * warm * (3 - 2 * warm);
-        speedometer.current.style.setProperty('--speed-arc', `${(Math.min(ratio, 1) * 75).toFixed(2)} 100`);
-        speedometer.current.style.setProperty('--speed-heat', heat.toFixed(3));
+        setCssVar(speedometer.current, '--speed-arc', `${(Math.min(ratio, 1) * 75).toFixed(1)} 100`);
+        setCssVar(speedometer.current, '--speed-heat', heat.toFixed(2));
       }
       frame = requestAnimationFrame(tick);
     };

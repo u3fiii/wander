@@ -17,7 +17,7 @@ test('static meshes with different colours but the same surface merge into one, 
   const a = box(red, 0), b = box(blue, 2);
   root.add(a, b);
   const { stats, undo } = batchStatic(root, new THREE.Vector3(0, -100, -60));
-  assert.deepEqual(stats, { meshes: 2, trimmed: 0, batches: 1 });
+  assert.deepEqual(stats, { meshes: 2, trimmed: 0, batches: 1, detached: 2 });
   assert.equal(a.visible, false);
   const merged = root.getObjectByName('static-batches')!.children[0] as THREE.Mesh;
   const colours = merged.geometry.getAttribute('color');
@@ -30,6 +30,30 @@ test('static meshes with different colours but the same surface merge into one, 
   undo();
   assert.equal(a.visible, true);
   assert.equal(root.getObjectByName('static-batches'), undefined);
+});
+
+test('branches left with nothing to draw leave the scene graph, and come back with undo', () => {
+  const root = new THREE.Group();
+  const plain = new THREE.MeshStandardMaterial({ color: 0x888888 });
+  const glowing = new THREE.MeshStandardMaterial({ color: 0x888888, emissive: 0xffaa00 });
+  // A tree (a group around a mesh) merges away entirely; a house keeps its glowing lamp, so it stays.
+  const tree = new THREE.Group(); tree.add(box(plain, 0));
+  const house = new THREE.Group(); const lamp = box(glowing, 4); house.add(box(plain, 2), lamp);
+  // Something hidden by the game for now (shown later) is kept, and so is an empty group (its model still loading).
+  const later = new THREE.Group(); later.visible = false; later.add(box(plain, 6));
+  const loading = new THREE.Group();
+  root.add(tree, house, later, loading);
+  const { stats, undo } = batchStatic(root, new THREE.Vector3(0, -100, -60));
+  assert.equal(stats.detached, 2, 'the tree, and the house\'s merged wall');
+  assert.equal(tree.parent, null);
+  assert.equal(house.parent, root);
+  assert.deepEqual(house.children, [lamp]);
+  assert.equal(later.parent, root);
+  assert.equal(loading.parent, root);
+  undo();
+  assert.deepEqual(root.children, [tree, house, later, loading]);
+  assert.equal(house.children.length, 2);
+  assert.equal(tree.parent, root);
 });
 
 test('glowing, see-through and dynamic things are left alone', () => {
@@ -75,7 +99,7 @@ test('a mesh with one glowing material merges the rest and keeps drawing only th
   const house = new THREE.Mesh(geometry, [wall, wall, wall, wall, glass, wall]);
   root.add(house);
   const { stats, undo } = batchStatic(root, new THREE.Vector3(0, -100, -60));
-  assert.deepEqual(stats, { meshes: 0, trimmed: 1, batches: 1 });
+  assert.deepEqual(stats, { meshes: 0, trimmed: 1, batches: 1, detached: 0 });
   assert.equal(house.visible, true);
   assert.deepEqual(house.geometry.groups.map(group => group.materialIndex), [4]);
   assert.equal(house.geometry.getAttribute('position'), geometry.getAttribute('position'), 'buffers are shared, not copied');

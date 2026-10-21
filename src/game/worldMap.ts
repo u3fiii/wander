@@ -270,17 +270,32 @@ export function roadPathMetric(path: RoadPath, t: number) {
   return Math.hypot(after[0] - before[0], after[1] - before[1], after[2] - before[2]) / (2 * epsilon);
 }
 
+// The road's sample points, worked out once per layout (it is asked many times a frame: the car, the scene, and
+// thousands of times while the world is built).
+let roadSamples: { latitudes: Float64Array; longitudes: Float64Array; halfWidth: number }[] = [];
+let roadSamplesLayout = -1;
 export function distanceToRoadNetwork(latitude: number, longitude: number) {
+  if (roadSamplesLayout !== roadLayoutVersion) {
+    roadSamplesLayout = roadLayoutVersion;
+    roadSamples = ROAD_PATHS.map(path => {
+      const samples = Math.max(32, Math.ceil(path.segments / 4));
+      const latitudes = new Float64Array(samples + 1), longitudes = new Float64Array(samples + 1);
+      for (let index = 0; index <= samples; index++) {
+        latitudes[index] = path.latitudeAt(index / samples);
+        longitudes[index] = path.longitudeAt(index / samples);
+      }
+      return { latitudes, longitudes, halfWidth: path.width * 0.5 };
+    });
+  }
   let nearest = Infinity;
-  for (const path of ROAD_PATHS) {
-    const samples = Math.max(32, Math.ceil(path.segments / 4));
-    for (let index = 0; index <= samples; index++) {
-      const t = index / samples;
-      const pathLatitude = path.latitudeAt(t);
-      const pathLongitude = path.longitudeAt(t);
-      const dLongitude = wrapAngle(longitude - pathLongitude) * Math.cos((latitude + pathLatitude) * 0.5);
+  for (const { latitudes, longitudes, halfWidth } of roadSamples) {
+    for (let index = 0; index < latitudes.length; index++) {
+      const pathLatitude = latitudes[index];
+      // The difference in latitude alone already puts this point too far to be the nearest.
+      if (Math.abs(latitude - pathLatitude) * GLOBE_RADIUS - halfWidth >= nearest) continue;
+      const dLongitude = wrapAngle(longitude - longitudes[index]) * Math.cos((latitude + pathLatitude) * 0.5);
       const distance = Math.hypot(latitude - pathLatitude, dLongitude) * GLOBE_RADIUS;
-      nearest = Math.min(nearest, distance - path.width * 0.5);
+      nearest = Math.min(nearest, distance - halfWidth);
     }
   }
   return nearest;

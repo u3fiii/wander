@@ -143,17 +143,47 @@ function coastBendCorrectionSlope(angle: number) {
     + 0.6 * Math.sin(delta) * Math.exp(3 * (Math.cos(delta) - 1));
 }
 
-export function loopLatitude(angle: number, lane = 0) {
-  const latitude = ROAD_SMOOTHING_WEIGHTS.reduce((sum, weight, index) => (
+function exactLoopLatitude(angle: number) {
+  return ROAD_SMOOTHING_WEIGHTS.reduce((sum, weight, index) => (
     sum + weight * rawLoopLatitude(angle + (index - 2) * ROAD_SMOOTHING_STEP)
   ), 0) / 16 + coastBendCorrection(angle);
-  return latitude + lane / GLOBE_RADIUS;
 }
 
-function loopSlope(angle: number) {
+function exactLoopSlope(angle: number) {
   return ROAD_SMOOTHING_WEIGHTS.reduce((sum, weight, index) => (
     sum + weight * rawLoopSlope(angle + (index - 2) * ROAD_SMOOTHING_STEP)
   ), 0) / 16 + coastBendCorrectionSlope(angle);
+}
+
+// The finished road (smoothed, corrected) is tabulated too, on first use after each layout change: the car, the
+// camera, the traffic and the world all read it many times a frame, and each exact reading is some thirty trig
+// calls. Read between the table's points it is out by well under a millimetre.
+const LOOP_TABLE_SIZE = 4096;
+const latitudeTable = new Float64Array(LOOP_TABLE_SIZE + 1);
+const loopSlopeTable = new Float64Array(LOOP_TABLE_SIZE + 1);
+let loopTableVersion = -1;
+function readLoopTable(table: Float64Array, angle: number) {
+  if (loopTableVersion !== roadLayoutVersion) {
+    loopTableVersion = roadLayoutVersion;
+    for (let index = 0; index <= LOOP_TABLE_SIZE; index++) {
+      const at = (index / LOOP_TABLE_SIZE) * FULL_TURN;
+      latitudeTable[index] = exactLoopLatitude(at);
+      loopSlopeTable[index] = exactLoopSlope(at);
+    }
+  }
+  const turn = angle / FULL_TURN;
+  const position = (turn - Math.floor(turn)) * LOOP_TABLE_SIZE;
+  const index = Math.min(LOOP_TABLE_SIZE - 1, Math.floor(position));
+  const t = position - index;
+  return table[index] + (table[index + 1] - table[index]) * t;
+}
+
+export function loopLatitude(angle: number, lane = 0) {
+  return readLoopTable(latitudeTable, angle) + lane / GLOBE_RADIUS;
+}
+
+function loopSlope(angle: number) {
+  return readLoopTable(loopSlopeTable, angle);
 }
 
 export function roadLatitude(angle: number, _routeIndex = 0) {

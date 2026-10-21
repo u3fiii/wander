@@ -7,7 +7,9 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // vertex colours, so everything sharing the same surface (roughness, shading, texture…) draws together. The
 // globe is cut into sectors so the parts out of view are still skipped. Anything that changes at run time is
 // left as it is: glowing (emissive), transparent or custom-shader materials, instanced or skinned meshes, and
-// whole subtrees marked `userData.dynamic`. The originals are hidden, not removed; `undo` restores them.
+// whole subtrees marked `userData.dynamic`. The originals are hidden, and every branch left with nothing to draw
+// is taken out of the scene graph (kept aside, not disposed): the globe turns every frame, so three.js would
+// otherwise recompute and walk thousands of hidden objects each frame for nothing. `undo` puts it all back.
 // Sectors are about 12 m across (on the radius-30 globe): small enough that the frustum and horizon culling
 // can skip most of the planet when the camera is close, big enough to keep the draw calls few.
 const SECTORS = { latitude: 8, equatorLongitude: 16 };
@@ -157,14 +159,50 @@ export function batchStatic(root: THREE.Object3D, globeCenter: THREE.Vector3, { 
     made.push({ mesh, material });
   }
   hidden.forEach(mesh => { mesh.visible = false; });
+  const detached = detachEmpty(root, new Set(hidden));
   root.add(batches);
   return {
-    stats: { meshes: hidden.length, trimmed: trimmed.length, batches: made.length },
+    stats: { meshes: hidden.length, trimmed: trimmed.length, batches: made.length, detached: detached.length },
     undo() {
       root.remove(batches);
       made.forEach(({ mesh, material }) => { mesh.geometry.dispose(); material.dispose(); });
+      detached.reverse().forEach(({ object, parent, index }) => { parent.children.splice(Math.min(index, parent.children.length), 0, object); object.parent = parent; });
       hidden.forEach(mesh => { mesh.visible = true; });
       trimmed.forEach(({ mesh, geometry }) => { mesh.geometry = geometry; });
     },
   };
+}
+
+// Takes out of the scene graph every branch under `root` with nothing left to draw: it held meshes that were merged
+// (`merged`), and nothing else (no other mesh, light or other renderable, nothing hidden that the game might show
+// later, nothing dynamic). A branch with nothing merged in it is left alone, even if it is empty for now: its model
+// may still be loading. Returns where each one was, for putting it back.
+function detachEmpty(root: THREE.Object3D, merged: Set<THREE.Object3D>) {
+  const detached: { object: THREE.Object3D; parent: THREE.Object3D; index: number }[] = [];
+  // How many merged meshes the branch holds, or -1 if it holds anything that must stay.
+  const mergedIn = (object: THREE.Object3D): number => {
+    if (object.userData.dynamic) return -1;
+    const own = merged.has(object) ? 1 : 0;
+    const plain = object.type === 'Group' || object.type === 'Object3D' || (object as THREE.Bone).isBone;
+    if (!own && !(plain && object.visible)) return -1;
+    let count = own;
+    for (const child of object.children) {
+      const inside = mergedIn(child);
+      if (inside < 0) return -1;
+      count += inside;
+    }
+    return count;
+  };
+  const walk = (parent: THREE.Object3D) => {
+    for (let index = parent.children.length - 1; index >= 0; index--) {
+      const child = parent.children[index];
+      if (mergedIn(child) > 0) {
+        parent.children.splice(index, 1);
+        child.parent = null;
+        detached.push({ object: child, parent, index });
+      } else walk(child);
+    }
+  };
+  walk(root);
+  return detached;
 }
