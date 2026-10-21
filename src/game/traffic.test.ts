@@ -270,16 +270,16 @@ test('a car further off than the wake reach is not touched even by a boosting ca
   assert.ok(!other.boostHit && !other.impact);
 });
 
-test('a near miss throws the car passed aside (no hit), unless the experiment is off', async () => {
-  const { NEAR_MISS, trackNearMiss, drainNearMisses, resetNearMiss } = await import('./obstacles.ts');
-  for (const fling of [true, false]) {
-    NEAR_MISS.fling = fling;
+test('a normal near miss awards the pass without changing the traffic car', () => {
+  for (const side of [-1, 1]) {
     resetNearMiss();
     const other: Obstacle = { latitude: 0, longitude: 0, radius: 0.6, movable: true, forward: [0, 1], halfLength: 0.9, velocity: 5 };
-    trackNearMiss({ obstacle: other, gap: 0.2, away: [1, 0], playerAlong: 0 }, 20, 15, 1, false);
-    trackNearMiss(undefined, 20, 15, 1, false);
-    assert.equal(drainNearMisses().length, 1, 'a near miss all the same');
-    assert.equal(!!other.boostHit && (other.impact ?? 0) > 0, fling, fling ? 'thrown aside' : 'left alone');
+    const before = structuredClone(other);
+    trackNearMiss({ obstacle: other, gap: 0.2, away: [side, 0], playerAlong: 0 }, 20, 15, side, false);
+    trackNearMiss(undefined, 20, 15, side, false);
+    assert.equal(drainNearMisses().length, 1, 'the near miss still scores');
+    assert.deepEqual(other, before, 'no impact, boost flag, spin trigger or cooldown');
+    assert.equal(drainNearMisses().length, 0, 'the pass only scores once');
   }
-  NEAR_MISS.fling = true;
+  resetNearMiss();
 });

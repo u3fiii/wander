@@ -1627,3 +1627,9 @@
 .stage-editing{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:0;font-size:12px;color:#55625c}
 .stage-editing b{color:#1e5954}
 .stage-editing button{padding:0;border:0;background:none;color:#1e5954;font-size:11.5px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+
+.stage-delete-row{display:flex;align-items:center;gap:10px;padding-top:4px}
+.stage-delete{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #b94b4655;border-radius:8px;background:#b94b4610;color:#a63833;font-size:12px;font-weight:700;cursor:pointer}
+.stage-delete:hover:not(:disabled){background:#b94b4625}
+.stage-delete:disabled{opacity:.4;cursor:not-allowed}
+.stage-delete-row>span{font-size:11px;opacity:.65}

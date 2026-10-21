@@ -5,11 +5,12 @@ import { fetchStanding, fetchTop, sharedBoard } from './game/globalBoard';
 import type { Standing } from './game/globalBoard';
 import { cleanName, loadBest, loadDeviceId } from './game/leaderboard';
 import type { Entry } from './game/leaderboard';
+import './DriverCard.css';
 import { STAGE_POINTS, cardLook, stageAt, stageProgress } from './game/stages';
 
 const number = (n: number) => Math.max(0, Math.floor(n)).toLocaleString('en-US');
 
-export function LeaderboardSpotlight({ open }: { open: () => void }) {
+export function LeaderboardSpotlight({ open, level, best }: { open: () => void; level: { level: number; title: string }; best: number }) {
   const [board, setBoard] = useState<Entry[] | null>(null);
   const [loading, setLoading] = useState(sharedBoard);
   useEffect(() => {
@@ -18,19 +19,23 @@ export function LeaderboardSpotlight({ open }: { open: () => void }) {
     return () => { live = false; };
   }, []);
   const connected = board !== null;
-  return <button className="leader-spotlight" onClick={open} aria-label="Open leaderboard and see the top drivers">
-    <span className="leader-heading"><span><Trophy size={13} /> {connected ? 'THE ONES TO BEAT' : 'CHASE THE CROWN'}</span><ArrowRight size={14} /></span>
-    <span className="leader-trio">
-      {[1, 0, 2].map(rank => {
-        const entry = board?.[rank];
-        return <span className={`leader-mini leader-mini-${rank + 1}${entry ? '' : ' vacant'}`} key={rank} style={{ '--arrival': `${rank === 0 ? 240 : rank === 1 ? 80 : 400}ms` } as CSSProperties}>
-          <span className="leader-medal">{rank === 0 ? <Crown size={19} /> : <span>{rank + 1}</span>}</span>
-          <strong>{entry ? cleanName(entry.name) || 'Unnamed' : loading ? '…' : connected ? 'Your name?' : '—'}</strong>
-          <small>{entry ? number(entry.score) : loading ? 'Loading' : connected ? 'Open spot' : ['1st place', '2nd place', '3rd place'][rank]}</small>
+  return <button className="driver-card" onClick={open} aria-label={`Level ${level.level}, ${level.title}. Personal best ${number(best)}. Open leaderboard.`}>
+    <span className="driver-card-profile">
+      <span className="driver-card-level" aria-hidden="true">{level.level}</span>
+      <span className="driver-card-identity"><small>YOUR JOURNEY</small><strong>{level.title}</strong></span>
+      <span className="driver-card-best"><small>PERSONAL BEST</small><strong>{number(best)}</strong></span>
+    </span>
+    <span className="driver-card-divider" />
+    <span className="driver-card-heading"><span>{connected ? 'WORLD TOP 3' : loading ? 'FINDING RIVALS' : 'YOUR NEXT CHALLENGE'}</span><ArrowRight size={14} /></span>
+    {connected && board.length > 0 ? <span className="driver-card-rivals">
+      {[0, 1, 2].map(rank => {
+        const entry = board[rank];
+        return <span key={rank} className={`driver-card-rival${rank === 0 ? ' first' : ''}`} style={{ '--arrival': `${rank * 90}ms` } as CSSProperties}>
+          <span className="driver-card-place">{rank === 0 ? <Crown size={14} /> : `0${rank + 1}`}</span>
+          <span><strong>{entry ? cleanName(entry.name) || 'Unnamed' : 'Open spot'}</strong><small>{entry ? number(entry.score) : '—'}</small></span>
         </span>;
       })}
-    </span>
-    <span className="leader-invite">{connected ? board.length ? 'ONE CROWN. YOUR TURN.' : 'SET THE FIRST RECORD.' : loading ? 'FINDING RIVALS…' : 'PERSONAL BEST · OFFLINE'}</span>
+    </span> : <span className="driver-card-empty"><Trophy size={17} /><strong>{loading ? 'The chase is loading…' : connected ? 'Set the first record.' : best > 0 ? `Beat ${number(best)}. Make your next mark.` : 'Your first record starts here.'}</strong>{!connected && !loading && <small>LOCAL</small>}</span>}
   </button>;
 }
 

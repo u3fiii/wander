@@ -1,7 +1,7 @@
 import { Component, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Timer, Users, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Car, Check, Map as MapIcon, Palette, Sparkles, Timer, Users, Video, Menu, Trophy, SlidersHorizontal, ChevronLeft, ChevronRight, CircleHelp, CarFront, Maximize2, Minimize2, Moon, Pause, Play, RotateCcw, Sun, Trash2, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import Scene, { scoreDrift } from './game/Scene';
 import Garage from './Garage';
 import { loadVehicle, saveVehicle } from './game/vehicles';
@@ -567,7 +567,10 @@ export default function App() {
       next = addStage(index, name);
     }
     if (action === 'earlier' || action === 'later') next = moveStage(index, action === 'earlier' ? -1 : 1);
-    if (action === 'remove' && window.confirm(`Take ${STAGES[index].name} out of the loop?`)) next = removeStage(index);
+    if (action === 'remove') {
+      if (STAGES.length <= 2 || !window.confirm(`Delete ${STAGES[index].name} from the stage loop? Click Apply to save the change.`)) return;
+      next = removeStage(index);
+    }
     showStage(next, viewing);
     setThemeValues(themeFlat(next, themeSettings, viewing));
   };
@@ -958,14 +961,18 @@ export default function App() {
     const state = streak.current;
     const dt = state.last ? Math.min((now - state.last) / 1000, 0.5) : 0;
     state.last = now;
-    if (!started || halted) return;
+    if (!started || halted || partyOn) {
+      curbTime.current = 0;
+      setCurbHint(false);
+      return;
+    }
     const topSpeed = DRIVING_CONFIG.maxSpeed * 3.6;
     curbTime.current = (data.curb ?? 0) > 0.5 && !data.offroad ? curbTime.current + dt : 0;
     setCurbHint(curbTime.current > 1.2);
     if (data.offroad || (data.curb ?? 0) > 0.5 || data.speed < topSpeed * 0.3) state.time = 0;
     else if (data.speed > topSpeed * JUICE_CONFIG.streakSpeedRatio) state.time += dt;
     setStreakLevel(state.time > 0 ? Math.floor(state.time / JUICE_CONFIG.streakStep) + 1 : 0);
-  }, [data, started, paused]);
+  }, [data, started, halted, partyOn]);
   useEffect(() => { setMuted(muted); }, [muted]);
   // Browsers only allow audio after a user gesture.
   useEffect(() => {
@@ -1066,7 +1073,7 @@ export default function App() {
     state.time = started && !halted && pressing && data.speed < 3 ? state.time + dt : 0;
     if (state.time > 1.5) setStuckHint(true);
     else if (data.speed > 8 || !started) setStuckHint(false);
-  }, [data, started, paused]);
+  }, [data, started, halted, partyOn]);
   const recover = useCallback(() => { recoverToRoad(car.current); stuck.current.time = 0; setStuckHint(false); }, []);
   const openPauseMenu = () => { controls.current = emptyControls(); setMobileMenuOpen(false); setPaused(true); };
   useEffect(() => {
@@ -1212,7 +1219,12 @@ export default function App() {
           <button onClick={() => editLoop('earlier')} disabled={Number(themeValues.theme) === 0}>← Earlier</button>
           <button onClick={() => editLoop('later')} disabled={Number(themeValues.theme) === STAGES.length - 1}>Later →</button>
           <button onClick={() => editLoop('add')}>+ New stage</button>
-          <button onClick={() => editLoop('remove')} disabled={STAGES.length <= 2}>Remove</button>
+        </div>
+        <div className="stage-delete-row">
+          <button className="stage-delete" onClick={() => editLoop('remove')} disabled={STAGES.length <= 2}>
+            <Trash2 size={14} aria-hidden="true" /> Delete stage
+          </button>
+          <span>{STAGES.length <= 2 ? 'Keep at least 2 stages' : STAGES[Number(themeValues.theme)]?.name}</span>
         </div>
       </div> : undefined}
       endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', drift: '/__drift-tuning', theme: '/__theme-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
@@ -1278,7 +1290,7 @@ export default function App() {
           busy={!!hitNote || !!heartBreak || streakShown || coachShowing || !!roadWarning || !!stuckHint}
           open={() => setBoardOpen(true)} />
       </div>}
-      {partyOn ? null : stuckHint
+      {!started || halted || partyOn ? null : stuckHint
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <Keys action="recover" device={device} /> to hop back on the road</span></div>
         : roadWarning ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>
         : curbHint && <div className="curb-hint" role="status"><TriangleAlert size={15} /><span><b>Back onto the road!</b> The curb slows you down and scores nothing</span></div>}
@@ -1302,11 +1314,7 @@ export default function App() {
     </header>
 
     {(!started || introExit) && party !== 'lobby' && <section className={`intro-card${introExit ? ' exiting' : ''}`}>
-      <LeaderboardSpotlight open={() => setBoardOpen(true)} />
-      {/* The driver's level, like the badge in the game's header; a welcome back for returning players. */}
-      <div className="intro-level rise" style={{ '--d': '800ms' } as CSSProperties}>
-        <span className="level-number">{level.level}</span><strong>{level.title}</strong>{best > 0 ? <span className="intro-welcome">Best {formatNumber(best)}</span> : xp > 0 && <span className="intro-welcome">Welcome back</span>}
-      </div>
+      <LeaderboardSpotlight level={level} best={best} open={() => setBoardOpen(true)} />
       <h1 aria-label={TITLE}>{[...TITLE].map((c, i) => <span key={i} aria-hidden="true" className={`ch${c === '.' ? ' dot' : ''}`} style={{ '--d': `${1000 + i * 60}ms` } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</h1>
       <p className="intro-copy rise" style={{ '--d': '1700ms' } as CSSProperties}>
         <span>A small world, a long road.</span>

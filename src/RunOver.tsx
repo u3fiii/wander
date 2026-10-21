@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchDeviceEntry, fetchStanding, fetchTop, sharedBoard, submitRun } from './game/globalBoard';
 import type { FormEvent } from 'react';
-import { ChevronLeft, RotateCcw, Route, Timer, Trophy, Wind } from 'lucide-react';
+import { ArrowRight, Check, ChevronLeft, Crown, RotateCcw, Route, Timer, Trophy, Wind } from 'lucide-react';
 import { addEntry, cleanName, loadBoard, loadDeviceId, loadName, qualifies, saveBoard, saveName } from './game/leaderboard';
 import type { Entry, RunStats } from './game/leaderboard';
-import { Podium } from './Leaderboard';
+import Leaderboard from './Leaderboard';
+import './RunOver.css';
 import EnglishNameInput from './EnglishNameInput';
 
 const number = (n: number) => Math.round(n).toLocaleString('en-US');
@@ -23,6 +24,10 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
   const [name, setName] = useState(loadName);
   const [rank, setRank] = useState(-1);
   const saved = useRef(false);
+  const mounted = useRef(true);
+  const [fullBoard, setFullBoard] = useState(false);
+  const [personal, setPersonal] = useState<Entry | null>(() => loadBoard()[0] ?? null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [projectedRank, setProjectedRank] = useState<number | null>(null);
   useEffect(() => {
     let live = true;
@@ -33,11 +38,12 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     if (!sharedBoard) return;
     Promise.all([fetchTop(), fetchDeviceEntry(deviceId)]).then(([top, personal]) => {
       // Once the run is saved, its own result (with its rank) is what shows.
-      if (saved.current) return;
+      if (saved.current || !mounted.current) return;
       const current = top ?? loadBoard();
       const comparison = personal && !current.some(entry => entry.deviceId === deviceId) ? [...current, personal] : current;
       setBoardScope(top ? 'everyone' : 'device');
       setBoard(current);
+      setPersonal(personal ?? loadBoard()[0] ?? null);
       // Store a first device record even when it falls outside the visible top ten, so later runs can update it.
       setStep(qualifies(comparison, score, deviceId) || (!personal && score > 0) ? 'name' : 'board');
     });
@@ -45,12 +51,15 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
   const save = async (event: FormEvent) => {
     event.preventDefault();
     const driver = cleanName(name);
+    if (!driver || saved.current) return;
     const local = addEntry(loadBoard(), { name: driver, score, distance: stats.distance, seconds: stats.seconds, date: Date.now(), deviceId });
     saveBoard(local.board);
     saveName(driver);
     saved.current = true;
     setStep('saving');
     const shared = sharedBoard ? await submitRun({ name: driver, score, distance: stats.distance, seconds: stats.seconds, deviceId }) : null;
+    if (!mounted.current) return;
+    setPersonal(local.board.find(entry => entry.deviceId === deviceId) ?? null);
     setBoard(shared ? shared.board : local.board);
     setBoardScope(shared ? 'everyone' : 'device');
     setRank(shared ? shared.rank : local.rank);
@@ -62,30 +71,45 @@ export default function RunOver({ score, newBest, stats, onPlayAgain, onHome }: 
     { icon: <Timer />, value: clock(stats.seconds), label: 'Time' },
     { icon: <Wind />, value: number(stats.nearMisses), label: 'Near misses' },
   ];
-  return <div className="modal-shade"><section className="modal run-over" role="dialog" aria-modal="true" aria-labelledby="run-over-title">
-    <span className="eyebrow">RUN OVER</span>
-    <h2 id="run-over-title" className="run-score">{number(score)}</h2>
-    {projectedRank !== null && step === 'name' && boardScope === 'everyone' && <p className="run-rank-goal">On pace for <strong>#{number(projectedRank)}</strong> · save your run to join the board</p>}
-    {newBest && <span className="run-best">New best!</span>}
-    <div className="run-stats">{tiles.map(tile => <div key={tile.label} aria-label={`${tile.label}: ${tile.value}`}>{tile.icon}<b>{tile.value}</b></div>)}</div>
-    {step === 'loading' && <p className="board-empty">Loading the shared board…</p>}
-    {step === 'saving' && <p className="board-empty">Putting you on the board…</p>}
-    {step === 'name'
-      ? <form className="run-name" onSubmit={save}>
-        {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. This score can be saved on this device.' : 'The shared leaderboard is not connected yet. This score can be saved on this device.'}</p>}
-        <label htmlFor="run-name-input"><Trophy size={15} /> {boardScope === 'everyone' ? 'Put your name on the board' : 'Save your personal best'}</label>
-        <div className="run-name-row">
-          <EnglishNameInput value={name} onChange={setName} />
-          <button type="submit" className="primary">Save</button>
+  const bestEntry = personal ?? board.find(entry => entry.deviceId === deviceId);
+  const gap = bestEntry ? Math.max(0, bestEntry.score - score) : 0;
+  const records = boardScope === 'everyone' ? board.slice(0, 3) : bestEntry ? [bestEntry] : [];
+  const saving = step === 'saving';
+  return <>
+    <div className="results-shade" hidden={fullBoard}>
+      <section className={`results-card${newBest ? ' record-run' : ''}`} role="dialog" aria-modal="true" aria-labelledby="run-over-title">
+        <header className="results-heading"><span><span className="results-flag" aria-hidden="true" /> RUN COMPLETE</span><span className="results-brand">Wander<span>.</span></span></header>
+        <div className="results-body">
+          <div className="results-performance">
+            <div className="results-medal" aria-hidden="true">{newBest ? <Crown /> : <Trophy />}</div>
+            <h2 id="run-over-title">{newBest ? 'NEW BEST!' : 'WHAT A RIDE.'}</h2>
+            <div className="results-score" aria-label={`${number(score)} points`}><strong>{number(score)}</strong><span>POINTS</span></div>
+            <div className="results-stats">{tiles.map(tile => <div key={tile.label}>{tile.icon}<strong>{tile.value}</strong><span>{tile.label}</span></div>)}</div>
+          </div>
+          <aside className="results-records" aria-label="Run records">
+            <div className="results-section-title"><Trophy size={15} /><h3>{boardScope === 'everyone' ? 'THE CHASE' : 'YOUR RECORD'}</h3><span>{boardScope === 'everyone' ? 'GLOBAL' : 'LOCAL'}</span></div>
+            {step === 'loading' ? <div className="results-status" role="status">Finding your rivals<span className="results-loading" aria-hidden="true">…</span></div> : <>
+              {records.length > 0 ? <ol className="results-record-list">{records.map((entry, index) => <li key={entry.deviceId} className={`${index === 0 ? 'champion' : ''}${entry.deviceId === deviceId ? ' your-record' : ''}`}>
+                <span className="results-place">{index === 0 ? <Crown size={20} /> : `0${index + 1}`}</span>
+                <span className="results-driver"><strong>{cleanName(entry.name) || 'Unnamed'}</strong><small>{entry.deviceId === deviceId ? 'YOUR BEST' : index === 0 ? 'THE ONE TO BEAT' : `WORLD #${index + 1}`}</small></span>
+                <b>{number(entry.score)}</b>
+              </li>)}</ol> : <div className="results-empty"><Crown /><strong>MAKE YOUR MARK.</strong><span>Your first record starts here.</span></div>}
+              {step === 'name' ? <form className="results-name" onSubmit={save}>
+                <label htmlFor="run-name-input">{boardScope === 'everyone' && projectedRank !== null ? `CLAIM #${number(projectedRank)}` : 'MAKE IT OFFICIAL'}</label>
+                <div className="results-name-row"><EnglishNameInput value={name} onChange={setName} /><button type="submit" disabled={!cleanName(name)} aria-label="Save your score">Save <Check size={16} /></button></div>
+              </form> : <div className="results-challenge" role="status">
+                {saving ? <><span className="results-loading">SAVING…</span><strong>Making your mark.</strong></> : saved.current ? <><span><Check size={13} /> RECORD SAVED</span><strong>{boardScope === 'everyone' && rank >= 0 ? `#${rank + 1}. Keep climbing.` : 'Ready for another?'}</strong></> : <><span>NEXT RUN</span><strong>{gap > 0 ? `${number(gap + 1)} to a new best.` : 'Take the next spot.'}</strong></>}
+              </div>}
+            </>}
+            <div className="results-board-footer"><span title={boardScope === 'device' ? 'Scores are saved on this device. The shared board is currently unavailable.' : 'Shared leaderboard'}>{boardScope === 'device' ? 'ON THIS DEVICE' : 'WORLD LEADERBOARD'}</span><button onClick={() => setFullBoard(true)}>Leaderboard <ArrowRight size={14} /></button></div>
+          </aside>
         </div>
-      </form>
-      : step === 'board' && <>
-        {boardScope === 'device' && <p className="board-empty">{sharedBoard ? 'The shared board could not be reached. Showing scores saved on this device.' : 'The shared leaderboard is not connected yet. Showing scores saved on this device.'}</p>}
-        <Podium board={board} highlight={rank} />
-        <div className="run-over-actions">
-          <button autoFocus className="primary" onClick={onPlayAgain}>Play again <RotateCcw size={18} /></button>
-          <button className="secondary" onClick={onHome}><ChevronLeft size={15} /> Home</button>
-        </div>
-      </>}
-  </section></div>;
+        <footer className="results-actions">
+          <button className="results-home" onClick={onHome} disabled={saving}><ChevronLeft size={17} /> Home</button>
+          <button className="results-replay" autoFocus={step === 'board'} onClick={onPlayAgain} disabled={saving}>LET’S GO AGAIN <RotateCcw size={20} /></button>
+        </footer>
+      </section>
+    </div>
+    {fullBoard && <Leaderboard close={() => setFullBoard(false)} />}
+  </>;
 }
