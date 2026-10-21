@@ -10,7 +10,7 @@ import { playBoost, playHonk, playImpact, playSlowMoWhoosh, playThud, playWhoosh
 import { createBodySpring, updateBodySpring, updateCamera } from './carRig';
 import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
-import { DRIVE_MODE, RAILS, initialLoopCar, recoverToRoad, stepLoopCar } from './driving';
+import { DRIVE_MODE, RAILS, initialLoopCar, keepOnBridge, recoverToRoad, stepLoopCar } from './driving';
 import { clearObstacleGroup, drainNearMisses, drainTrafficHits, drainTrafficTouch, isSpecialNearMiss, setObstacleGroup } from './obstacles';
 import type { NearMiss, Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
@@ -35,6 +35,7 @@ import { DRIFT_CAM, DRIFT_CINE, DRIFT_SCORE } from './driftTuning';
 import { PARTY, bump, catchUp, pack, partyControls, slotDrive, slotHorn, stepFx, track } from './party';
 import type { PartyRun } from './party';
 import PartyCars, { PartyBody } from './PartyCars';
+import { CarLamps, HeadlightBeam } from './CarLights';
 import { pickNearMissCut } from './nearMissCut';
 import Weather from './Weather';
 import { CAR_COLORS, JITTER, PALETTE, seededRandom } from './palette';
@@ -109,7 +110,11 @@ const PARKING_OFFSET = -3.2;
 
 // Party mode's widest shot: straight above the middle of the pack, this high (m) over the ground, so the globe
 // fills the screen, reached at `fullAt` of the largest gap.
-const PARTY_CAMERA = { overheadHeight: 51, fullAt: 0.8 };
+const PARTY_CAMERA = {
+  overheadHeight: 51, fullAt: 0.8,
+  // Two players need a tighter wide shot; centre the globe before the zoom-out finishes.
+  duoOverheadHeight: 40, duoPullback: 1.8, duoCenterAt: 0.8,
+};
 // The controls of a car held still in party mode (both pedals: brakes, never creeps either way).
 const PARTY_HOLD: Controls = { forward: false, back: false, left: false, right: false, brake: false, throttle: 1, reverse: 1, steer: 0 };
 
@@ -191,46 +196,6 @@ function BoostFlame({ car, vehicleId }: { car: React.RefObject<CarState>; vehicl
 
 // Head and tail lamps that glow at night (additive cores + soft halos), faded by the night blend.
 // Night lights are warm and soft everywhere: amber headlamps and beams, like the street lamps and windows.
-const WARM_LIGHT = { headlamp: '#ffa888', headlampHalo: '#ff7a5a', beam: '#ff9a78' };
-
-function CarLamps({ blend, halfWidth, front, rear, height, rearHeight = height }: {
-  blend: React.RefObject<number>; halfWidth: number; front: number; rear: number; height: number; rearHeight?: number;
-}) {
-  const geometry = useMemo(() => new THREE.SphereGeometry(1, 10, 8), []);
-  const materials = useMemo(() => {
-    const glow = (hex: string) => new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-    return { head: glow(WARM_LIGHT.headlamp), headHalo: glow(WARM_LIGHT.headlampHalo), tail: glow(PALETTE.carRed), tailHalo: glow(PALETTE.carRed) };
-  }, []);
-  useEffect(() => () => { geometry.dispose(); Object.values(materials).forEach(material => material.dispose()); }, [geometry, materials]);
-  useFrame(() => {
-    const n = blend.current;
-    materials.head.opacity = n;
-    materials.headHalo.opacity = n * 0.3;
-    materials.tail.opacity = n * 0.9;
-    materials.tailHalo.opacity = n * 0.3;
-  });
-  return <group>
-    {[-1, 1].map(side => <group key={side}>
-      <mesh geometry={geometry} material={materials.head} position={[side * halfWidth, height, front]} scale={0.09} />
-      <mesh geometry={geometry} material={materials.headHalo} position={[side * halfWidth, height, front]} scale={0.26} />
-      <mesh geometry={geometry} material={materials.tail} position={[side * halfWidth, rearHeight, rear]} scale={0.07} />
-      <mesh geometry={geometry} material={materials.tailHalo} position={[side * halfWidth, rearHeight, rear]} scale={0.18} />
-    </group>)}
-  </group>;
-}
-
-// The player's headlight beam: one spotlight (always present so the shader never recompiles), faded by night.
-function HeadlightBeam({ blend }: { blend: React.RefObject<number> }) {
-  const spot = useRef<THREE.SpotLight>(null!);
-  const target = useMemo(() => new THREE.Object3D(), []);
-  useEffect(() => { spot.current.target = target; }, [target]);
-  useFrame(() => { spot.current.intensity = blend.current * 110; });
-  return <>
-    <spotLight ref={spot} color={WARM_LIGHT.beam} position={[0, 0.7, -1.3]} angle={0.7} penumbra={1} distance={34} decay={1.6} intensity={0} />
-    <primitive object={target} position={[0, 0, -10]} />
-  </>;
-}
-
 function CarModel({ car, vehicleId, active, landingCompression, landingActive, bodyRoll, nightBlend }: {
   car: React.RefObject<CarState>;
   vehicleId: VehicleId;
@@ -1282,6 +1247,7 @@ function DrivingScene(props: SceneProps) {
         else {
           // Where each car was, so its distance round the loop counts every way it moved (driving, bumps, shoves).
           const before = party.players.map(player => player.car.x);
+          const beforeZ = party.players.map(player => player.car.z);
           party.players.forEach((player, index) => {
             if (player.out) return;
             const wanted = party.frozen ? PARTY_HOLD : index === 0 ? driveControls : slotDrive(player.slot);
@@ -1298,7 +1264,13 @@ function DrivingScene(props: SceneProps) {
             }
           });
           const hits = bump(party.players);
-          party.players.forEach((player, index) => { if (!player.out) track(player, before[index]); });
+          party.players.forEach((player, index) => {
+            if (!player.out) {
+              // Shoves run after driving; enforce the railing on their final position too.
+              keepOnBridge(player.car, before[index], beforeZ[index], dt);
+              track(player, before[index]);
+            }
+          });
           party.bumps += hits.length;
           for (const hit of hits) {
             if (hit.knocked) {
@@ -1588,10 +1560,16 @@ function DrivingScene(props: SceneProps) {
       // All the way out a little before the last car is pushed up, so the widest shot holds steady near the limit.
       const reach = Math.min(1, partyFocus.current.spread / (PARTY.outDistance / 2 * PARTY_CAMERA.fullAt));
       partyOverhead = THREE.MathUtils.smoothstep(reach, 0, 1);
-      gameCamera.sub(groundVehiclePosition).multiplyScalar(1.25 + 2.5 * reach).add(groundVehiclePosition);
-      partySpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, PARTY_CAMERA.overheadHeight);
+      const duo = props.party.current.players.length === 2;
+      const overheadHeight = duo ? PARTY_CAMERA.duoOverheadHeight : PARTY_CAMERA.overheadHeight;
+      gameCamera.sub(groundVehiclePosition).multiplyScalar(1.25 + (duo ? PARTY_CAMERA.duoPullback : 2.5) * reach).add(groundVehiclePosition);
+      partySpot.copy(groundVehiclePosition).addScaledVector(surfaceUp, overheadHeight);
       gameCamera.lerp(partySpot, partyOverhead);
-      gameLook.lerp(globeCenter, partyOverhead);
+      if (duo) {
+        // Bound intermediate shots too, including the overhead camera preset.
+        gameCamera.sub(globeCenter).clampLength(0, GLOBE_RADIUS + overheadHeight).add(globeCenter);
+      }
+      gameLook.lerp(globeCenter, duo ? THREE.MathUtils.smoothstep(reach, 0, PARTY_CAMERA.duoCenterAt) : partyOverhead);
     }
     // The first steering lesson looks straight down from above the car; as the lesson ends, orbit smoothly back
     // to the normal chase view rather than replacing the camera in a single frame.
@@ -1821,7 +1799,7 @@ function DrivingScene(props: SceneProps) {
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld key={road} zoom={zoomProgress} />
         <Suspense fallback={null}><Traffic paused={props.paused} enabled={props.trafficEnabled !== false} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} /></Suspense>
-        {props.party && !!props.partyCount && <PartyCars run={props.party} count={props.partyCount} />}
+        {props.party && !!props.partyCount && <PartyCars run={props.party} count={props.partyCount} nightBlend={nightBlend} />}
         <group ref={vehicle}><PartyBody run={props.party} index={0}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /></PartyBody><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
         <primitive object={dust.mesh} />

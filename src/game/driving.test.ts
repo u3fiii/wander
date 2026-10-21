@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DRIVE_MODE, RAILS, emptyControls, initialCar, initialLoopCar, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
+import { DRIVE_MODE, RAILS, emptyControls, initialCar, initialLoopCar, keepOnBridge, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
 import type { CarState, Controls } from './driving.ts';
 import { CAR_CONFIG, LOOP_DRIVE } from './config.ts';
 import { FULL_TURN, GLOBE_RADIUS, LOOP_LENGTH, loopFrame, loopLatitude, loopPoint } from './globe.ts';
@@ -356,4 +356,30 @@ test('riding the curb rumbles the car down to a slower pace; back in the lane it
   assert.ok(onCurb.lowest < CAR_CONFIG.maxSpeed * 0.8, `slowed on the curb (${onCurb.lowest.toFixed(1)} m/s)`);
   assert.equal(inLane.curb, 0);
   assert.ok(inLane.lowest > onCurb.lowest + 2, `faster in the lane (${inLane.lowest.toFixed(1)} vs ${onCurb.lowest.toFixed(1)} m/s)`);
+});
+
+
+test('bridge rails contain the whole angled car on both sides after a shove', () => {
+  const x = WORLD_SETTINGS.roads.bridgeLongitude;
+  const step = 1e-3;
+  const slope = (loopLatitude(x + step) - loopLatitude(x - step)) / (2 * step) / Math.cos(loopLatitude(x));
+  const scale = 1 / Math.sqrt(1 + slope * slope);
+  const face = (WORLD_SETTINGS.roads.mainWidth + WORLD_SETTINGS.roads.shoulderExtra) / 2 - WORLD_SETTINGS.roads.bridgeRailInset;
+  for (const side of [-1, 1]) for (const angle of [0, 0.45, 1.1]) {
+    const car = { ...initialLoopCar(), x, z: side * 3.04 / scale, heading: side * angle, speed: 12 };
+    keepOnBridge(car, x, side * 2 / scale, 1 / 60);
+    const edge = Math.abs(car.z) * scale + CAR_CONFIG.trafficRadius + CAR_CONFIG.collisionHalfLength * Math.abs(Math.sin(car.heading));
+    assert.ok(edge <= face + 1e-6, 'nose, tail and side stay inside the visible rail');
+    assert.ok(car.speed > 10, 'a scrape keeps forward momentum');
+  }
+});
+
+test('steering away from a bridge rail is not straightened back into it', () => {
+  const x = WORLD_SETTINGS.roads.bridgeLongitude;
+  for (const side of [-1, 1]) {
+    const car = { ...initialLoopCar(), x, z: side * 3, heading: -side * 0.4, speed: 8 };
+    keepOnBridge(car, x, side * 2.5, 1 / 60);
+    assert.equal(car.heading, -side * 0.4);
+    assert.equal(car.speed, 8);
+  }
 });

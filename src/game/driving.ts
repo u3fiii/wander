@@ -1,6 +1,6 @@
 import { BLOCKS, DRIVE, JUICE_CONFIG, LOOP_DRIVE } from './config.ts';
 import { DRIVING_CONFIG as CAR_CONFIG, impactPower } from './vehicleHandling.ts';
-import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude } from './globe.ts';
+import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude, loopMetric } from './globe.ts';
 import type { Vec3 } from './globe.ts';
 import { WORLD_SETTINGS, distanceToRoadNetwork, landInfluence } from './worldMap.ts';
 import { difficulty } from './difficulty.ts';
@@ -197,15 +197,14 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   updateBoost(car, drive, dt, currentOnRoad, boostEnabled);
   // Nothing slows a boosting car: the off-road drag and the water drag below are skipped while boosting.
   updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence, tutorial ? RAILS.tutorialMaxSpeed : Infinity);
-  // On the curb the car rumbles and can't hold full speed (on touch screens too, which can steer onto it; boost
-  // ignores it).
+  // Curb resistance builds with overlap and time, including during boost.
   car.curb = respectWater && currentOnRoad ? smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.curbFull, Math.abs(car.z) * lateralScale(car.x)) : 0;
   car.curbTime = car.curb > 0.5 ? car.curbTime + dt : Math.max(0, car.curbTime - 2 * dt);
-  if (car.curb > 0 && car.boosting === 0) {
+  if (car.curb > 0) {
     const long = Math.min(1, car.curbTime / CAR_CONFIG.curbLongAfter);
     const factor = CAR_CONFIG.curbSpeedFactor + (CAR_CONFIG.curbSpeedFactorLong - CAR_CONFIG.curbSpeedFactor) * long;
     const limit = CAR_CONFIG.maxSpeed * (1 - (1 - factor) * car.curb);
-    if (Math.abs(car.speed) > limit) car.speed = toward(car.speed, Math.sign(car.speed) * limit, CAR_CONFIG.curbScrub * dt);
+    if (Math.abs(car.speed) > limit) car.speed = toward(car.speed, Math.sign(car.speed) * limit, CAR_CONFIG.curbScrub * car.curb * dt);
   }
   if (respectWater && car.boosting === 0 && !currentOnRoad && currentLand < LOOP_DRIVE.waterShoreInfluence) {
     const waterAmount = Math.min(1, Math.max(0,
@@ -228,6 +227,15 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   car.slide = slideTime <= 0.03 ? slideTarget : toward(car.slide, slideTarget, dt / slideTime);
   const travel = (previousSpeed + car.speed) * 0.5 * dt;
   car.yawRate = turnRate(car.steering, travel / dt, car.slide, car.boosting > 0);
+  if (respectWater && CAR_CONFIG.roadAssist > 0) {
+    const edge = smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.roadEdgeHalfWidth, Math.abs(car.z) * lateralScale(car.x));
+    const error = wrapAngle(car.heading - roadAlong(car));
+    const outward = Math.sin(car.heading) * car.speed * Math.sign(car.z) > 0;
+    // Ease steering that pushes further into the edge, without weakening steering back onto the road.
+    if (outward && car.yawRate * error > 0) {
+      car.yawRate *= 1 - edge * Math.min(1, CAR_CONFIG.roadAssist / CAR_CONFIG.roadAssistFull);
+    }
+  }
   if (travel === 0) return;
 
   // Move along the sphere and parallel-transport the heading. Updating longitude
@@ -507,7 +515,7 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
     // ease back along the road for a moment (less while the player steers), and near the edge the cushion below keeps
     // it from heading off the road.
     if (recovering) car.heading = along + error * Math.exp(-CAR_CONFIG.crashAssist * (1 - steering * 0.7) * dt);
-    cushionRoadEdge(car, along, previousZ, dt);
+    cushionRoadEdge(car, along, dt);
     return;
   }
   const rate = (CAR_CONFIG.roadAssist * (1 - steering * (boosting ? 0.6 : 1)) + (towardEdge ? CAR_CONFIG.roadEdgeAssist : 0) + funnel) * assistScale
@@ -520,16 +528,17 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
 // point outward: far off it can turn as it likes; within `roadEdgeZone` m of the edge the outward angle allowed
 // shrinks smoothly, to running along the road right at the edge (with the assist at its top). Only the outward part
 // is ever trimmed: steering back in, or along, is never touched, and nothing acts inside the road.
-function cushionRoadEdge(car: CarState, along: number, previousZ: number, dt: number) {
+function cushionRoadEdge(car: CarState, along: number, dt: number) {
   const strength = Math.max(0, Math.min(1, CAR_CONFIG.roadAssist / CAR_CONFIG.roadAssistFull));
-  if (strength <= 0 || Math.abs(car.z) <= Math.abs(previousZ) || Math.sign(car.z) !== Math.sign(car.z - previousZ)) return;
+  if (strength <= 0 || Math.sin(car.heading) * car.speed * Math.sign(car.z) <= 0) return;
   const lateral = Math.abs(car.z) * lateralScale(car.x);
   const push = smoothstep(CAR_CONFIG.roadEdgeHalfWidth - CAR_CONFIG.roadEdgeZone, CAR_CONFIG.roadEdgeHalfWidth, lateral);
   if (push <= 0) return;
   const error = wrapAngle(car.heading - along);
   const allowed = (Math.PI / 2) * (1 - push * strength);
   if (Math.abs(error) <= allowed) return;
-  car.heading = along + Math.sign(error) * (allowed + (Math.abs(error) - allowed) * Math.exp(-CAR_CONFIG.roadEdgeHold * dt));
+  const correction = (Math.abs(error) - allowed) * (1 - Math.exp(-CAR_CONFIG.roadEdgeHold * dt));
+  car.heading -= Math.sign(error) * Math.min(correction, CAR_CONFIG.roadEdgeTurnRate * strength * dt);
 }
 // Auto-cruise steering: while the car drives itself and the wheel is untouched, it eases back into its own lane (the
 // right-hand side of the way it is facing, like the traffic) and along the road. The player's wheel always wins.
@@ -558,7 +567,12 @@ function holdRoadEdge(car: CarState, along: number, dt: number) {
   // Past the edge (the cushion has already turned the car along it): held there, and its heading is left alone, so
   // steering back in works at once.
   car.z = Math.sign(car.z) * limit;
-  void along; void dt;
+  const outward = Math.sin(car.heading) * Math.sign(car.speed) * Math.sign(car.z);
+  if (outward > 0) {
+    // Dissipate the outward part of a hit instead of turning that impact into a sharp yaw.
+    car.speed *= Math.exp(-CAR_CONFIG.roadEdgeImpactDrag * outward * outward * dt);
+  }
+  void along;
 }
 
 // Deflections off walls, trunks and the shore turn the car at a capped rate. If the free direction
@@ -592,32 +606,44 @@ export function onRoadSurface(latitude: number, longitude: number) {
   return Math.abs(latitude - loopLatitude(longitude)) * GLOBE_RADIUS * lateralScale(longitude) <= railing;
 }
 
-function keepOnBridge(car: CarState, previousX: number, previousZ: number, dt: number) {
-  const span = WORLD_SETTINGS.roads.bridgeDeckHalfSpan + CAR_CONFIG.bridgeEndOverlap;
-  const onSpan = (longitude: number) => Math.abs(wrapAngle(longitude - WORLD_SETTINGS.roads.bridgeLongitude)) <= span;
+export function keepOnBridge(car: CarState, previousX: number, previousZ: number, dt: number) {
+  const roads = WORLD_SETTINGS.roads;
+  // Capsule support: protect the nose and tail as well as the centre when angled to the rail.
+  const radius = CAR_CONFIG.trafficRadius;
+  const halfLength = CAR_CONFIG.collisionHalfLength;
+  const across = radius + halfLength * Math.abs(Math.sin(car.heading));
+  const alongExtent = radius + halfLength * Math.abs(Math.cos(car.heading));
+  const span = roads.bridgeDeckHalfSpan + CAR_CONFIG.bridgeEndOverlap
+    + alongExtent / loopMetric(car.x);
+  const onSpan = (longitude: number) => Math.abs(wrapAngle(longitude - roads.bridgeLongitude)) <= span;
   if (!onSpan(car.x)) return;
-  const railing = (WORLD_SETTINGS.roads.mainWidth + WORLD_SETTINGS.roads.shoulderExtra) * 0.5;
-  const inner = railing - CAR_CONFIG.trafficRadius;
-  const outer = railing + CAR_CONFIG.trafficRadius;
+  const outerFace = (roads.mainWidth + roads.shoulderExtra) * 0.5;
+  const innerFace = outerFace - roads.bridgeRailInset;
+  const inner = innerFace - across;
+  const outer = outerFace + across;
   const scale = lateralScale(car.x);
   const side = car.z === 0 ? 1 : Math.sign(car.z);
   const lateral = Math.abs(car.z) * scale;
   const previousLateral = Math.abs(previousZ) * lateralScale(previousX);
-  if (lateral <= inner || lateral >= outer + 1.5) return;
-  // Driving onto the span from the bank while lined up with a railing: that's the end post.
-  if (!onSpan(previousX) && lateral < outer) {
+  if (lateral <= inner || lateral >= outer) return;
+  // A direct hit on an end post stops forward travel rather than passing through it.
+  if (!onSpan(previousX) && previousLateral >= innerFace && previousLateral <= outerFace) {
     car.x = previousX;
     car.z = previousZ;
     car.speed *= -0.16;
     return;
   }
-  const fromInside = previousLateral <= inner + 1e-3 || (previousLateral < outer && lateral - inner < outer - lateral);
-  if (!fromInside && lateral >= outer) return;
+  const fromInside = previousLateral <= (innerFace + outerFace) * 0.5;
   car.z = side * (fromInside ? inner : outer) / scale;
   const along = roadAlong(car);
   const angle = wrapAngle(car.heading - along);
-  if (Math.abs(angle) > 0.05) car.speed *= 1 - 2 * dt;
-  if (fromInside) car.heading = along + angle * Math.exp(-CAR_CONFIG.bridgeStraightenRate * dt);
+  // Resolve only motion into the wall: steering away is immediately available.
+  const outward = Math.sin(car.heading) * Math.sign(car.speed) * side;
+  const intoWall = fromInside ? outward > 0 : outward < 0;
+  if (intoWall) {
+    car.speed *= Math.exp(-2 * Math.abs(Math.sin(angle)) * dt);
+    car.heading = along + angle * Math.exp(-CAR_CONFIG.bridgeStraightenRate * dt);
+  }
 }
 
 export function isBlocked(x: number, z: number): boolean {

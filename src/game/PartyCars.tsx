@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { loopFrame, spherePoint } from './globe';
 import { distanceToRoadNetwork, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
 import PlayerVehicle from './PlayerVehicle';
+import { CarLamps, HeadlightBeam } from './CarLights';
+import { vehicleEffects } from './vehicleVisuals';
 import type { CarState } from './driving';
 import type { PartyRun } from './party';
 
@@ -47,9 +49,10 @@ export function PartyBody({ run, index, children }: { run?: React.RefObject<Part
   return <group ref={body}>{children}</group>;
 }
 
-function PartyCar({ run, index }: { run: React.RefObject<PartyRun | null>; index: number }) {
+function PartyCar({ run, index, nightBlend }: { run: React.RefObject<PartyRun | null>; index: number; nightBlend: React.RefObject<number> }) {
   const group = useRef<THREE.Group>(null!);
   const player = run.current!.players[index];
+  const effects = vehicleEffects('classic');
   // PlayerVehicle reads the car for its wheels; the player's car object is swapped each round, so follow it.
   const car = useMemo(() => ({ current: player.car }), [player]);
   const lastCar = useRef<CarState | null>(null);
@@ -61,10 +64,14 @@ function PartyCar({ run, index }: { run: React.RefObject<PartyRun | null>; index
     poseCar(group.current, current.car, Math.min(delta, 0.05), lastCar.current !== current.car);
     lastCar.current = current.car;
   });
-  return <group ref={group}><PartyBody run={run} index={index}><Suspense fallback={null}><PlayerVehicle vehicleId="classic" car={car} tint={player.colour} /></Suspense></PartyBody></group>;
+  return <group ref={group}><PartyBody run={run} index={index}>
+    <Suspense fallback={null}><PlayerVehicle vehicleId="classic" car={car} tint={player.colour} /></Suspense>
+    <CarLamps blend={nightBlend} halfWidth={effects.lampWidth} front={effects.front} rear={effects.rear} height={effects.headHeight} rearHeight={effects.tailHeight} />
+    <HeadlightBeam blend={nightBlend} />
+  </PartyBody></group>;
 }
 
 // The other players' cars (player 1 is the scene's own car). Lives inside the globe group.
-export default function PartyCars({ run, count }: { run: React.RefObject<PartyRun | null>; count: number }) {
-  return <>{Array.from({ length: Math.max(0, count - 1) }, (_, i) => <PartyCar key={i + 1} run={run} index={i + 1} />)}</>;
+export default function PartyCars({ run, count, nightBlend }: { run: React.RefObject<PartyRun | null>; count: number; nightBlend: React.RefObject<number> }) {
+  return <>{Array.from({ length: Math.max(0, count - 1) }, (_, i) => <PartyCar key={i + 1} run={run} index={i + 1} nightBlend={nightBlend} />)}</>;
 }

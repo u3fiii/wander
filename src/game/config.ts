@@ -64,18 +64,20 @@ export const CAR_CONFIG = {
   // m/s². Nothing scores while riding it (see App), so the edge is safe but not a free lane.
   curbStart: 2.35,
   curbFull: 2.85,
-  curbSpeedFactor: 0.7,
+  curbSpeedFactor: 0.64,
   // Riding it on and on drags harder: after `curbLongAfter` s on the curb the top speed is down to `curbSpeedFactorLong`
   // (it eases back once the car is off the curb a while).
-  curbSpeedFactorLong: 0.45,
-  curbLongAfter: 2.5,
-  curbScrub: 6,
+  curbSpeedFactorLong: 0.58,
+  curbLongAfter: 1.2,
+  curbScrub: 18,
   roadAssist: 3,
   roadEdgeHalfWidth: 3.04, // asphalt (2.88) plus the curb, a hair inside the bridge railing posts (3.08) so the wall never snags on them
   roadEdgeZone: 1.8,
   roadAssistFull: 3,
   roadEdgeSlack: 1.6,
   roadEdgeHold: 5,
+  roadEdgeTurnRate: 0.9, // Maximum automatic heading correction, rad/s.
+  roadEdgeImpactDrag: 5, // Scrub only the speed directed into the boundary.
   roadEdgeAssist: 3,
   // The old assist (boost, touch screens): the heading eases back toward the road direction, firmer once the car is
   // this far (m) from the centre line and heading out.

@@ -13,6 +13,8 @@ export const WORLD_SETTINGS = {
     bridgeHalfSpan: 0.12,
     bridgeDeckHalfSpan: 0.1,
     bridgeHeight: 0.72,
+    // Imported bridge posts extend inward from the outer deck bounds.
+    bridgeRailInset: 0.65,
   },
   regions: {
     citySize: 0.64,
