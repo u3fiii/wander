@@ -4,15 +4,34 @@ import type { VisualQuality } from './renderQuality.ts';
 
 export type { VisualQuality } from './renderQuality.ts';
 
+export const QUALITY_FALLBACK_KEY = 'wander:quality-fallback';
+const SLOW_VISITS_KEY = 'wander:slow-visits';
+function storedFallback() {
+  try { return window.localStorage.getItem(QUALITY_FALLBACK_KEY); } catch { return null; }
+}
+// A visit on this tier ran far too slow. One bad visit could be anything (a busy machine, a throttled window), so the
+// lighter tier is remembered only after the second.
+export function recordSlowVisit(tier: VisualQuality, lighter: VisualQuality) {
+  try {
+    const [seen, count] = (window.localStorage.getItem(SLOW_VISITS_KEY) ?? '').split(':');
+    const visits = seen === tier ? Number(count) + 1 : 1;
+    window.localStorage.setItem(SLOW_VISITS_KEY, `${tier}:${visits}`);
+    if (visits >= 2) window.localStorage.setItem(QUALITY_FALLBACK_KEY, lighter);
+  } catch { /* storage off: nothing to remember */ }
+}
+
 // Phones/tablets use a sharp but lighter scene; only constrained devices get low.
 // ?quality=low|mobile|high allows comparison on the same device.
+export const FORCED_QUALITY = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('quality');
 function detectQuality(): VisualQuality {
   if (typeof window === 'undefined') return 'high';
   return selectVisualQuality({
-    forced: new URLSearchParams(window.location.search).get('quality'),
+    forced: FORCED_QUALITY,
     touch: window.matchMedia?.('(pointer: coarse)').matches,
     cores: navigator.hardwareConcurrency,
     memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    console: /Xbox|PlayStation|Nintendo/i.test(navigator.userAgent),
+    fallback: storedFallback(),
   });
 }
 export const VISUAL_QUALITY: VisualQuality = detectQuality();

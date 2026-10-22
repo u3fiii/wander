@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DRIVE_MODE, RAILS, emptyControls, initialCar, initialLoopCar, keepOnBridge, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
+import { DRIVE_MODE, EDGE, RAILS, TIRES, lateralScale, emptyControls, initialCar, initialLoopCar, keepOnBridge, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
 import type { CarState, Controls } from './driving.ts';
 import { CAR_CONFIG, LOOP_DRIVE } from './config.ts';
 import { FULL_TURN, GLOBE_RADIUS, LOOP_LENGTH, loopFrame, loopLatitude, loopPoint } from './globe.ts';
@@ -243,6 +243,7 @@ test('on rails (mobile) a knock never turns the car round: it keeps driving forw
 
 test('on rails (mobile) the car can be steered onto the curb, and the curb slows it there too', () => {
   DRIVE_MODE.rails = true;
+  EDGE.tires = false;
   try {
     const car = { ...initialLoopCar(), x: 0.6, speed: CAR_CONFIG.maxSpeed };
     let curb = 0, lowest = Infinity;
@@ -253,6 +254,46 @@ test('on rails (mobile) the car can be steered onto the curb, and the curb slows
     }
     assert.ok(curb > 0.5, `reached the curb (${curb.toFixed(2)})`);
     assert.ok(lowest < CAR_CONFIG.maxSpeed * 0.8, `slowed on it (${lowest.toFixed(1)} m/s)`);
+  } finally { DRIVE_MODE.rails = false; EDGE.tires = true; }
+});
+
+test('with the tyre wall the car bounces off the edge and goes on at speed, never riding along it', () => {
+  DRIVE_MODE.rails = true;
+  try {
+    const car = { ...initialLoopCar(), x: 0.6, speed: CAR_CONFIG.maxSpeed };
+    let bounces = 0, lastHit = 0, widest = 0, lowest = Infinity, atWall = 0;
+    for (let i = 0; i < 60 * 6; i++) {
+      stepLoopCar(car, { ...emptyControls(), throttle: RAILS.autoThrottle, left: i < 60 * 3 }, 1 / 60, true);
+      if ((car.tireHit ?? 0) > lastHit + 0.05) bounces++;
+      lastHit = car.tireHit ?? 0;
+      const lateral = Math.abs(car.z) * lateralScale(car.x);
+      widest = Math.max(widest, lateral);
+      if (lateral > TIRES.line - 0.05) atWall++;
+      if (i > 60) lowest = Math.min(lowest, car.speed);
+    }
+    assert.ok(bounces >= 1, 'it hit the tyres');
+    assert.ok(widest <= (TIRES.line + TIRES.give) * 1.05, `never into them (${widest.toFixed(2)} m)`);
+    assert.ok(lowest > CAR_CONFIG.maxSpeed * 0.6, `kept its pace (${lowest.toFixed(1)} m/s at the slowest)`);
+    assert.ok(Math.abs(car.z) * lateralScale(car.x) < TIRES.line - 0.3, `let go, it is back in the road (${car.z.toFixed(2)} m)`);
+    assert.equal(car.curb, 0, 'no slowing curb');
+    void atWall;
+  } finally { DRIVE_MODE.rails = false; }
+});
+
+test('on rails, let go of the pads and the car lines up with the road again', () => {
+  DRIVE_MODE.rails = true;
+  try {
+    // Pointed at the edge, let go: it turns back along the road before it gets there, bends included.
+    for (const x of [0.3, 0.6, 1, 2, 3, 4, 5]) {
+      const car = { ...initialLoopCar(), x, heading: 0.3, speed: 12 };
+      let widest = 0;
+      for (let i = 0; i < 120; i++) {
+        stepLoopCar(car, { ...emptyControls(), throttle: RAILS.autoThrottle }, 1 / 60, true);
+        widest = Math.max(widest, Math.abs(car.z) * lateralScale(car.x));
+      }
+      assert.ok(widest < TIRES.line, `at ${x}: never reached the edge (${widest.toFixed(2)} m)`);
+      assert.ok(Math.abs(car.heading) < 0.15, `at ${x}: lined up (${car.heading.toFixed(2)} rad)`);
+    }
   } finally { DRIVE_MODE.rails = false; }
 });
 
@@ -334,6 +375,8 @@ test('let go while cruising, the car keeps the lane it was nearer to and follows
 });
 
 test('riding the curb rumbles the car down to a slower pace; back in the lane it is full speed again', () => {
+  EDGE.tires = false;
+  try {
   // The offset (along the globe's north) that puts the car's centre `metres` from the road's centre line here.
   const offsetFor = (x: number, metres: number) => {
     let z = 0;
@@ -356,6 +399,7 @@ test('riding the curb rumbles the car down to a slower pace; back in the lane it
   assert.ok(onCurb.lowest < CAR_CONFIG.maxSpeed * 0.8, `slowed on the curb (${onCurb.lowest.toFixed(1)} m/s)`);
   assert.equal(inLane.curb, 0);
   assert.ok(inLane.lowest > onCurb.lowest + 2, `faster in the lane (${inLane.lowest.toFixed(1)} vs ${onCurb.lowest.toFixed(1)} m/s)`);
+  } finally { EDGE.tires = true; }
 });
 
 

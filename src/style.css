@@ -276,7 +276,7 @@
 .modal .secondary{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;height:44px;border-radius:999px;background:#ffffff14;border:1px solid #ffffff26;color:#fff;font-size:13px;font-weight:600;box-shadow:inset 0 1px 0 #ffffff1a;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .2s}
 .modal .secondary:hover{background:#ffffff24;transform:scale(1.03)}
 .modal .secondary svg{width:15px;height:15px}
-.close-button{background:#ffffff14;border:1px solid #ffffff26;color:#fff;right:20px;left:auto}
+.close-button{background:#ffffff14;border:1px solid #ffffff26;color:#fff;right:20px;left:auto;padding:0}
 .close-button:hover{background:#ffffff24}
 .help-row{color:#ffffffd9;padding:9px 0;margin:0;border-bottom:1px solid #ffffff12}
 .help-row:last-of-type{border-bottom:0}
@@ -1655,3 +1655,250 @@
 @media (min-width:900px) and (min-height:650px) and (pointer:fine) {
   .modal.leaderboard{overflow:visible}
 }
+
+/* ===== The leaderboard, as games show one: a single column. A stepped podium (second, first, third; the winner's
+   step tallest, crowned), each finalist a medal-ringed avatar with name and score above the step, the step itself a
+   chunky medal-coloured block with the place number; then places four to ten as short rows; and the player's own
+   row pinned at the bottom. Same chunky material as the game's header. ===== */
+.modal.leaderboard.lb{width:min(480px,calc(100vw - 32px));height:auto;max-height:calc(100dvh - 32px);padding:24px 22px 18px;display:flex;flex-direction:column;overflow:hidden}
+.lb>h2{margin:4px 0 14px;text-align:center;font-size:30px;line-height:1}
+.lb-eyebrow{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;font-weight:800;letter-spacing:1.6px;color:var(--gold)}
+.lb>.board-tabs{align-self:center}
+.lb-board{display:flex;flex-direction:column;min-height:0;margin-top:14px}
+.lb-podium{display:grid;grid-template-columns:1fr 1.12fr 1fr;align-items:end;gap:8px;padding:0 4px}
+.lb-step{--medal:#d9dde2;--medal-dark:#8f969d;display:flex;flex-direction:column;align-items:center;min-width:0;animation:podium-rise .55s cubic-bezier(.3,1.5,.5,1) both}
+.lb-step.s1{--medal:#f4b544;--medal-dark:#a8742a;animation-delay:.12s}
+.lb-step.s3{--medal:#e6a273;--medal-dark:#9c5d36;animation-delay:.2s}
+.lb-player{position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;min-width:0;padding-bottom:8px;text-align:center}
+.lb-crown{width:22px;height:22px;margin-bottom:-2px;color:var(--gold);fill:#f4b54455;filter:drop-shadow(0 2px 6px #f4b54488);animation:lb-crown 2.4s ease-in-out infinite}
+.lb-avatar{display:grid;place-items:center;width:46px;height:46px;margin-bottom:5px;border-radius:50%;background:linear-gradient(160deg,#34474f,#1b2a33);border:3px solid var(--medal);box-shadow:0 0 0 3px #0b161a,0 6px 16px #0007;color:#fff;font-size:19px;font-weight:900}
+.s1 .lb-avatar{width:58px;height:58px;font-size:24px;box-shadow:0 0 0 3px #0b161a,0 0 22px #f4b54466}
+.lb-player strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:800;color:#fff}
+.lb-player b{font-size:17px;font-weight:900;color:var(--medal);font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.s1 .lb-player b{font-size:21px}
+.lb-player .board-you{position:absolute;top:30px;right:4px}
+.lb-block{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;width:100%;padding-top:8px;border-radius:12px 12px 4px 4px;border:1.5px solid color-mix(in srgb,var(--medal) 70%,#fff);border-bottom:0;background:linear-gradient(180deg,color-mix(in srgb,var(--medal) 85%,#fff),var(--medal) 40%,var(--medal-dark));box-shadow:inset 0 2px 0 #ffffff66,0 10px 20px #0005}
+.s1 .lb-block{height:98px}.s2 .lb-block{height:72px}.s3 .lb-block{height:56px}
+.lb-place{font-size:30px;font-weight:900;line-height:1;color:#2a1d05;text-shadow:0 1px 0 #ffffff66}
+.s1 .lb-place{font-size:38px}
+.lb-block small{display:flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#2a1d05b3;white-space:nowrap}
+.lb-block small svg{width:10px;height:10px}
+.s3 .lb-block small{display:none}
+.lb-step.empty .lb-block{opacity:.45}
+.lb-list{display:flex;flex-direction:column;gap:6px;min-height:0;margin:12px 0 0;padding:12px 2px 2px;overflow-y:auto;list-style:none;border-top:1px solid #ffffff14;scrollbar-width:thin}
+.lb-row{display:flex;align-items:center;gap:12px;min-height:46px;padding:6px 14px 6px 8px;border-radius:13px;border:1px solid #ffffff14;border-bottom:3px solid #05080a66;background:linear-gradient(160deg,#25343d,#18232b)}
+.lb-row.empty{opacity:.4}
+.lb-rank{display:grid;place-items:center;flex:none;width:30px;height:30px;border-radius:9px;background:#ffffff12;color:#ffffffc0;font-size:13px;font-weight:900}
+.lb-name{flex:1;min-width:0}
+.lb-name strong{display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap;font-size:14px;font-weight:800;color:#fff}
+.lb-name small{display:block;font-size:10.5px;font-weight:600;color:#ffffff73}
+.lb-score{font-size:16px;font-weight:900;color:#fff;font-variant-numeric:tabular-nums}
+.lb-row.mine{border-color:#f4b544aa;background:linear-gradient(160deg,#4a3d22,#1d2a2a)}
+.lb-row.mine .lb-rank{background:var(--gold);color:#2a1d05}
+.lb-row.mine .lb-score{color:var(--gold)}
+.lb-pinned{margin-top:10px;box-shadow:0 -10px 20px #0b161a66}
+.lb-pinned .lb-rank{width:38px;font-size:10px}
+@keyframes lb-crown{50%{transform:translateY(-3px) rotate(-4deg)}}
+@media(prefers-reduced-motion:reduce){.lb-crown,.lb-step{animation:none}}
+@media(max-width:600px){
+  .modal.leaderboard.lb{width:100%;max-height:none;height:100%;padding:calc(30px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+  .lb-avatar{width:40px;height:40px;font-size:16px}.s1 .lb-avatar{width:50px;height:50px;font-size:20px}
+  .s1 .lb-block{height:84px}.s2 .lb-block{height:62px}.s3 .lb-block{height:48px}
+  .lb-block small{display:none}
+}
+
+.intro-card .cta{display:flex;flex-direction:column;align-items:flex-start;gap:0}
+.intro-card .cta .party-button{margin-top:12px}
+.intro-card>.party-button{width:255px;max-width:100%;box-sizing:border-box}
+@media(max-width:600px){.intro-card>.party-button{width:min(255px,58vw)}}
+
+/* The party button shares the primary button's intrinsic width; each reveals in sequence. */
+.intro-card .cta{display:inline-flex;flex-direction:column;align-items:stretch;width:max-content;max-width:100%;gap:12px}
+.intro-card .cta>.rise{display:block}
+.intro-card .cta .party-button{width:100%;max-width:100%;margin-top:0;box-sizing:border-box}
+@media(max-width:600px){.intro-card .cta{width:max-content;max-width:100%}}
+
+
+/* Align the two play actions; keep their short staggered entrance. */
+.intro-card .cta{display:flex;flex-direction:row;align-items:stretch;gap:12px;width:max-content;max-width:100%}
+.intro-card .cta>.rise{display:flex}
+.intro-card .cta .start-button,.intro-card .cta .party-button{height:62px;min-height:62px;box-sizing:border-box;margin:0}
+.intro-card .cta .party-button{width:auto;padding:0 18px;justify-content:center}
+@media(max-width:600px){
+  .intro-card .cta{gap:8px;max-width:100%}
+  .intro-card .cta .start-button,.intro-card .cta .party-button{height:52px;min-height:52px;padding-left:12px;padding-right:12px;font-size:12px}
+  .intro-card .cta .start-button{gap:10px}
+}
+/* The arrow on "Start driving" is a tile of the button's own material: a darker shade of the stage's button colour,
+   rounded square with a lip and a highlight, like the emblem tiles; the arrow bold and light. */
+.app .intro-card .start-button.primary .start-arrow{width:46px;height:44px;border-radius:13px;border:1.5px solid color-mix(in srgb,var(--home-button,#f4b544) 40%,#2a1d05);border-bottom:3px solid color-mix(in srgb,var(--home-button,#f4b544) 22%,#1a1205);background:linear-gradient(165deg,color-mix(in srgb,var(--home-button,#f4b544) 52%,#3a2408),color-mix(in srgb,var(--home-button,#f4b544) 30%,#1f1405));box-shadow:inset 0 1px 0 #ffffff40,0 2px 6px #0003;color:#fff}
+.app .intro-card .start-button.primary .start-arrow svg{color:#fff!important;stroke-width:2.8;filter:drop-shadow(0 1px 0 #0006)}
+/* (The arrow tile stays in the button's own colour family: a touch deeper than the button, with its words' dark arrow.) */
+.app .intro-card .start-button.primary .start-arrow{border:1.5px solid color-mix(in srgb,var(--home-button,#f4b544) 70%,#fff);border-bottom:3px solid color-mix(in srgb,var(--home-button,#f4b544) 62%,#000);background:linear-gradient(165deg,color-mix(in srgb,var(--home-button,#f4b544) 92%,#fff),color-mix(in srgb,var(--home-button,#f4b544) 86%,#a0560f));box-shadow:inset 0 1px 0 #ffffff80,0 2px 6px #7a4d0a33;color:var(--home-button-text,#2a1d05)}
+.app .intro-card .start-button.primary .start-arrow svg{color:var(--home-button-text,#2a1d05)!important;filter:none}
+/* (Final: no tile behind the arrow. It sits right after the words, bold, in the words' colour, so the two read as one
+   label; it still slides on hover.) */
+.app .intro-card .start-button.primary{justify-content:center;gap:10px;padding:0 30px}
+.app .intro-card .start-button.primary .start-arrow{width:auto;height:auto;border:0;border-radius:0;background:none;box-shadow:none}
+.app .intro-card .start-button.primary .start-arrow svg{width:23px;height:23px;stroke-width:3.2;color:var(--home-button-text,#2a1d05)!important}
+/* Optically on the words' line: a touch lower than the box centre. */
+.app .intro-card .start-button.primary .start-arrow{translate:0 2px}
+
+/* ===== Phone driving HUD. The middle of the screen is the road's: everything else sits at the edges and stays
+   small. Top: one row of three blocks the same height (menu, the stage card with the score, hearts over the clock).
+   Under it a single lane for messages (notes, hints, the guide), one at a time, one line each. Bottom: the steering
+   halves are invisible; small chevrons in the corners show them and an edge glow answers a press. Boost has one fixed
+   spot above the right thumb; speed is a small dial in the middle. Sound lives in the pause menu. ===== */
+@media (pointer:coarse){
+  .app.rails.playing{--hud-top:calc(10px + env(safe-area-inset-top));--hud-row:58px;--hud-lane:calc(var(--hud-top) + var(--hud-row) + 10px);--thumb:calc(22px + env(safe-area-inset-bottom))}
+  .app.rails.playing .topbar{padding:var(--hud-top) 12px 0;align-items:stretch;gap:8px;justify-content:flex-start}
+  .app.rails.playing .topbar-left{flex:none}
+  .app.rails.playing .topbar-left .home-button{width:44px;height:var(--hud-row);border-radius:14px}
+  .app.rails.playing .toolbar{display:none}
+  /* The stage card fills the middle of the row. */
+  .app.rails.playing .hud-center{position:static;translate:none;flex:1;min-width:0;max-width:420px;margin:0 auto}
+  .app.rails.playing .rank-chase{position:relative;width:100%;max-width:none;height:var(--hud-row);padding:6px 10px 5px;border-radius:14px;border-bottom-width:2px;box-shadow:0 6px 18px #0b161a40,inset 0 1px 0 #ffffff22}
+  .app.rails.playing .rank-chase-line{height:24px;gap:7px}
+  .app.rails.playing .stage-emblem{width:24px;height:24px;border-radius:8px;box-shadow:inset 0 1px #ffffff88,0 2px 0 color-mix(in srgb,var(--stage-accent) 50%,#000)}
+  .app.rails.playing .stage-emblem svg{width:14px;height:14px}
+  .app.rails.playing .chase-score{gap:6px}
+  .app.rails.playing .chase-score .score-value{font-size:22px;letter-spacing:-.5px}
+  .app.rails.playing .chase-score .combo-pill{height:20px;padding:0 7px}
+  .app.rails.playing .chase-score .combo-pill b{font-size:12px}
+  .app.rails.playing .rank-chase .rank-position,.app.rails.playing .rank-goal{display:none}
+  .app.rails.playing .stage-bar{height:4px;margin:5px 1px 5px;box-shadow:none}
+  .app.rails.playing .stage-head{width:8px;height:8px;margin:-4px 0 0 -4px}
+  .app.rails.playing .rank-chase-detail{font-size:9px;letter-spacing:.5px;line-height:1.2}
+  .app.rails.playing .rank-chase-detail .rank-sprint>b{font-size:10.5px}
+  .app.rails.playing .rank-chase-detail .rank-shout{font-size:9px}
+  .app.rails.playing .rank-chase-detail .rank-shout b{font-size:10.5px}
+  /* Hearts over the clock, in one block the card's height. */
+  .app.rails.playing .topbar-right{flex:none;gap:0}
+  .app.rails.playing .hud-right{height:var(--hud-row);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:0 9px;border-radius:14px;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow)}
+  .app.rails.playing .hud-right .hearts-bar,.app.rails.playing .hud-right .run-clock{position:static;translate:none;height:auto;padding:0;background:none;border:0;box-shadow:none}
+  .app.rails.playing .hud-right .hearts-bar{gap:2px}
+  .app.rails.playing .hud-right .hearts-bar .heart-icon{width:16px;height:16px}
+  .app.rails.playing .hud-right .run-clock{gap:3px;color:#ffffffc8}
+  .app.rails.playing .hud-right .run-clock svg{width:11px;height:11px;padding:0;background:none;box-shadow:none;color:var(--gold)}
+  .app.rails.playing .hud-right .run-clock b{min-width:0;font-size:12px}
+  /* The message lane. */
+  .app.rails.playing .hit-note,.app.rails.playing .coach,.app.rails.playing .coach-goal{top:var(--hud-lane);bottom:auto;z-index:5}
+  .app.rails.playing .topbar .road-warning,.app.rails.playing .topbar .curb-hint{top:calc(100% + 10px)}
+  .app.rails.playing .hit-note{padding:6px 10px 6px 13px;font-size:12px;gap:6px}
+  .app.rails.playing .coach{min-height:0;padding:6px 12px 6px 8px;border-radius:14px;font-size:12px;gap:8px}
+  .app.rails.playing .coach small{font-size:10px}
+  .app.rails.playing .road-warning,.app.rails.playing .curb-hint{padding:6px 12px;font-size:12px;gap:6px}
+  .app.rails.playing .curb-hint .hint-detail{display:none}
+  .app.rails.playing .curb-hint b{margin:0}
+  /* Steering: invisible halves, a chevron in each corner. */
+  .app.rails.playing .steer-zone::before{content:'';position:absolute;inset:0;opacity:0;pointer-events:none;transition:opacity .2s}
+  .app.rails.playing .steer-zone.left::before{background:linear-gradient(90deg,#f4b54438,transparent 38%)}
+  .app.rails.playing .steer-zone.right::before{background:linear-gradient(270deg,#f4b54438,transparent 38%)}
+  .app.rails.playing .steer-zone.held::before{opacity:1}
+  .app.rails.playing .steer-button{bottom:var(--thumb);width:54px;height:54px;background:#1a252d66;border-color:#ffffff26;box-shadow:0 4px 14px #0b161a30}
+  .app.rails.playing .steer-zone.left .steer-button{left:14px}
+  .app.rails.playing .steer-zone.right .steer-button{right:14px}
+  .app.rails.playing .steer-button svg{width:26px;height:26px}
+  .app.rails.playing .steer-zone.held .steer-button{transform:scale(1.08)}
+  .app.rails.playing .steer-lesson{bottom:calc(var(--thumb) + 66px);min-width:0;padding:6px 10px 3px;font-size:11px}
+  .app.rails.playing .steer-zone.left .steer-lesson{left:14px}
+  .app.rails.playing .steer-zone.right .steer-lesson{right:14px}
+  /* Speed: a small dial between the thumbs; the distance is in the pause menu. */
+  .app.rails.playing .speedometer{left:50%;right:auto;translate:-50% 0;bottom:var(--thumb);width:66px;height:66px}
+  .app.rails.playing .speed-readout{top:0}
+  .app.rails.playing .speed-readout strong{font-size:22px}
+  .app.rails.playing .speed-readout small{font-size:8px;margin-top:0}
+  .app.rails.playing .speed-label{display:none}
+  /* Boost: one place, one size, right above the right thumb. Charging it dims and lets presses through to steering. */
+  .app.rails.playing .boost-gauge,.app.rails.playing .boost-gauge.charging,.app.rails.playing .boost-gauge.burning{left:auto;right:14px;bottom:calc(var(--thumb) + 54px + 18px);width:62px;height:62px;transition:background .3s,opacity .3s,filter .3s,transform .35s cubic-bezier(.3,1.6,.5,1)}
+  .app.rails.playing .boost-gauge.charging{opacity:.7}
+  .app.rails.playing .boost-gauge .boost-flame,.app.rails.playing .boost-gauge.ready .boost-flame{width:30px;height:30px}
+  .app.rails.playing .boost-gauge .boost-label{font-size:10px;padding:2px 7px}
+  .app.rails.playing .boost-gauge.charging .boost-label{font-size:13px;padding:0}
+  .pause-actions{display:flex;flex-wrap:wrap;justify-content:center}
+  .pause-actions button{flex:0 0 calc((100% - 16px) / 3)}
+}
+
+/* Phone controls, how they answer a press. A pressed control sinks in (it is under the thumb, so the edge of the
+   screen glows too, stronger the longer a turn is held). Boost: a larger invisible hit area round the disc, a sink and
+   a buzz when it fires, a shake when it can't, and its label above the disc so it never covers the steering. */
+@media (pointer:coarse){
+  .app.rails.playing .steer-zone.held .steer-button{transform:scale(.9)}
+  .app.rails.playing .steer-zone.left::before{background:linear-gradient(90deg,color-mix(in srgb,#ff3b30 calc(var(--strain,0) * 60%),#f4b544) 0,#f4b54400 34%)}
+  .app.rails.playing .steer-zone.right::before{background:linear-gradient(270deg,color-mix(in srgb,#ff3b30 calc(var(--strain,0) * 60%),#f4b544) 0,#f4b54400 34%)}
+  .app.rails.playing .steer-zone.held::before{opacity:calc(.35 + var(--strain,0) * .3)}
+  .app.rails.playing .boost-gauge::after{content:'';position:absolute;inset:-12px;border-radius:50%}
+  .app.rails.playing .boost-gauge.ready:active{transform:scale(.88);animation:none;transition-duration:.06s}
+  .app.rails.playing .boost-gauge.ready .boost-label,.app.rails.playing .boost-gauge.blocked .boost-label,.app.rails.playing .boost-gauge.burning .boost-label{top:auto;bottom:calc(100% + 8px);left:auto;right:0;translate:none;font-size:10px;padding:3px 8px}
+  .app.rails.playing .boost-gauge.refused-0{animation:boost-refuse .35s ease-in-out}
+  .app.rails.playing .boost-gauge.refused-1{animation:boost-refuse-again .35s ease-in-out}
+}
+@keyframes boost-refuse{20%,60%{translate:-5px 0}40%,80%{translate:5px 0}}
+@keyframes boost-refuse-again{20%,60%{translate:-5px 0}40%,80%{translate:5px 0}}
+@media (prefers-reduced-motion:reduce){.boost-gauge.refused-0,.boost-gauge.refused-1{animation:none!important}}
+
+/* ===== The shockwave button: the boost's twin in electric magenta (gold's opposite, and clear of the map's greens, sands and water). On a computer it sits left of the boost; on phones it
+   is over the left thumb, mirroring the boost over the right. ===== */
+.wave-button{--wave:#ff4fb0;position:absolute;right:306px;bottom:104px;z-index:3;width:72px;height:72px;padding:0;border-radius:50%;display:grid;place-items:center;background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffa6;touch-action:none;user-select:none;-webkit-user-select:none;transition:transform .35s cubic-bezier(.3,1.6,.5,1),background .3s,opacity .3s,color .3s}
+.wave-button::after{content:'';position:absolute;inset:-12px;border-radius:50%}
+.wave-dial{position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);overflow:visible;pointer-events:none}
+.wave-track{stroke:#ffffff1f;stroke-width:4}
+.wave-ring{stroke:#c94a8f;stroke-width:4;stroke-linecap:round;transition:stroke .3s}
+.wave-mark{width:30px;height:30px;transition:transform .3s,opacity .3s}
+.wave-seconds{position:absolute;font-style:normal;font-size:13px;font-weight:800;color:#ffffffd0;font-variant-numeric:tabular-nums;text-shadow:0 1px 2px #0008}
+.wave-button.charging{pointer-events:none;opacity:.72}
+.wave-button.charging .wave-mark{opacity:.18;transform:scale(.8)}
+.wave-button.ready{color:#fff;background:radial-gradient(circle at 50% 35%,#8a1f63,#33102a 72%);border-color:var(--wave);animation:wave-pop .55s cubic-bezier(.3,1.6,.5,1),wave-breathe 1.8s ease-in-out .55s infinite}
+.wave-button.ready .wave-ring{stroke:var(--wave);filter:drop-shadow(0 0 6px #ff4fb0)}
+.wave-button.ready .wave-mark{filter:drop-shadow(0 0 8px #ff4fb0cc)}
+.wave-button.ready .wave-mark-inner{animation:wave-mark 1.4s ease-out infinite}
+.wave-button.ready .wave-mark-outer{animation:wave-mark 1.4s ease-out .25s infinite}
+/* Rings rolling out of the ready button, inviting the tap. */
+.wave-button.ready::before{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid var(--wave);opacity:0;pointer-events:none;animation:wave-roll 1.4s ease-out infinite}
+.wave-button.ready:active{transform:scale(.86);animation:none;transition-duration:.06s}
+.wave-label{position:absolute;bottom:calc(100% + 8px);left:50%;translate:-50% 0;display:flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;white-space:nowrap;font-size:10px;font-weight:900;letter-spacing:.8px;color:#330a22;background:linear-gradient(110deg,#ffc2e4,#ff4fb0 60%,#e8338f);box-shadow:0 4px 18px #ff4fb077;animation:wave-label-in .4s cubic-bezier(.3,1.6,.5,1) both}
+.wave-label kbd{height:16px;min-width:16px;font-size:9px;padding:0 4px}
+.wave-burst{position:absolute;inset:-6px;border-radius:50%;border:4px solid #ffc2e4;pointer-events:none;animation:wave-burst .6s cubic-bezier(.2,.8,.3,1) forwards}
+@keyframes wave-pop{0%{transform:scale(.7)}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+@keyframes wave-breathe{0%,100%{box-shadow:var(--glass-shadow),0 0 0 0 #ff4fb000}50%{box-shadow:var(--glass-shadow),0 0 24px 3px #ff4fb066}}
+@keyframes wave-roll{0%{opacity:.85;transform:scale(1)}100%{opacity:0;transform:scale(1.6)}}
+@keyframes wave-mark{0%{opacity:.35}35%{opacity:1}100%{opacity:.35}}
+@keyframes wave-label-in{0%{opacity:0;transform:translateY(6px) scale(.7)}100%{opacity:1;transform:none}}
+@keyframes wave-burst{0%{opacity:1;transform:scale(.9)}100%{opacity:0;transform:scale(3.4)}}
+/* Firing: one thin magenta ring sweeps out over the screen, and that is all. */
+.wave-flash{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
+.wave-flash::after{content:'';position:absolute;left:50%;top:60%;width:60vmax;height:60vmax;margin:-30vmax 0 0 -30vmax;border-radius:50%;border:2px solid #ff7cc4e0;box-shadow:0 0 18px #ff4fb066;animation:wave-sweep .55s cubic-bezier(.15,.8,.3,1) forwards}
+@keyframes wave-sweep{0%{opacity:.9;transform:scale(.05)}100%{opacity:0;transform:scale(2.2)}}
+/* The big word: magenta letters slammed in, with a ring going out behind them. */
+.big-note.wave{top:30%}
+.big-note.wave strong{filter:drop-shadow(0 6px 0 #5a1240) drop-shadow(0 12px 30px #ff4fb088)}
+.big-note.wave strong span{background:linear-gradient(180deg,#ffffff 0%,#ffc2e4 40%,#ff4fb0 100%);-webkit-background-clip:text;background-clip:text;color:transparent;animation:letter-slam .38s cubic-bezier(.2,1.5,.4,1) both;animation-delay:calc(var(--i) * 28ms)}
+.big-note.wave::before{content:'';position:absolute;left:50%;top:40%;width:280px;height:280px;margin:-140px 0 0 -140px;border-radius:50%;border:7px solid #ff4fb0;opacity:0;animation:shockwave .6s cubic-bezier(.2,.8,.3,1) .05s both}
+.big-note.wave b{background:#e8338f;color:#fff;box-shadow:0 8px 28px #e8338f88}
+@media (prefers-reduced-motion:reduce){.wave-button.ready,.wave-button.ready::before,.wave-mark-inner,.wave-mark-outer,.wave-burst,.wave-flash::after{animation:none!important}}
+/* With a keyboard: the third of the row in the bottom-right corner (shockwave, boost, speed), the same size, level
+   with the other two, the same gap between them, and its name underneath like theirs. */
+@media (pointer:fine){
+  .wave-button{right:178px;bottom:62px;width:114px;height:114px;transition:right .5s cubic-bezier(.3,1.4,.5,1),transform .35s cubic-bezier(.3,1.6,.5,1),background .3s,opacity .3s,color .3s}
+  /* (Beside the speedometer until the boost unlocks; then it slides over to make room for it.) */
+  .boost-gauge ~ .wave-button{right:314px}
+  .wave-mark{width:46px;height:46px}
+  .wave-seconds{font-size:18px}
+  .wave-label{bottom:auto;top:calc(100% + 7px);font-size:11px;padding:4px 12px;animation:none}
+  .wave-button.charging .wave-label{background:var(--glass);border:1px solid var(--glass-line);box-shadow:var(--glass-shadow);color:#ffffffbf}
+  .wave-button.charging .wave-label kbd{opacity:.6}
+}
+@media (pointer:coarse){
+  .app.rails.playing .wave-button{right:auto;left:14px;bottom:calc(var(--thumb) + 54px + 18px);width:62px;height:62px}
+  .app.rails.playing .wave-mark{width:26px;height:26px}
+  .app.rails.playing .wave-label{left:0;translate:none}
+}
+
+/* Scrollbars everywhere: thin, no track, a soft light thumb that suits the dark glass panels (never the browser's
+   white default). Safari and older Chrome take the -webkit- rules; the rest take scrollbar-color. */
+*{scrollbar-width:thin;scrollbar-color:#ffffff30 transparent}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#ffffff30;border-radius:6px}
+::-webkit-scrollbar-thumb:hover{background:#ffffff50}
+::-webkit-scrollbar-corner{background:transparent}

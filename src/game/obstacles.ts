@@ -19,6 +19,9 @@ export type Obstacle = {
   hitKind?: 'side' | 'front';
   // The player was boosting when it hit this car: it gets thrown clear much harder.
   boostHit?: boolean;
+  // Seconds left that the player's car passes through this one: a car thrown by the shockwave can tumble back into
+  // the player, and that must never count as a crash (or cost a heart).
+  untouchable?: number;
 };
 
 // Hitboxes are smaller than the visible objects so near-misses don't count as crashes.
@@ -176,7 +179,7 @@ export function classifyTrafficHit(contact: TrafficContact, facing: [number, num
 export function trafficContact(latitude: number, longitude: number, forward: [number, number], halfLength: number, radius: number): TrafficContact | undefined {
   let best: TrafficContact | undefined;
   for (const obstacle of flat) {
-    if (!obstacle.movable || obstacle.inactive) continue;
+    if (!obstacle.movable || obstacle.inactive || (obstacle.untouchable ?? 0) > 0) continue;
     const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
     const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     if (Math.hypot(east, north) > 8) continue;
@@ -220,7 +223,7 @@ export function trafficAhead(latitude: number, longitude: number, forward: [numb
 export function trafficNear(latitude: number, longitude: number, forward: [number, number], halfLength: number, radius: number, reach: number) {
   const found: TrafficContact[] = [];
   for (const obstacle of flat) {
-    if (!obstacle.movable || obstacle.inactive) continue;
+    if (!obstacle.movable || obstacle.inactive || (obstacle.untouchable ?? 0) > 0) continue;
     const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
     const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     if (Math.hypot(east, north) > 10) continue;

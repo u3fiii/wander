@@ -30,13 +30,16 @@ export type CarState = {
   hitAssist?: number;
   // Seconds of boost left in the current burst, and cooldown progress (1 = ready).
   boostTime: number; boostCharge: number;
+  // Tyre wall (see TIRES): the inward push left from the last bounce (m/s), how hard that bounce was (0..1, fading)
+  // and the wait before the next one counts as a new hit (s).
+  tirePush?: number; tireHit?: number; tireWait?: number;
 };
 // Booleans come from keys/touch. Optional analog values (0..1, steer -1..1) override them when present.
 export type Controls = {
-  forward: boolean; back: boolean; left: boolean; right: boolean; brake: boolean; gentle?: boolean; boost?: boolean;
+  forward: boolean; back: boolean; left: boolean; right: boolean; brake: boolean; gentle?: boolean; boost?: boolean; wave?: boolean;
   throttle?: number; reverse?: number; steer?: number; tilt?: number;
 };
-export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost';
+export type ControlKey = 'forward' | 'back' | 'left' | 'right' | 'brake' | 'gentle' | 'boost' | 'wave';
 const steerInput = (controls: Controls) => controls.steer ?? (Number(controls.left) - Number(controls.right));
 export const emptyControls = (): Controls => ({ forward: false, back: false, left: false, right: false, brake: false });
 export const initialCar = (): CarState => ({ ...DRIVE.spawn, speed: 0, steering: 0, distance: 0, wheelTravel: 0, acceleration: 0, yawRate: 0, waterTravel: 0, boost: 0, boosting: 0, drift: 0, slide: 0, cruise: 0, leadGap: -1, leadSpeed: 0, handsOff: 0, cruiseLane: 0, curb: 0, curbTime: 0, boostTime: 0, boostCharge: 0 });
@@ -86,7 +89,47 @@ export function updateBoost(car: CarState, controls: Controls, dt: number, onRoa
 // the road's direction, so it can never end up turned round and heading back the way it came. In the first-drive
 // lesson the car also eases back toward the road's centre when the pads are let go (`tutorialCentering`).
 export const DRIVE_MODE = { rails: false };
-export const RAILS = { autoThrottle: 1, tutorialMaxSpeed: 6, tutorialCentering: 0.08, maxHeading: 0.9 };
+// `straighten`: let go of the pads and the car lines itself up with the road again at this rate (1/s), so it never
+// keeps rolling on toward the edge it was pointed at; past `clearFrom` m from the middle it also angles back in a
+// little (`clearGain` rad per m, at most `clearMax`).
+export const RAILS = { autoThrottle: 1, tutorialMaxSpeed: 11, tutorialCentering: 0.08, maxHeading: 0.9, straighten: 6, clearFrom: 1.2, clearGain: 0.12, clearMax: 0.12 };
+
+// The road's edge as a wall of tyres instead of a slowing curb: a car that reaches them (its centre `line` m from the
+// centre line) is bounced back in, sideways (`push` m/s, from a graze to a full-on hit at `fullHit` m/s outward),
+// turned back along the road, and loses a little speed (`speedLoss` at a full hit). It never sticks: a bounce, and on
+// it goes, and running along them they ease it off at `nudge` m/s. `?edge=curb` in the address brings the old slowing curb back, for comparison.
+export const EDGE = { tires: typeof location === 'undefined' || new URLSearchParams(location.search).get('edge') !== 'curb' };
+export const TIRES = { line: 2.3, give: 0.08, push: [1.4, 4.5] as const, fullHit: 4, speedLoss: 0.14, straighten: 14, turnRate: 2.2, minOutward: 0.35, wait: 0.25, settle: 7, nudge: 1.2 };
+// The latest bounce, for the scene (the sound, the buzz and the tyres' wobble).
+export const tireBounce = { id: 0, x: 0, z: 0, strength: 0 };
+function bounceOffTires(car: CarState, dt: number) {
+  const scale = lateralScale(car.x);
+  car.tireWait = Math.max(0, (car.tireWait ?? 0) - dt);
+  car.tireHit = Math.max(0, (car.tireHit ?? 0) - dt * 2.5);
+  const push = car.tirePush ?? 0;
+  if (push > 0.01) {
+    car.z -= Math.sign(car.z) * push * dt / scale;
+    car.tirePush = push * Math.exp(-TIRES.settle * dt);
+  } else car.tirePush = 0;
+  const lateral = Math.abs(car.z) * scale;
+  if (lateral < TIRES.line) return;
+  if (lateral > TIRES.line + TIRES.give) car.z = Math.sign(car.z) * (TIRES.line + TIRES.give) / scale;
+  const outward = Math.sin(car.heading) * car.speed * Math.sign(car.z);
+  // Running along them, the tyres ease it off again: it never rides the wall.
+  if ((car.tirePush ?? 0) < TIRES.nudge) car.tirePush = TIRES.nudge;
+  if (outward <= 0) return;
+  const along = roadAlong(car);
+  // Turned back along the road quickly, but never faster than `turnRate` (the world turns with the car: a snap whips it).
+  const error = wrapAngle(car.heading - along);
+  car.heading -= Math.sign(error) * Math.min(Math.abs(error) * (1 - Math.exp(-TIRES.straighten * dt)), TIRES.turnRate * dt);
+  if ((car.tireWait ?? 0) > 0 || outward < TIRES.minOutward) return;
+  const strength = Math.min(1, Math.max(0.15, outward / TIRES.fullHit));
+  car.tirePush = TIRES.push[0] + (TIRES.push[1] - TIRES.push[0]) * strength;
+  car.speed *= 1 - TIRES.speedLoss * strength;
+  car.tireHit = strength;
+  car.tireWait = TIRES.wait;
+  Object.assign(tireBounce, { id: tireBounce.id + 1, x: car.x, z: car.z, strength });
+}
 function keepFacingForward(car: CarState) {
   car.heading = wrapAngle(car.heading);
   if (Math.abs(car.heading) <= RAILS.maxHeading) return;
@@ -196,7 +239,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   // Nothing slows a boosting car: the off-road drag and the water drag below are skipped while boosting.
   updateSpeed(car, drive, dt, car.boosting === 0 && !currentOnRoad && currentLand >= LOOP_DRIVE.waterShoreInfluence, tutorial ? RAILS.tutorialMaxSpeed : Infinity);
   // Curb resistance builds with overlap and time, including during boost.
-  car.curb = respectWater && currentOnRoad ? smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.curbFull, Math.abs(car.z) * lateralScale(car.x)) : 0;
+  car.curb = respectWater && currentOnRoad && !EDGE.tires ? smoothstep(CAR_CONFIG.curbStart, CAR_CONFIG.curbFull, Math.abs(car.z) * lateralScale(car.x)) : 0;
   car.curbTime = car.curb > 0.5 ? car.curbTime + dt : Math.max(0, car.curbTime - 2 * dt);
   if (car.curb > 0) {
     const long = Math.min(1, car.curbTime / CAR_CONFIG.curbLongAfter);
@@ -457,7 +500,10 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   if (DRIVE_MODE.rails) keepFacingForward(car);
   // With the road assist at its top (and always on touch screens) the road's edge is a wall on every step, not only
   // while the car is on the road: a shove from traffic or a trunk can never leave it off the road.
-  if (respectWater && (DRIVE_MODE.rails || CAR_CONFIG.roadAssist >= CAR_CONFIG.roadAssistFull)) holdRoadEdge(car, roadAlong(car), dt);
+  if (respectWater && (DRIVE_MODE.rails || CAR_CONFIG.roadAssist >= CAR_CONFIG.roadAssistFull)) {
+    holdRoadEdge(car, roadAlong(car), dt);
+    if (EDGE.tires) bounceOffTires(car, dt);
+  }
   car.distance += Math.abs(effectiveTravel);
   car.wheelTravel += effectiveTravel;
 }
@@ -513,6 +559,13 @@ function assistRoad(car: CarState, controls: Controls, previousZ: number, dt: nu
     // ease back along the road for a moment (less while the player steers), and near the edge the cushion below keeps
     // it from heading off the road.
     if (recovering) car.heading = along + error * Math.exp(-CAR_CONFIG.crashAssist * (1 - steering * 0.7) * dt);
+    else if (DRIVE_MODE.rails && steering < 0.05) {
+      // Through a bend the road turns under the car: it turns with it (so it holds its line), and lines up the rest.
+      // And from the outer part of the road it drifts gently back toward the middle (never to it: the player's line).
+      const out = Math.max(0, Math.abs(car.z) * lateralScale(car.x) - RAILS.clearFrom);
+      const clear = -Math.sign(car.z) * Math.min(RAILS.clearMax, out * RAILS.clearGain);
+      car.heading = along + clear + (error - clear) * Math.exp(-RAILS.straighten * dt) + roadBend(car.x) * car.speed * dt;
+    }
     cushionRoadEdge(car, along, dt);
     return;
   }
@@ -554,6 +607,13 @@ function cruiseSteer(car: CarState, controls: Controls, dt: number) {
   const rate = CAR_CONFIG.cruiseSteerRate * car.cruise * settle;
   car.heading = along + aim + wrapAngle(car.heading - along - aim) * Math.exp(-rate * dt);
 }
+// How fast the road turns at `longitude`, in radians per metre along it.
+function roadBend(longitude: number) {
+  const sample = 0.004;
+  const before = loopFrame(longitude - sample, 0), after = loopFrame(longitude + sample, 0), frame = loopFrame(longitude, 0);
+  const turn = Math.atan2(dot(cross(before.tangent, after.tangent), frame.normal), dot(before.tangent, after.tangent));
+  return turn / (2 * sample * GLOBE_RADIUS * Math.cos(frame.latitude));
+}
 const smoothstep = (low: number, high: number, value: number) => { const t = Math.max(0, Math.min(1, (value - low) / (high - low))); return t * t * (3 - 2 * t); };
 // With the assist high the road's edge is a wall; lower, it gives by `roadEdgeSlack` less the stronger the assist is.
 function holdRoadEdge(car: CarState, along: number, dt: number) {
@@ -590,7 +650,7 @@ function turnTooSharp(car: CarState, turn: number, dt: number) {
 // railing (the road crosses the bridge at an angle). An angled hit on the inside turns the car along the
 // bridge so it rolls across instead of sticking.
 const wrapAngle = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
-function lateralScale(longitude: number) {
+export function lateralScale(longitude: number) {
   const step = 1e-3;
   const slope = (loopLatitude(longitude + step) - loopLatitude(longitude - step)) / (2 * step) / Math.cos(loopLatitude(longitude));
   return 1 / Math.sqrt(1 + slope * slope);

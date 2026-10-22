@@ -26,7 +26,7 @@ export function LeaderboardSpotlight({ open, level, best }: { open: () => void; 
       <span className="driver-card-best"><small>PERSONAL BEST</small><strong>{number(best)}</strong></span>
     </span>
     <span className="driver-card-divider" />
-    <span className="driver-card-heading"><span>{connected ? 'WORLD TOP 3' : loading ? 'FINDING RIVALS' : 'YOUR NEXT CHALLENGE'}</span><ArrowRight size={14} /></span>
+    <span className="driver-card-heading"><span>{connected ? 'WORLD TOP 3' : loading ? 'FINDING RIVALS' : 'YOUR NEXT CHALLENGE'}</span><ArrowRight size={14} aria-hidden="true" /></span>
     {connected && board.length > 0 ? <span className="driver-card-rivals">
       {[0, 1, 2].map(rank => {
         const entry = board[rank];
@@ -146,7 +146,6 @@ export function LeaderboardChase({ score, scoreSlot, stage, active, busy, visibl
       {showNotice
         ? <span className="rank-shout" key={notice.title}><b>{notice.title}</b> {notice.detail}</span>
         : <><span className="rank-sprint"><b>{number(toNext)}</b> TO <em key={next.id} style={{ color: next.glow }}>{next.title}</em></span><span className="rank-goal">{detail}</span></>}
-      <ArrowRight size={11} />
     </span>
     <span className="rank-announcement" role="status" aria-live="polite" aria-atomic="true">{showNotice ? `${notice.title}. ${notice.detail}` : ''}</span>
   </button>;

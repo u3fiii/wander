@@ -21,9 +21,9 @@ export const CAR_CONFIG = {
   boostSpeedFactor: 1.1,
   boostAccelFactor: 1.8,
   boostDuration: 5,
-  // Boost throws aside every car within this gap (m) of the car's sides as it passes, touched or not. Very close:
-  // it takes all but a touch to throw one, not a car in the next lane.
-  boostWakeReach: 0.2,
+  // Boost throws aside every car within this gap (m) of the car's sides as it passes, touched or not: pass within
+  // half a metre of one and it goes flying.
+  boostWakeReach: 0.8,
   boostCooldown: 5,
   boostOverspeedDecel: 8,
   // Gamepad: ignore small stick/trigger values, then apply a curve for fine control near centre.

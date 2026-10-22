@@ -6,11 +6,14 @@ import { JUICE_CONFIG, LOOP_DRIVE } from './config';
 import { DRIVING_CONFIG as CAR_CONFIG } from './vehicleHandling';
 import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
-import { playBoost, playHonk, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
+import { playBoost, playReady, playHonk, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
 import { createBodySpring, updateBodySpring, updateCamera } from './carRig';
-import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
+import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
-import { DRIVE_MODE, RAILS, initialLoopCar, keepOnBridge, recoverToRoad, stepLoopCar } from './driving';
+import { JUMP, createJump, stepJump } from './jump';
+import { JAM, recordWave, stepJam, trafficJam } from './jam';
+import { WAVE, chargeWave, fireWave, runWave, waveOver, waveRadius } from './wave';
+import { DRIVE_MODE, RAILS, initialLoopCar, tireBounce, keepOnBridge, recoverToRoad, stepLoopCar } from './driving';
 import { clearObstacleGroup, drainNearMisses, drainTrafficHits, drainTrafficTouch, isSpecialNearMiss, setObstacleGroup } from './obstacles';
 import type { NearMiss, Obstacle, TrafficHit } from './obstacles';
 import type { CarState, Controls } from './driving';
@@ -24,8 +27,8 @@ import { dayLook } from './dayLook';
 import { warmLight } from './warmLight';
 import { nightLook } from './nightLook';
 import { nearMissLook } from './nearMissLook';
-import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
-import { adaptPacing, adaptResolution, createPacingState, createResolutionState, resolutionBounds } from './renderQuality';
+import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION, recordSlowVisit, FORCED_QUALITY } from './artDirection';
+import { adaptPacing, adaptResolution, createPacingState, createResolutionState, createSlowFrameState, lighterTier, resolutionBounds, watchSlowFrames } from './renderQuality';
 import { cullBehindGlobe } from './horizonCull';
 import { setCssVar } from '../cssVar';
 import { advanceTheme, currentThemes, setTheme, themeSettings, themeSunWarmth, themedColour, themeState } from './themes';
@@ -76,8 +79,8 @@ function readGamepad() {
     return Math.sign(value) * ((magnitude - CAR_CONFIG.gamepadDeadzone) / (1 - CAR_CONFIG.gamepadDeadzone)) ** CAR_CONFIG.gamepadCurve;
   };
   const pad = currentPad();
-  if (!pad) return { throttle: 0, brake: 0, steer: 0, recover: false, handbrake: false, boost: false, gentle: false };
-  return { throttle: shape(pad.throttle), brake: shape(pad.brake), steer: -shape(pad.steer), recover: pad.recover, handbrake: pad.handbrake, boost: pad.boost, gentle: pad.gentle };
+  if (!pad) return { throttle: 0, brake: 0, steer: 0, recover: false, handbrake: false, boost: false, gentle: false, wave: false };
+  return { throttle: shape(pad.throttle), brake: shape(pad.brake), steer: -shape(pad.steer), recover: pad.recover, handbrake: pad.handbrake, boost: pad.boost, gentle: pad.gentle, wave: pad.wave };
 }
 export type SceneProps = {
   started: boolean; paused: boolean; mapView?: boolean; trafficEnabled?: boolean; tutorialDriving?: boolean; tutorialCamera?: boolean; mobileCamera?: boolean; boostEnabled?: boolean; vehicleId: VehicleId;
@@ -93,6 +96,8 @@ export type SceneProps = {
   // follows the whole pack, pulling back as it spreads.
   party?: React.RefObject<PartyRun | null>; partyCount?: number;
   onTelemetry: (data: Telemetry) => void; onReady: () => void; onTrafficHit?: (hit: TrafficHit) => void; onNearMiss?: (miss: NearMiss) => void; onDrift?: (drift: DriftScore) => void;
+  // The shockwave (wave.ts): ready to fire, fired, and done spreading (with how many cars it threw).
+  onWave?: (event: 'ready' | 'fire' | 'done', cars?: number) => void;
 };
 
 const localUp = new THREE.Vector3(0, 1, 0);
@@ -374,9 +379,10 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   reactive: boolean;
   nightBlend: React.RefObject<number>;
 }) {
-  const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0 });
+  const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0, waveId: runWave.id });
   const hit = useRef({ hop: 0, hopVelocity: 0, roll: 0, rollVelocity: 0, squash: 0, squashVelocity: 0 });
   const presence = useRef(enabled && trafficActive(progressIndex) ? 1 : 0);
+  const jamSeen = useRef(trafficJam.id);
   // Swaying in the lane (higher levels): eased in and out, with this car's own phase.
   const swerve = useRef({ amount: 0, phase: progressIndex * 1.7, time: 0 });
   // How far out towards the curb this car is driving (see CURB_HUG).
@@ -385,6 +391,7 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   const heading = useMemo(() => new THREE.Vector3(), []);
   const playerPoint = useMemo(() => new THREE.Vector3(), []);
   const toPlayer = useMemo(() => new THREE.Vector3(), []);
+  const waveOrigin = useMemo(() => new THREE.Vector3(), []);
   const group = useRef<THREE.Group>(null!);
   const progress = useRef(startProgress);
   const path = ROAD_PATHS[pathIndex];
@@ -396,9 +403,17 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05) * gameTime.scale;
     const m = motion.current;
+    // A traffic jam just formed (jam.ts) with this car in it: it is put in its place (out of the player's sight) at
+    // the jam's crawl. While the jam stands it is on the road even if the level would leave it parked.
+    const inJam = trafficJam.active && trafficJam.members.has(progressIndex);
+    if (inJam && jamSeen.current !== trafficJam.id) {
+      jamSeen.current = trafficJam.id;
+      progress.current = trafficJam.members.get(progressIndex)!;
+      Object.assign(m, { speed: JAM.speed, push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0 });
+    }
     if (!paused) progress.current = (progress.current + Math.sign(speed) * m.speed * dt / roadPathMetric(path, progress.current) + 1) % 1;
     progresses.current[progressIndex] = progress.current;
-    const active = enabled && trafficActive(progressIndex);
+    const active = enabled && (trafficActive(progressIndex) || inJam);
     // Most traffic cars are dormant at early levels. Keep their route progress,
     // but skip the path frame, collision and animation work while fully hidden.
     if (!active && presence.current < 0.01) {
@@ -443,10 +458,10 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     presence.current = THREE.MathUtils.damp(presence.current, active ? 1 : 0, 3, Math.min(delta, 0.05));
     obstacle.inactive = presence.current < 0.6;
     group.current.visible = presence.current > 0.01;
-    const cruise = Math.abs(speed) * difficulty.trafficSpeed;
+    const cruise = inJam ? JAM.speed : Math.abs(speed) * difficulty.trafficSpeed;
     let followGap = Infinity;
     traffic.forEach((other, index) => {
-      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed) || !trafficActive(index)) return;
+      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed) || !(trafficActive(index) || (trafficJam.active && trafficJam.members.has(index)))) return;
       const fraction = ((progresses.current[index] - progress.current) * Math.sign(speed) + 1) % 1;
       followGap = Math.min(followGap, fraction * roadPathMetric(path, progress.current));
     });
@@ -458,8 +473,23 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     m.speed = THREE.MathUtils.damp(m.speed, targetSpeed, NPC.braking, dt);
     m.cooldown = Math.max(0, m.cooldown - dt);
     obstacle.ramCooldown = Math.max(0, (obstacle.ramCooldown ?? 0) - dt);
+    obstacle.untouchable = Math.max(0, (obstacle.untouchable ?? 0) - dt);
+    // The shockwave's ring reaching this car: thrown the moment it arrives, whatever else is going on.
+    const ring = waveRadius(runWave);
+    let waved = false;
+    if (ring >= 0 && m.waveId !== runWave.id && presence.current > 0.6
+      && group.current.position.distanceTo(waveOrigin.fromArray(runWave.origin)) <= ring + NPC.laneHalfWidth) {
+      m.waveId = runWave.id;
+      waved = true;
+      runWave.hits++;
+      obstacle.impact = WAVE.impact;
+      obstacle.impactPower = 1;
+      obstacle.boostHit = true;
+      obstacle.untouchable = WAVE.untouchable;
+      m.cooldown = 0;
+    }
     if (obstacle.impact && m.cooldown === 0) {
-      const power = obstacle.impactPower ?? 1;
+      const power = (obstacle.impactPower ?? 1) * (waved ? WAVE.fling : 1);
       const boosted = !!obstacle.boostHit;
       const side = obstacle.hitKind === 'side' && !boosted;
       const front = obstacle.hitKind === 'front' && !boosted;
@@ -484,14 +514,14 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
       if (boosted) {
         const direction = m.pushVelocity === 0 ? away : Math.sign(m.pushVelocity);
         m.pushVelocity = direction * THREE.MathUtils.clamp(Math.abs(m.pushVelocity), BOOST_HIT.minLateralVelocity * power, BOOST_HIT.maxLateralVelocity * power);
-        m.spinVelocity += direction * BOOST_HIT.spin * power;
+        m.spinVelocity += direction * BOOST_HIT.spin * power * (waved ? WAVE.spin : 1);
       }
       // A rear hit shoves the car forward (punted hard under boost); a frontal hit slows it while steering it clear.
       m.speed = ahead < 0 ? m.speed + obstacle.impact * (boosted ? BOOST_HIT.punt : NPC.shoveForward * (1 - sideways)) : m.speed * (front ? 0.72 : 0.3);
       m.cooldown = NPC.hitCooldown;
       const strength = THREE.MathUtils.clamp(obstacle.impact / NPC_HIT.strengthSpeed, 0, 1);
       const h = hit.current;
-      h.hopVelocity = Math.max(h.hopVelocity, THREE.MathUtils.lerp(NPC_HIT.hopMin, NPC_HIT.hopMax, strength) * (boosted ? BOOST_HIT.hop : side ? SIDE_HIT.hop : 1));
+      h.hopVelocity = Math.max(h.hopVelocity, THREE.MathUtils.lerp(NPC_HIT.hopMin, NPC_HIT.hopMax, strength) * (waved ? WAVE.hop : boosted ? BOOST_HIT.hop : side ? SIDE_HIT.hop : 1));
       // Tip away from the hit: the body is shoved while the tyres grip, so the roof leans the way it's pushed
       // (+z roll lifts the right side). A rear hit still gets a little roll so it reads as a bump.
       h.rollVelocity += -away * THREE.MathUtils.lerp(NPC_HIT.rollKick, NPC_HIT.rollKickMax, strength) * Math.max(sideways, 0.3) * (side ? SIDE_HIT.roll : 1);
@@ -676,6 +706,57 @@ function Meteors() {
   return null;
 }
 
+// The shockwave's look (wave.ts), kept light: one crisp magenta line (the button's colour) racing out over the ground to the full radius (the
+// ring that throws the cars), a fainter thinner one trailing it, and the faintest haze inside. Drawn over
+// everything (it is thin), fading as it spreads to nothing at its full size.
+const WAVE_LOOK = { lift: 0.6, line: 0.16, trail: 0.55, trailWidth: 0.08, haze: 0.06, opacity: 0.9, colour: '#ff4fb0', core: '#ffd1ea' };
+const hex = (colour: string) => new THREE.Color(colour).toArray().map(value => value.toFixed(3)).join(', ');
+function WaveRing() {
+  const cap = WAVE.radius + 1;
+  const angle = cap / GLOBE_RADIUS;
+  const uniforms = useMemo(() => ({ uFront: { value: 0 }, uAlpha: { value: 0 }, uCap: { value: cap } }), [cap]);
+  const material = useMemo(() => new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide,
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float uFront, uAlpha, uCap; varying vec2 vUv;
+      void main(){
+        float d = (1.0 - vUv.y) * uCap;
+        float line = 1.0 - smoothstep(0.0, ${WAVE_LOOK.line.toFixed(2)}, abs(d - uFront));
+        float trail = (1.0 - smoothstep(0.0, ${WAVE_LOOK.trailWidth.toFixed(2)}, abs(d - uFront * ${WAVE_LOOK.trail.toFixed(2)}))) * 0.45;
+        float haze = d < uFront ? ${WAVE_LOOK.haze.toFixed(2)} * smoothstep(0.0, uFront, d) : 0.0;
+        float a = max(line, max(trail, haze)) * uAlpha;
+        if (a < 0.004) discard;
+        // Magenta, the button's colour, a little paler at the very middle of the line so it stays crisp.
+        vec3 colour = mix(vec3(${hex(WAVE_LOOK.colour)}), vec3(${hex(WAVE_LOOK.core)}), line * line * 0.6);
+        gl_FragColor = vec4(colour, a);
+      }`,
+  }), [uniforms]);
+  const ground = useMemo(() => new THREE.SphereGeometry(1, 128, 32, 0, Math.PI * 2, 0, angle), [angle]);
+  useEffect(() => () => { material.dispose(); ground.dispose(); }, [material, ground]);
+  const root = useRef<THREE.Group>(null!);
+  const disc = useRef<THREE.Mesh>(null!);
+  const up = useMemo(() => new THREE.Vector3(), []);
+  const yAxis = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+  useFrame(() => {
+    const t = runWave.time;
+    const visible = t >= 0 && t < WAVE.spread;
+    root.current.visible = visible;
+    if (!visible) return;
+    // (Positions in this space are measured from the globe's centre at (0, -R, 0): see spherePoint.)
+    const surface = up.fromArray(runWave.origin).setY(runWave.origin[1] + GLOBE_RADIUS).length();
+    root.current.quaternion.setFromUnitVectors(yAxis, up.normalize());
+    const radius = waveRadius(runWave);
+    // Bright as it leaves the car, gone (fully transparent) the moment it reaches its full size.
+    const out = radius / WAVE.radius;
+    uniforms.uFront.value = radius;
+    uniforms.uAlpha.value = WAVE_LOOK.opacity * Math.pow(1 - out, 0.8);
+    disc.current.scale.setScalar(surface + WAVE_LOOK.lift);
+  });
+  return <group ref={root} visible={false} position={[0, -GLOBE_RADIUS, 0]}>
+    <mesh ref={disc} geometry={ground} material={material} renderOrder={9} frustumCulled={false} />
+  </group>;
+}
+
 function DrivingScene(props: SceneProps) {
   const vehicle = useRef<THREE.Group>(null!);
   const globeGroup = useRef<THREE.Group>(null!);
@@ -722,6 +803,8 @@ function DrivingScene(props: SceneProps) {
   const lastPointer = useRef({ x: 0, y: 0 });
   const zoomProgress = useRef(0);
   const smoothedElevation = useRef<number | null>(null);
+  // The car's flight over crests (jump.ts), and how far its nose is tipped by it.
+  const air = useRef({ ...createJump(), pitch: 0 });
   const poseInitialized = useRef(false);
   const readied = useRef(false);
   const introZoom = useRef(0);
@@ -880,9 +963,15 @@ function DrivingScene(props: SceneProps) {
   useEffect(() => () => { tireMarks.dispose(); speedLines.dispose(); dust.dispose(); soilClods.dispose(); }, [tireMarks, speedLines, dust, soilClods]);
   const roughShake = useRef(0);
   // How long the car has been riding the curb (s), and the camera's protest at it (0..1, see CURB_CAM).
+  const lastTireBounce = useRef(tireBounce.id);
+  const waveHeld = useRef(false);
+  const jumpTilt = useMemo(() => new THREE.Quaternion(), []);
+  const xAxis = useMemo(() => new THREE.Vector3(1, 0, 0), []);
   const curbRide = useRef(0);
   const curbProtest = useRef(0);
   const curbSide = useRef(1);
+  // Whether the car has been out on the road since the run started (it starts parked on the curb).
+  const curbArmed = useRef(false);
   const wasOnRoad = useRef<boolean | null>(null);
   const telemetryTime = useRef(0);
   const padRecoverHeld = useRef(false);
@@ -944,6 +1033,7 @@ function DrivingScene(props: SceneProps) {
   }, [fog, scene, sunTarget]);
   // The car waits parked at the road edge (out of the traffic lanes); no drop-in launch.
   const parkCar = () => {
+    curbArmed.current = false;
     props.car.current = { ...initialLoopCar(), x: scenicSpawnAngles[SPAWN_INDEX], z: props.started && props.tutorialDriving ? 0 : PARKING_OFFSET };
     smoothedElevation.current = null;
     poseInitialized.current = false;
@@ -1156,6 +1246,33 @@ function DrivingScene(props: SceneProps) {
     // Gamepad Y: back to road (once per press).
     if (pad.recover && !padRecoverHeld.current && props.started && !props.paused) recoverToRoad(car);
     padRecoverHeld.current = pad.recover;
+    // The shockwave (wave.ts): it charges while driving among the traffic, and goes off on its button (the disc, E or
+    // RB). Fired, a short shake and a deep boom roll out with the ring; the car itself carries on untouched.
+    const waveOn = props.started && !props.paused && !props.finale && props.trafficEnabled !== false && !party;
+    if (waveOn && chargeWave(runWave, realDt)) { playReady(); props.onWave?.('ready'); }
+    const wavePressed = !!keys.wave || pad.wave;
+    if (waveOn && wavePressed && !waveHeld.current && fireWave(runWave)) {
+      runWave.origin = spherePoint(loopLatitude(car.x) + car.z / GLOBE_RADIUS, car.x, 0) as [number, number, number];
+      trauma.current = Math.min(1, trauma.current + 0.25);
+      playImpact();
+      playThud(1.5);
+      playSlowMoWhoosh(1);
+      navigator.vibrate?.([40, 30, 60]);
+      props.onWave?.('fire');
+    }
+    waveHeld.current = wavePressed;
+    // Traffic jams (jam.ts): once the shockwave is learned, the road bunches cars up ahead now and then while it is
+    // ready. (Road progress runs with longitude, the way the player drives.)
+    const roadProgress = ((car.x / FULL_TURN) % 1 + 1) % 1;
+    stepJam(realDt, roadProgress, roadPathMetric(ROAD_PATHS[0], roadProgress), runWave.charge >= 1, waveOn,
+      traffic.map((other, index) => ({ index, progress: trafficProgresses.current[index] ?? other.progress, forward: other.speed > 0 })));
+    if (runWave.time >= 0 && !props.paused) {
+      const before = runWave.time;
+      runWave.time += realDt;
+      const counted = WAVE.spread + 0.15;
+      if (before < counted && runWave.time >= counted) { recordWave(runWave.hits); props.onWave?.('done', runWave.hits); }
+      if (waveOver(runWave)) runWave.time = -1;
+    }
     let throttle = Math.max(pedals.current.throttle, pad.throttle);
     // Rails mode (touch screens): the car drives itself; the player only steers.
     // Rails mode: the car cruises on its own, but never flat out. A slow, uneven rhythm (a few overlapping waves)
@@ -1382,8 +1499,20 @@ function DrivingScene(props: SceneProps) {
     smoothedElevation.current = smoothedElevation.current === null
       ? targetElevation
       : THREE.MathUtils.damp(smoothedElevation.current, targetElevation, 8, dt);
+    // Jumps (jump.ts): only on the road, while driving.
+    const flight = air.current;
+    const landed = stepJump(flight, targetElevation, Math.abs(car.speed), dt, onRoad && props.started);
+    if (landed > 0) {
+      landingCompression.current = Math.max(landingCompression.current, THREE.MathUtils.clamp(landed / JUMP.landSquash * 0.3, 0.08, 0.42));
+      trauma.current = Math.min(1, trauma.current + THREE.MathUtils.clamp(landed / 12, 0.1, 1) * JUMP.landShake);
+      playThud(THREE.MathUtils.clamp(landed / 8, 0.4, 1.4));
+    }
+    const lift = flight.flying ? Math.max(0, flight.height - smoothedElevation.current) : 0;
+    // The nose follows the flight, against the road's own slope beneath it.
+    const along = Math.max(4, Math.abs(car.speed));
+    flight.pitch = THREE.MathUtils.damp(flight.pitch, flight.flying ? Math.atan2(flight.velocity, along) - Math.atan2(flight.groundSpeed, along) : 0, flight.flying ? 6 : 12, dt);
     groundVehiclePosition.set(...spherePoint(latitude, car.x, smoothedElevation.current));
-    vehicle.current.position.set(...spherePoint(latitude, car.x, smoothedElevation.current + landingHeight.current));
+    vehicle.current.position.set(...spherePoint(latitude, car.x, smoothedElevation.current + landingHeight.current + lift));
     vehicleUp.set(...terrainNormal(latitude, car.x));
     vehicleTangent.set(...carFrame.tangent);
     vehicleTangent.addScaledVector(vehicleUp, -vehicleTangent.dot(vehicleUp)).normalize();
@@ -1393,6 +1522,7 @@ function DrivingScene(props: SceneProps) {
     vehicleBack.copy(vehicleTangent).negate();
     vehicleBasis.makeBasis(vehicleRight, vehicleUp, vehicleBack);
     targetVehicleQuaternion.setFromRotationMatrix(vehicleBasis);
+    if (Math.abs(air.current.pitch) > 1e-4) targetVehicleQuaternion.multiply(jumpTilt.setFromAxisAngle(xAxis, air.current.pitch));
     if (!poseInitialized.current) {
       vehicle.current.quaternion.copy(targetVehicleQuaternion);
       poseInitialized.current = true;
@@ -1630,11 +1760,23 @@ function DrivingScene(props: SceneProps) {
       playBoost();
     }
     if (driving && cameraAcceleration.current < -JUICE_CONFIG.hardBrakeAccel && Math.abs(car.speed) > 8) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBrake);
+    // A bounce off the tyre wall: a rubbery thump, a short jolt and a buzz under the thumb, in proportion to the hit.
+    if (tireBounce.id !== lastTireBounce.current) {
+      lastTireBounce.current = tireBounce.id;
+      if (driving) {
+        playThud(0.35 + tireBounce.strength * 0.5);
+        trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * (0.8 + tireBounce.strength * 1.6));
+        navigator.vibrate?.(Math.round(12 + tireBounce.strength * 25));
+      }
+    }
     if (offRoadDriving) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
     // Riding the curb: a light, steady judder (the rumble strip), a little less than off the road.
     else if (driving && car.curb > 0.4) trauma.current = Math.max(trauma.current, JUICE_CONFIG.shakeBump * 0.6 * car.curb * Math.min(Math.abs(car.speed) / CAR_CONFIG.maxSpeed, 1));
     // And staying on it, the camera's protest builds (CURB_CAM).
-    const riding = driving && !party && car.curb > 0.4 && Math.abs(car.speed) > 2;
+    // (Not from the parking spot a run starts at, on the curb: only once the car has been out on the road.)
+    if (!props.started) curbArmed.current = false;
+    else if (car.curb < 0.3) curbArmed.current = true;
+    const riding = driving && !party && curbArmed.current && car.curb > 0.4 && Math.abs(car.speed) > 2;
     curbRide.current = riding ? curbRide.current + realDt : Math.max(0, curbRide.current - realDt * 2);
     if (riding) curbSide.current = Math.sign(car.z) || 1;
     const built = THREE.MathUtils.clamp((curbRide.current - CURB_CAM.delay) / CURB_CAM.ramp, 0, 1);
@@ -1779,6 +1921,7 @@ function DrivingScene(props: SceneProps) {
       <AtmosphereGlow amount={glowAmount} night={nightBlend} />
       <group ref={scaleGroup} position={[0, GLOBE_RADIUS, 0]}>
         <MiniatureWorld key={road} zoom={zoomProgress} />
+        <WaveRing />
         <Suspense fallback={null}><Traffic paused={props.paused} enabled={props.trafficEnabled !== false} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} /></Suspense>
         {props.party && !!props.partyCount && <PartyCars run={props.party} count={props.partyCount} nightBlend={nightBlend} />}
         <group ref={vehicle}><PartyBody run={props.party} index={0}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /></PartyBody><MapPin show={!!props.mapView} /></group>
@@ -1854,6 +1997,8 @@ function AdaptiveResolution({ active }: { active: boolean }) {
     w.start = performance.now();
   }, -10000);
   const bounds = useRef(deviceResolution());
+  const slowFrames = useRef(createSlowFrameState());
+  const demoted = useRef(false);
   useEffect(() => {
     const resize = () => {
       bounds.current = deviceResolution();
@@ -1871,6 +2016,11 @@ function AdaptiveResolution({ active }: { active: boolean }) {
     const onTime = pacing.fps / 60;
     const next = adaptResolution(stats.current, delta * onTime, running, resolution.dpr, bounds.current, work.current.last * onTime);
     if (Math.abs(next - resolution.dpr) > 0.01) { resolution.dpr = next; setDpr(next); }
+    // Far too slow for a good while, twice: later visits start on the lighter tier (unless the tier is forced).
+    if (!demoted.current && watchSlowFrames(slowFrames.current, delta, running && document.hasFocus()) && VISUAL_QUALITY !== 'low' && !FORCED_QUALITY) {
+      demoted.current = true;
+      recordSlowVisit(VISUAL_QUALITY, lighterTier(VISUAL_QUALITY));
+    }
   });
   return null;
 }

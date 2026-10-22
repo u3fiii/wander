@@ -10,6 +10,9 @@ import { setActiveVehicle, DRIVING_CONFIG } from './game/vehicleHandling';
 import LoadingScreen from './LoadingScreen';
 import Coach from './Coach';
 import BoostGauge from './BoostGauge';
+import WaveButton from './WaveButton';
+import { resetRunWave, waveScore, waveWord } from './game/wave';
+import { resetJam } from './game/jam';
 import type { DriftScore, Telemetry } from './game/Scene';
 import { BOOST_EARN, DRIVE_MODE, earnBoost, emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
 import type { ControlKey } from './game/driving';
@@ -209,7 +212,7 @@ import { rampFor } from './game/difficulty';
 import { HEARTS, HEART_GRACE_MS, emptyRunStats, loadBest, saveBest, stageFor } from './game/leaderboard';
 import RunOver from './RunOver';
 import Leaderboard from './Leaderboard';
-import { LeaderboardChase, LeaderboardSpotlight } from './LeaderboardChase';
+import { LeaderboardChase } from './LeaderboardChase';
 import { difficulty, setDifficultyLevel } from './game/difficulty';
 import { goTo, jumpTo, mixHex, nightAmount, settleAt, skyAt, twilight } from './game/dayCycle';
 import { HOME_STAGE_SECONDS, STAGES, cardLook, nextMorning, stageTime, stagesReached, themeForStage } from './game/stages';
@@ -249,11 +252,15 @@ const NOTE_TEXT = {
   bigBoost: ['SMASH!', 'BOOM!', 'WRECKING BALL!', 'OUT OF MY WAY!', 'UNSTOPPABLE!'],
   // The overhead near-miss cut-in, camera looking straight down: purple, slid in like the car, and the biggest payout.
   cineNear: ['THREADED IT!', 'NEEDLE EYE!', 'RAZOR THIN!', 'PERFECT PASS!'],
+  // The shockwave going off: the word, and the cars it threw.
+  bigWave: ['SHOCKWAVE!', 'KABOOM!', 'CLEARED OUT!', 'BOOM!'],
   drift: ['Nice drift!', 'Clean slide!'],
   bigDrift: ['Big drift!', 'Sideways!'],
   hugeDrift: ['Drift king!', 'Endless slide!'],
 };
-const NOTE_RANK = { bigSmash: 5, bigNear: 5, bigBoost: 5, cineNear: 5, level: 4, newBest: 4, stage: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
+// Cars thrown by one boost: each is worth `points` more than the one before; a pause of `gap` ms starts a new run.
+const BOOST_CHAIN = { points: 50, gap: 3000 };
+const NOTE_RANK = { bigWave: 6, bigSmash: 5, bigNear: 5, bigBoost: 5, cineNear: 5, level: 4, newBest: 4, stage: 4, smash: 3, hugeDrift: 3, near: 2, boost: 2, bigDrift: 2, drift: 1, flick: 1, bump: 1 };
 // Notes that show a badge (an XP reward, a score) instead of points.
 const BADGE_NOTES: string[] = ['level', 'newBest', 'stage'];
 // How long the end-of-run shot plays before the run-over card (ms); matches FINALE in Scene.tsx.
@@ -732,6 +739,7 @@ export default function App() {
   const [streakShown, setStreakShown] = useState(false);
   // Riding the curb for a moment: a quiet note that nothing scores there.
   const curbTime = useRef(0);
+  const curbArmed = useRef(false);
   const [curbHint, setCurbHint] = useState(false);
   // Traffic notes match what the camera shows: a red smash (the slow-motion crash) costs points, a grey near
   // miss pays, a clip from the side pays a little, a soft bump costs a little, and under boost every hit pays.
@@ -894,17 +902,30 @@ export default function App() {
   }, [started, halted, showNote, RAILS]);
   // Boost hits still award a fixed bonus and flash, but no longer chain into a timed score multiplier.
   const [boostFlash, setBoostFlash] = useState(0);
+  // The shockwave: a ring of light bursts from the button side of the screen as it fires; once it has spread, the
+  // big word and its score (for every car it threw).
+  const [waveFlash, setWaveFlash] = useState(0);
+  const handleWave = useCallback((event: 'ready' | 'fire' | 'done', cars = 0) => {
+    if (event === 'fire') setWaveFlash(n => n + 1);
+    if (event === 'done') {
+      // The more cars caught at once, the more each is worth (wave.ts, waveScore).
+      showNote('bigWave', waveScore(cars), false, undefined, waveWord(cars));
+      runStats.current.smashes += cars;
+    }
+  }, [showNote]);
+  // How many cars the current boost run has thrown, and when the last one went (see BOOST_CHAIN).
+  const boostChain = useRef(0), boostChainAt = useRef(0);
   const handleTrafficHit = useCallback((hit: TrafficHit) => {
     const magnitude = Math.round(hit.speed * 2) + 5;
-    if (hit.wake) {
-      // Thrown aside by the boost's wake as it passed close: a smaller note, one per car, no combo flash.
-      showNote('boost', Math.round(magnitude * 0.9), false);
+    if (hit.boosted) {
+      // Every car a boost throws (rammed, or blown aside by its wake) scores, and each next one in the same boost run
+      // scores more (50, 100, 150...): a boost ploughed through a crowd pays. Always shown big, with the count.
+      const now = performance.now();
+      const chain = boostChain.current = now - boostChainAt.current > BOOST_CHAIN.gap ? 1 : boostChain.current + 1;
+      boostChainAt.current = now;
+      showNote('bigBoost', BOOST_CHAIN.points * chain, false, undefined, chain > 1 ? `SMASH ×${chain}` : undefined);
       runStats.current.smashes++;
-    }
-    else if (hit.boosted) {
-      showNote('bigBoost', Math.round(magnitude * 1.5), false);
-      runStats.current.smashes++;
-      setBoostFlash(n => n + 1);
+      if (!hit.wake) setBoostFlash(n => n + 1);
     }
     else if (hit.closing >= JUICE_CONFIG.crashCinematicClosing) {
       // A head-on crash that gets the slow-motion costs a heart, and the note says how many are left.
@@ -963,11 +984,14 @@ export default function App() {
     state.last = now;
     if (!started || halted || partyOn) {
       curbTime.current = 0;
+      curbArmed.current = false;
       setCurbHint(false);
       return;
     }
     const topSpeed = DRIVING_CONFIG.maxSpeed * 3.6;
-    curbTime.current = (data.curb ?? 0) > 0.5 && !data.offroad ? curbTime.current + dt : 0;
+    // A run starts parked at the road's edge, on the curb: the hint waits until the car has been out on the road once.
+    if ((data.curb ?? 0) < 0.3) curbArmed.current = true;
+    curbTime.current = curbArmed.current && (data.curb ?? 0) > 0.5 && !data.offroad ? curbTime.current + dt : 0;
     setCurbHint(curbTime.current > 1.2);
     if (data.offroad || (data.curb ?? 0) > 0.5 || data.speed < topSpeed * 0.3) state.time = 0;
     else if (data.speed > topSpeed * JUICE_CONFIG.streakSpeedRatio) state.time += dt;
@@ -1086,7 +1110,9 @@ export default function App() {
   const car = useRef(initialLoopCar());
   const reset = useCallback(() => {
     boostElapsed.current = 0; setBoostUnlocked(false);
-    controls.current = emptyControls(); setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
+    resetRunWave();
+    resetJam();
+    controls.current = emptyControls(); curbArmed.current = false; setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
     // A new run: hearts, stage, stats, stars, clean driving and the best-score note start over.
     beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; comboRef.current = { count: 0, until: 0 }; setCombo({ count: 0, id: 0 }); shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
     setHearts(HEARTS); heartsRef.current = HEARTS; setRunOver(false); setFinale(false); runStats.current = emptyRunStats(); setRunSeconds(0);
@@ -1161,7 +1187,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    const mapping: Record<string, ControlKey> = { ShiftLeft: 'boost', ShiftRight: 'boost', AltLeft: 'gentle', AltRight: 'gentle', KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake' };
+    const mapping: Record<string, ControlKey> = { ShiftLeft: 'boost', ShiftRight: 'boost', KeyE: 'wave', AltLeft: 'gentle', AltRight: 'gentle', KeyW: 'forward', ArrowUp: 'forward', KeyS: 'back', ArrowDown: 'back', KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', Space: 'brake' };
     const held = new Set<string>();
     const clear = () => { held.clear(); controls.current = emptyControls(); };
     const down = (e: KeyboardEvent) => {
@@ -1242,7 +1268,7 @@ export default function App() {
       }}
       onClose={() => setShowLook(false)}
     />}
-    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive && !partyOn} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked && !partyOn} party={partyOn ? partyRun : undefined} partyCount={partyOn ? partyCount : 0} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
+    <div className="scene"><div className="sky-glow" aria-hidden="true" /><NightSky /><SceneBoundary><Scene vehicleId={vehicleId} started={started && !mapView} paused={paused || help || boardOpen || mapView || runOver || garageOpen} mapView={mapView} trafficEnabled={!firstDrive && !partyOn} tutorialDriving={!!RAILS && firstDrive && (coachThisRun || coachTransitioning)} tutorialCamera={!!RAILS && firstDrive && coachThisRun} mobileCamera={!!RAILS} boostEnabled={boostUnlocked && !partyOn} party={partyOn ? partyRun : undefined} partyCount={partyOn ? partyCount : 0} finale={finale} danger={hearts === 1} cameraMode={cameraMode} resetKey={resetKey} theme={theme} road={road} controls={controls} car={car} onTelemetry={setData} onReady={onReady} onTrafficHit={handleTrafficHit} onNearMiss={handleNearMiss} onDrift={handleDrift} onWave={handleWave} /></SceneBoundary><div className={`boost-tint${started && data.boosting ? ' on' : ''}`} aria-hidden="true" /></div>
     <div className="vignette" />
     <header className={`topbar${headerMotion ? ` header-${headerMotion}` : ''}`}>
       {/* Three parts: the logo on the start screen or the driver's level while driving (left), the score
@@ -1293,7 +1319,7 @@ export default function App() {
       {!started || halted || partyOn ? null : stuckHint
         ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Stuck? Press <Keys action="recover" device={device} /> to hop back on the road</span></div>
         : roadWarning ? <div className="road-warning" role="status"><TriangleAlert size={16} /><span>Off road — head back to the road</span></div>
-        : curbHint && <div className="curb-hint" role="status"><TriangleAlert size={15} /><span><b>Back onto the road!</b> The curb slows you down and scores nothing</span></div>}
+        : curbHint && <div className="curb-hint" role="status"><TriangleAlert size={15} /><span><b>Back onto the road!</b><span className="hint-detail"> The curb slows you down and scores nothing</span></span></div>}
       <div className="topbar-right">
       {started && !partyOn && <div className="hud-right">
         <div className="run-clock" aria-label={`${Math.floor(runSeconds / 60)} minutes ${runSeconds % 60} seconds`}><Timer aria-hidden="true" /><b>{clockText(runSeconds)}</b></div>
@@ -1314,18 +1340,19 @@ export default function App() {
     </header>
 
     {(!started || introExit) && party !== 'lobby' && <section className={`intro-card${introExit ? ' exiting' : ''}`}>
-      <LeaderboardSpotlight level={level} best={best} open={() => setBoardOpen(true)} />
       <h1 aria-label={TITLE}>{[...TITLE].map((c, i) => <span key={i} aria-hidden="true" className={`ch${c === '.' ? ' dot' : ''}`} style={{ '--d': `${1000 + i * 60}ms` } as CSSProperties}>{c === ' ' ? '\u00a0' : c}</span>)}</h1>
       <p className="intro-copy rise" style={{ '--d': '1700ms' } as CSSProperties}>
         <span>A small world, a long road.</span>
         <span>Drive in your browser. Nothing to install.</span>
       </p>
-      <div className="rise cta" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={() => start()}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button>
-        {!RAILS && <button className="party-button" disabled={!ready} onClick={() => setParty('lobby')}><Users size={17} /><span>Party · 2–4 players</span></button>}</div>
-      <div className="intro-howto rise" style={{ '--d': '2500ms' } as CSSProperties} aria-label="How to play">
-        <span><span className="howto-keys"><Keys action="steer" device={device} />{device !== 'touch' && <Keys action="gas" device={device} />}</span><small>{device === 'touch' ? 'to steer' : 'Steer · speed up'}</small></span>
-        <span><Sparkles aria-hidden="true" /><small>Slip past traffic</small></span>
-        <span><HeartIcon className="full" /><small>Three hearts</small></span>
+      <div className="cta">
+        <div className="rise" style={{ '--d': '2100ms' } as CSSProperties}><button className="primary start-button" disabled={!ready} onClick={() => start()}><span>{ready ? 'Start driving' : 'Preparing the globe...'}</span><span className="start-arrow"><ArrowRight size={20} /></span></button></div>
+        {!RAILS && <button className="party-button rise" style={{ '--d': '2200ms' } as CSSProperties} disabled={!ready} onClick={() => setParty('lobby')}><Users size={17} /><span>Party · 2–4 players</span></button>}
+      </div>
+      <div className="intro-howto" aria-label="How to play">
+        <span className="rise" style={{ '--d': '2850ms' } as CSSProperties}><span className="howto-keys"><Keys action="steer" device={device} />{device !== 'touch' && <Keys action="gas" device={device} />}</span><small>{device === 'touch' ? 'to steer' : 'Steer · speed up'}</small></span>
+        <span className="rise" style={{ '--d': '2950ms' } as CSSProperties}><Sparkles aria-hidden="true" /><small>Slip past traffic</small></span>
+        <span className="rise" style={{ '--d': '3050ms' } as CSSProperties}><HeartIcon className="full" /><small>Three hearts</small></span>
       </div>
     </section>}
 
@@ -1360,9 +1387,11 @@ export default function App() {
         <span className="speed-label"><b>{car.current.speed < -0.1 ? 'R' : 'D'}</b>{formatNumber(data.distance)} m</span>
       </div>
       {boostUnlocked && <BoostGauge car={car} controls={controls} offroad={!!data.offroad} mobile={!!RAILS} />}
+      {!firstDrive && <WaveButton key={`wave-${resetKey}`} controls={controls} mobile={!!RAILS} />}
+      {waveFlash > 0 && <div key={`wave-flash-${waveFlash}`} className="wave-flash" aria-hidden="true" />}
       {(!RAILS || !firstDrive) && hitNote && (hitNote.kind.startsWith('big') || hitNote.kind === 'cineNear'
         // During a slow-motion cut-in, or ramming cars under boost: big, the word built letter by letter.
-        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineNear: 'near-cine' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
+        ? <div key={hitNote.id} className={`big-note ${{ bigSmash: 'smash', bigNear: 'near', bigBoost: 'boost', cineNear: 'near-cine', bigWave: 'wave' }[hitNote.kind as 'bigSmash']}`} role="status" aria-label={`${hitNote.text} ${hitNote.points}`}>
           <strong aria-hidden="true">{[...hitNote.text].map((letter, i) => <span key={i} style={{ '--i': i } as CSSProperties}>{letter === ' ' ? '\u00a0' : letter}</span>)}</strong>
           <span className="big-scores" aria-hidden="true">
             {hitNote.points !== 0 && <b style={{ '--i': hitNote.text.length } as CSSProperties}>{hitNote.points > 0 ? '+' : ''}{hitNote.points}</b>}
@@ -1401,6 +1430,7 @@ export default function App() {
         <button onClick={() => setCameraMode(mode => 1 - mode)}><Video /><span>{cameraMode ? 'Chase view' : 'Top view'}</span></button>
         <button onClick={openGarage}><CarFront /><span>Garage</span></button>
         <button onClick={() => setHelp(true)}><CircleHelp /><span>Controls</span></button>
+        <button onClick={() => setMutedState(m => !m)}>{muted ? <VolumeX /> : <Volume2 />}<span>{muted ? 'Sound off' : 'Sound on'}</span></button>
         <button className="desktop-only" onClick={toggleFullscreen}>{fullscreen ? <Minimize2 /> : <Maximize2 />}<span>{fullscreen ? 'Window' : 'Full screen'}</span></button>
       </div>
     </section></div>}

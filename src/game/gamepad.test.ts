@@ -13,7 +13,7 @@ test('every driving action has a button', () => {
   assert.equal(state.brake, 0.3);
   assert.equal(state.steer, 0.5);
   assert.deepEqual([state.handbrake, state.boost, state.gentle, state.recover, state.camera, state.map, state.menu], [true, true, true, true, true, true, true]);
-  assert.equal(readPadState(pad([PAD.RB])).boost, true, 'RB boosts too');
+  assert.equal(readPadState(pad([PAD.RB])).wave, true, 'RB fires the shockwave');
   assert.equal(readPadState(pad()).boost, false);
 });
 

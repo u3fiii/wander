@@ -233,7 +233,7 @@ function carBeside(car: ReturnType<typeof initialLoopCar>, aside: number, along:
 }
 test('a boosting car throws aside traffic it only passes close to, without touching it', () => {
   const car = { ...initialLoopCar(), speed: 14, boostTime: 3 };
-  const other = carBeside(car, 1.35, 2);
+  const other = carBeside(car, 1.95, 2); // 0.7 m of air between them
   setObstacleGroup('wake', [other]);
   drainTrafficHits();
   for (let i = 0; i < 20; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
@@ -282,4 +282,16 @@ test('a normal near miss awards the pass without changing the traffic car', () =
     assert.equal(drainNearMisses().length, 0, 'the pass only scores once');
   }
   resetNearMiss();
+});
+
+test('a car thrown by the shockwave that tumbles into the player passes through: no crash, no heart', () => {
+  const car = { ...initialLoopCar(), speed: 14 };
+  const other = { ...carBeside(car, 0, 1.2), untouchable: 1 }; // right in the car's way
+  setObstacleGroup('thrown', [other]);
+  drainTrafficHits();
+  for (let i = 0; i < 30; i++) stepLoopCar(car, { ...controls }, 1 / 60, true);
+  const hits = drainTrafficHits();
+  clearObstacleGroup('thrown');
+  assert.equal(hits.length, 0, 'not reported as a hit');
+  assert.ok(car.speed > 13, `and the player drove straight on (${car.speed.toFixed(1)} m/s)`);
 });

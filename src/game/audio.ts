@@ -5,6 +5,7 @@ import slowMoWhooshUrl from '../assets/sound/alexis_gaming_cam-woosh-saber-laser
 import ambienceUrl from '../assets/sound/soundreality-wind-blowing-457954.mp3?url';
 import seaUrl from '../assets/sound/freesound_community-sea-and-seagull-wave-5932.mp3?url';
 import planeUrl from '../assets/sound/loswin23-small-airplane-520026.mp3?url';
+import readyUrl from '../assets/sound/microwave ding.mp3?url';
 
 // Car audio on the Web Audio API. Layers, all feeding one master gain (and, for the world's sounds, a low-pass
 // that closes in slow motion):
@@ -48,6 +49,8 @@ export const AUDIO_CONFIG = {
   seaVolume: 0.06,
   // The little plane, heard when it flies near the camera.
   planeVolume: 0.12,
+  // The ding when the boost or the shockwave is ready again: soft, under everything else.
+  readyVolume: 0.045,
   startVolume: 0.25, slowMoWhooshVolume: 0.2, slowMoMuffleHz: 650, slowMoPitchDrop: 0.45,
   // Seconds trimmed from both ends of a loop (MP3 files carry a little silence there).
   loopTrim: 0.03,
@@ -65,6 +68,7 @@ export const AUDIO_RANGES: Record<AudioKey, [number, number, number]> = {
   synthVolume: [0, 0.4, 0.005], engineBody: [0, 1, 0.01], engineRumble: [0, 1, 0.01], enginePitch: [0.5, 1.5, 0.01], engineGrit: [0, 1, 0.01],
   boostVolume: [0, 1, 0.01], boostPitchBump: [0, 1, 0.01], boostBumpTime: [0.1, 2, 0.05],
   thudVolume: [0, 1, 0.01], impactVolume: [0, 1.5, 0.01], natureVolume: [0, 1.5, 0.01], ambienceVolume: [0, 0.4, 0.005], seaVolume: [0, 0.4, 0.005], planeVolume: [0, 0.6, 0.005],
+  readyVolume: [0, 1, 0.01],
   startVolume: [0, 1, 0.01], slowMoWhooshVolume: [0, 1, 0.01], slowMoMuffleHz: [200, 5000, 10], slowMoPitchDrop: [0, 0.9, 0.01],
   loopTrim: [0, 0.2, 0.005],
 };
@@ -73,7 +77,7 @@ export const AUDIO_RANGES: Record<AudioKey, [number, number, number]> = {
 const FILES = ['engine', 'engine-load', 'engine-start', 'offroad', 'boost', 'thud'] as const;
 type FileName = typeof FILES[number];
 const EXTENSIONS = ['mp3', 'ogg', 'wav', 'm4a'];
-const buffers: Partial<Record<FileName | 'slowmo' | 'ambience' | 'sea' | 'plane', AudioBuffer>> = {};
+const buffers: Partial<Record<FileName | 'slowmo' | 'ambience' | 'sea' | 'plane' | 'ready', AudioBuffer>> = {};
 
 // Decoded ahead of time (an offline context needs no user gesture), so they are ready when the drive starts.
 const decode = (url: string) => fetch(url)
@@ -89,6 +93,7 @@ if (typeof window !== 'undefined' && typeof OfflineAudioContext !== 'undefined')
   decode(slowMoWhooshUrl).then(buffer => { buffers.slowmo = trimmed(buffer, 0.25, 2.2); if (graph) buildLoops(); }).catch(() => undefined);
   decode(ambienceUrl).then(buffer => { buffers.ambience = seamless(buffer, 2); if (graph) buildLoops(); }).catch(() => undefined);
   decode(seaUrl).then(buffer => { buffers.sea = seamless(buffer, 3); if (graph) buildLoops(); }).catch(() => undefined);
+  decode(readyUrl).then(buffer => { buffers.ready = buffer; }).catch(() => undefined);
   decode(planeUrl).then(buffer => { buffers.plane = seamless(buffer, 3); if (graph) buildLoops(); }).catch(() => undefined);
 }
 // A piece of a recording, with a short fade at the end.
@@ -395,8 +400,12 @@ export function playEngineStart() {
   if (buffers['engine-start']) oneShot(buffers['engine-start'], AUDIO_CONFIG.startVolume, () => undefined);
 }
 
-// Boost ready: a soft, bright two-note rise (a fifth), quiet enough to sit under the engine.
-export function playBoostReady() {
+// A feature (the boost, the shockwave) ready to use again: the ding, quietly (the two-note chime until it has loaded).
+export function playReady() {
+  oneShot(buffers.ready, AUDIO_CONFIG.readyVolume, playReadyChime);
+}
+// The fallback: a soft, bright two-note rise (a fifth), quiet enough to sit under the engine.
+function playReadyChime() {
   if (!graph || muted) return;
   const { context, master } = graph;
   const now = context.currentTime;

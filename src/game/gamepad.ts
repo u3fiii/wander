@@ -1,6 +1,6 @@
 // Xbox / standard-mapping gamepad: driving and menus.
 //
-// While driving: RT gas, LT brake and reverse, left stick steers, A handbrake (drift), X or RB boost, LB gentle
+// While driving: RT gas, LT brake and reverse, left stick steers, A handbrake (drift), X boost, RB shockwave, LB gentle
 // throttle, Y back to the road, B or right-stick click changes the camera, View (⧉) opens the map, Menu (☰)
 // pauses. In menus and on the start screen the d-pad or left stick moves between buttons, A presses the focused
 // one, B goes back, and Menu starts or resumes.
@@ -19,7 +19,8 @@ export function readPadState(pad: PadLike) {
     brake: pad.buttons[PAD.LT]?.value ?? 0,
     steer: pad.axes[0] ?? 0,
     handbrake: held(pad, PAD.A),
-    boost: held(pad, PAD.X) || held(pad, PAD.RB),
+    boost: held(pad, PAD.X),
+    wave: held(pad, PAD.RB),
     gentle: held(pad, PAD.LB),
     recover: held(pad, PAD.Y),
     camera: held(pad, PAD.RS),

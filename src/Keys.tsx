@@ -2,15 +2,15 @@ import type { InputDevice } from './inputDevice';
 
 // The buttons for a game action, drawn for the device in use: keycaps, Xbox buttons (in their own colours) or a word
 // for touch. One table, so every prompt, hint and help row agrees.
-export type Action = 'steer' | 'gas' | 'brake' | 'drift' | 'boost' | 'recover' | 'camera' | 'map' | 'pause' | 'restart';
+export type Action = 'steer' | 'gas' | 'brake' | 'drift' | 'boost' | 'wave' | 'recover' | 'camera' | 'map' | 'pause' | 'restart';
 
 const KEYBOARD: Record<Action, string[]> = {
-  steer: ['A', 'D'], gas: ['W'], brake: ['S'], drift: ['Space'], boost: ['Shift'], recover: ['F'], camera: ['C'], map: ['M'], pause: ['Esc'], restart: ['R'],
+  steer: ['A', 'D'], gas: ['W'], brake: ['S'], drift: ['Space'], boost: ['Shift'], wave: ['E'], recover: ['F'], camera: ['C'], map: ['M'], pause: ['Esc'], restart: ['R'],
 };
 const GAMEPAD: Record<Action, string[]> = {
-  steer: ['LS'], gas: ['RT'], brake: ['LT'], drift: ['A'], boost: ['X'], recover: ['Y'], camera: ['B'], map: ['View'], pause: ['Menu'], restart: [],
+  steer: ['LS'], gas: ['RT'], brake: ['LT'], drift: ['A'], boost: ['X'], wave: ['RB'], recover: ['Y'], camera: ['B'], map: ['View'], pause: ['Menu'], restart: [],
 };
-const TOUCH: Partial<Record<Action, string>> = { steer: 'Hold left / right', boost: 'Tap the flame', drift: 'Brake in a turn', gas: 'Gas pedal' };
+const TOUCH: Partial<Record<Action, string>> = { steer: 'Hold left / right', boost: 'Tap the flame', wave: 'Tap the wave', drift: 'Brake in a turn', gas: 'Gas pedal' };
 
 export const keysFor = (action: Action, device: InputDevice) => (device === 'gamepad' ? GAMEPAD[action] : KEYBOARD[action]);
 

@@ -10,6 +10,8 @@ import { GLOBE_RADIUS, roadLatitude, roadLayoutVersion, sphereNormal, spherePoin
 import { MOUNTAIN_SITES, REGIONS, ROAD_PATHS, WORLD_SETTINGS, distanceToRoadNetwork, isLandAt, landInfluence, regionInfluence, roadPathFrame, roadPoint, roadSurfaceElevation, terrainElevation, groundNormal, terrainPoint } from './worldMap';
 import type { RoadPath } from './worldMap';
 import { clearObstacleGroup, obstacleAt, setObstacleGroup } from './obstacles';
+import { EDGE, tireBounce } from './driving';
+import { loopFrame } from './globe';
 import { nightState } from './nightState';
 import { nightLook } from './nightLook';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
@@ -473,6 +475,226 @@ function LoopRoad() {
         <meshStandardMaterial vertexColors roughness={0.9} metalness={0} flatShading />
       </mesh>
     </group>)}
+  </>;
+}
+
+// The road's barriers (the edge the car bounces off, driving.ts TIRES), in whatever a real road would have there, so
+// they read as part of the place:
+// - in the village, low concrete blocks (Jersey barriers), part of the street, with gaps at the zebra crossings;
+// - wherever water or the shore lies just beyond the edge, a steel guardrail on posts;
+// - on the tightest bends, stacks of old tyres, a few painted cream or coral (the race-track touch, in the map's colours);
+// - in the forest, a dark wooden fence; out in the meadows, a white post-and-rail fence.
+// Each side of the road is chosen on its own, and short runs are merged into their neighbours so it changes calmly.
+// The tyre stacks a car bounces off jolt outward and squash, then settle.
+type Barrier = 'concrete' | 'steel' | 'tyres' | 'wood' | 'fence';
+const BARRIERS = {
+  inset: 0.12, // from the asphalt's edge, onto the curb
+  base: 0.19, // the curb's top above the road surface
+  minRun: 12, // samples: shorter runs join the barrier beside them
+  bendShare: 0.16, // the tightest share of the road gets tyres
+  waterReach: 3, // m beyond the edge checked for water
+  // Tyres in the map's own colours: a soft charcoal (a shade off the asphalt, not black), and now and then one painted
+  // the road markings' cream or the roofs' coral.
+  tyre: { radius: 0.19, height: 0.3, colours: ['#5a5e60', '#5a5e60', '#5a5e60', PALETTE.roadMarking, '#5a5e60', '#5a5e60', '#5a5e60', PALETTE.roofAccent], reach: 1.6, wobble: 0.55, jolt: 0.16 },
+  concrete: { every: 3, height: 0.42, bottom: 0.34, top: 0.15, colour: '#d6d1c4', stripe: '#c9c3b4' },
+  steel: { postEvery: 4, post: [0.08, 0.5, 0.08], beam: { height: 0.2, thick: 0.05, at: 0.36 }, postColour: '#6f7980', beamColour: '#c7ced3' },
+  wood: { postEvery: 4, post: [0.11, 0.56, 0.11], rails: [0.22, 0.44], rail: [0.08, 0.06], postColour: '#5e4130', railColour: '#7a5638' },
+  fence: { postEvery: 4, post: [0.09, 0.5, 0.09], rails: [0.2, 0.4], rail: [0.07, 0.05], postColour: '#f3eee2', railColour: '#ece6d8' },
+};
+const GLOBE_CENTRE = new THREE.Vector3(0, -GLOBE_RADIUS, 0);
+function latLonOf(point: THREE.Vector3) {
+  const n = point.clone().sub(GLOBE_CENTRE).normalize();
+  return { latitude: Math.asin(n.y), longitude: Math.atan2(n.x, n.z) };
+}
+type Piece = { position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3 };
+function buildBarriers() {
+  const path = ROAD_PATHS.find(road => road.id === 'main')!;
+  const city = REGIONS.find(region => region.id === 'city')!, forest = REGIONS.find(region => region.id === 'forest')!;
+  const n = path.segments;
+  const centre = Array.from({ length: n }, (_, i) => new THREE.Vector3(...roadPoint(path, i / n, 0)));
+  // How sharply the road turns at each sample (radians per metre), over a few samples either side.
+  const bend = centre.map((_, i) => {
+    const a = centre[(i - 3 + n) % n], b = centre[i], c = centre[(i + 3) % n];
+    const before = b.clone().sub(a), after = c.clone().sub(b);
+    return before.angleTo(after) / ((before.length() + after.length()) / 2);
+  });
+  const bendLimit = [...bend].sort((x, y) => y - x)[Math.floor(n * BARRIERS.bendShare)];
+  const sides: { direction: number; points: (THREE.Vector3 | null)[]; up: THREE.Vector3[]; out: THREE.Vector3[]; kinds: (Barrier | null)[] }[] = [];
+  for (const direction of [-1, 1]) {
+    const points: (THREE.Vector3 | null)[] = [], up: THREE.Vector3[] = [], out: THREE.Vector3[] = [], kinds: (Barrier | null)[] = [];
+    for (let i = 0; i < n; i++) {
+      const t = i / n;
+      const latitude = path.latitudeAt(t), longitude = path.longitudeAt(t);
+      const side = new THREE.Vector3(...roadPathFrame(path, t).side).multiplyScalar(direction);
+      const elevation = roadSurfaceElevation(latitude, longitude) + BARRIERS.base;
+      const point = snapRoadVertex(centre[i].clone().addScaledVector(side, path.width * 0.5 + BARRIERS.inset), elevation).clone();
+      const normal = point.clone().sub(GLOBE_CENTRE).normalize();
+      up.push(normal);
+      out.push(side.clone().addScaledVector(normal, -side.dot(normal)).normalize());
+      const inTown = regionInfluence(city, latitude, longitude) > 0.5;
+      if (!showProceduralRoad(path, t) || (inTown && nearCrossing(longitude, STREET_DETAIL.crossing.depth / 2 + 0.2))) { points.push(null); kinds.push(null); continue; }
+      points.push(point);
+      const beyond = latLonOf(point.clone().addScaledVector(side, BARRIERS.waterReach));
+      kinds.push(inTown ? 'concrete'
+        : !isLandAt(beyond.latitude, beyond.longitude) ? 'steel'
+        : bend[i] >= bendLimit ? 'tyres'
+        : regionInfluence(forest, latitude, longitude) > 0.4 ? 'wood' : 'fence');
+    }
+    // Calm it down: a run shorter than `minRun` takes the kind of the run before it.
+    for (let pass = 0; pass < 2; pass++) {
+      let start = 0;
+      while (start < n) {
+        let end = start;
+        while (end + 1 < n && kinds[end + 1] === kinds[start]) end++;
+        if (kinds[start] && end - start + 1 < BARRIERS.minRun) {
+          const before = kinds[(start - 1 + n) % n];
+          if (before) for (let k = start; k <= end; k++) kinds[k] = before;
+        }
+        start = end + 1;
+      }
+    }
+    sides.push({ direction, points, up, out, kinds });
+  }
+  // The pieces, by material.
+  const groups: Record<string, Piece[]> = { concrete: [], steelPost: [], steelBeam: [], woodPost: [], woodRail: [], fencePost: [], fenceRail: [] };
+  const tyres: { position: THREE.Vector3; up: THREE.Vector3; side: THREE.Vector3; colour: string }[] = [];
+  const basis = new THREE.Matrix4();
+  const orient = (along: THREE.Vector3, up: THREE.Vector3, out: THREE.Vector3) => {
+    const x = along.clone().addScaledVector(up, -along.dot(up)).normalize();
+    const z = new THREE.Vector3().crossVectors(x, up).normalize();
+    void out;
+    return new THREE.Quaternion().setFromRotationMatrix(basis.makeBasis(x, up, z));
+  };
+  const lift = (point: THREE.Vector3, up: THREE.Vector3, height: number) => point.clone().addScaledVector(up, height);
+  for (const { points, up, out, kinds } of sides) {
+    for (let i = 0; i < n; i++) {
+      const kind = kinds[i], point = points[i];
+      if (!kind || !point) continue;
+      const next = points[(i + 1) % n], nextKind = kinds[(i + 1) % n];
+      const joined = next && nextKind === kind;
+      const along = joined ? next.clone().sub(point) : point.clone().sub(points[(i - 1 + n) % n] ?? point);
+      const length = along.length();
+      if (length < 1e-4) continue;
+      const q = orient(along, up[i], out[i]);
+      if (kind === 'tyres') {
+        tyres.push({ position: lift(point, up[i], BARRIERS.tyre.height / 2), up: up[i], side: out[i], colour: BARRIERS.tyre.colours[i % BARRIERS.tyre.colours.length] });
+        continue;
+      }
+      if (kind === 'concrete') {
+        const c = BARRIERS.concrete;
+        if (i % c.every || !joined) continue;
+        const end = points[(i + c.every) % n];
+        const span = end && kinds[(i + c.every) % n] === 'concrete' ? end.clone().sub(point) : along.clone().multiplyScalar(c.every);
+        groups.concrete.push({ position: point.clone().addScaledVector(span, 0.5), quaternion: orient(span, up[i], out[i]), scale: new THREE.Vector3(span.length() - 0.06, 1, 1) });
+        continue;
+      }
+      const look = BARRIERS[kind];
+      if (i % look.postEvery === 0) groups[`${kind}Post`].push({ position: lift(point, up[i], look.post[1] / 2), quaternion: q, scale: new THREE.Vector3(...look.post) });
+      if (!joined) continue;
+      const middle = point.clone().addScaledVector(along, 0.5);
+      if (kind === 'steel') {
+        const beam = BARRIERS.steel.beam;
+        groups.steelBeam.push({ position: lift(middle, up[i], beam.at).addScaledVector(out[i], -0.05), quaternion: q, scale: new THREE.Vector3(length + 0.02, beam.height, beam.thick) });
+      } else {
+        const rails = BARRIERS[kind];
+        for (const height of rails.rails) groups[`${kind}Rail`].push({ position: lift(middle, up[i], height), quaternion: q, scale: new THREE.Vector3(length + 0.02, rails.rail[0], rails.rail[1]) });
+      }
+    }
+  }
+  return { groups, tyres };
+}
+// A Jersey barrier's profile (wide foot, sloping sides, narrow top), extruded one metre along x and centred.
+function jerseyGeometry() {
+  const { height, bottom, top } = BARRIERS.concrete;
+  const shape = new THREE.Shape();
+  shape.moveTo(-bottom / 2, 0); shape.lineTo(bottom / 2, 0); shape.lineTo(bottom / 2 - 0.03, height * 0.22);
+  shape.lineTo(top / 2, height); shape.lineTo(-top / 2, height); shape.lineTo(-bottom / 2 + 0.03, height * 0.22); shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false });
+  // The shape lies in x/y and extrudes along z: turn it so the length runs along x, up is y, across is z.
+  geometry.rotateY(Math.PI / 2).translate(-0.5, 0, 0);
+  return geometry;
+}
+const BARRIER_LOOKS: Record<string, { colour: string; geometry: 'box' | 'jersey' }> = {
+  concrete: { colour: BARRIERS.concrete.colour, geometry: 'jersey' },
+  steelPost: { colour: BARRIERS.steel.postColour, geometry: 'box' }, steelBeam: { colour: BARRIERS.steel.beamColour, geometry: 'box' },
+  woodPost: { colour: BARRIERS.wood.postColour, geometry: 'box' }, woodRail: { colour: BARRIERS.wood.railColour, geometry: 'box' },
+  fencePost: { colour: BARRIERS.fence.postColour, geometry: 'box' }, fenceRail: { colour: BARRIERS.fence.railColour, geometry: 'box' },
+};
+function BarrierSet({ name, pieces }: { name: string; pieces: Piece[] }) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const geometry = useMemo(() => {
+    const look = BARRIER_LOOKS[name];
+    return look.geometry === 'jersey' ? jerseyGeometry() : new THREE.BoxGeometry(1, 1, 1);
+  }, [name]);
+  useEffect(() => {
+    const matrix = new THREE.Matrix4();
+    pieces.forEach((piece, index) => mesh.current!.setMatrixAt(index, matrix.compose(piece.position, piece.quaternion, piece.scale)));
+    mesh.current!.instanceMatrix.needsUpdate = true;
+    mesh.current!.computeBoundingSphere();
+    return () => geometry.dispose();
+  }, [pieces, geometry]);
+  if (!pieces.length) return null;
+  return <instancedMesh ref={mesh} args={[geometry, undefined, pieces.length]} castShadow receiveShadow frustumCulled={false}>
+    <meshStandardMaterial color={BARRIER_LOOKS[name].colour} roughness={name.startsWith('steel') ? 0.55 : 0.9} metalness={name === 'steelBeam' ? 0.35 : 0} flatShading />
+  </instancedMesh>;
+}
+function TyreStacks({ stacks }: { stacks: ReturnType<typeof buildBarriers>['tyres'] }) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const T = BARRIERS.tyre;
+  const geometry = useMemo(() => new THREE.CylinderGeometry(T.radius, T.radius, T.height, 8, 1), [T]);
+  const wobble = useRef(new Map<number, number>());
+  const lastBounce = useRef(tireBounce.id);
+  const place = useMemo(() => {
+    const matrix = new THREE.Matrix4(), quaternion = new THREE.Quaternion(), scale = new THREE.Vector3(), position = new THREE.Vector3(), yAxis = new THREE.Vector3(0, 1, 0);
+    return (index: number, amount: number) => {
+      const stack = stacks[index];
+      quaternion.setFromUnitVectors(yAxis, stack.up);
+      position.copy(stack.position).addScaledVector(stack.side, amount * T.jolt);
+      scale.set(1 + amount * 0.25, 1 - amount * 0.3, 1 + amount * 0.25);
+      mesh.current!.setMatrixAt(index, matrix.compose(position, quaternion, scale));
+    };
+  }, [stacks, T]);
+  useEffect(() => {
+    if (!stacks.length) return;
+    const colour = new THREE.Color();
+    stacks.forEach((stack, index) => { place(index, 0); mesh.current!.setColorAt(index, colour.set(stack.colour)); });
+    mesh.current!.instanceMatrix.needsUpdate = true;
+    if (mesh.current!.instanceColor) mesh.current!.instanceColor.needsUpdate = true;
+    mesh.current!.computeBoundingSphere();
+    return () => geometry.dispose();
+  }, [stacks, place, geometry]);
+  const hit = useMemo(() => new THREE.Vector3(), []);
+  useFrame((_, delta) => {
+    if (!stacks.length) return;
+    if (tireBounce.id !== lastBounce.current) {
+      lastBounce.current = tireBounce.id;
+      const frame = loopFrame(tireBounce.x, tireBounce.z);
+      hit.set(...spherePoint(frame.latitude, tireBounce.x, 0.3));
+      stacks.forEach((stack, index) => {
+        const distance = stack.position.distanceTo(hit);
+        if (distance < T.reach) wobble.current.set(index, Math.max(wobble.current.get(index) ?? 0, tireBounce.strength * (1 - distance / T.reach)));
+      });
+    }
+    if (!wobble.current.size) return;
+    for (const [index, amount] of wobble.current) {
+      const next = amount - delta / T.wobble;
+      // A jolt that rings down: out, a little back, settled.
+      place(index, Math.max(0, next) * Math.cos((1 - Math.max(0, next)) * 9));
+      if (next <= 0) wobble.current.delete(index);
+      else wobble.current.set(index, next);
+    }
+    mesh.current!.instanceMatrix.needsUpdate = true;
+  });
+  if (!stacks.length) return null;
+  return <instancedMesh ref={mesh} args={[geometry, undefined, stacks.length]} castShadow receiveShadow frustumCulled={false}>
+    <meshStandardMaterial roughness={0.92} metalness={0} flatShading />
+  </instancedMesh>;
+}
+function RoadBarriers() {
+  const built = useMemo(buildBarriers, []);
+  return <>
+    {Object.entries(built.groups).map(([name, pieces]) => <BarrierSet key={name} name={name} pieces={pieces} />)}
+    <TyreStacks stacks={built.tyres} />
   </>;
 }
 
@@ -2734,6 +2956,7 @@ export default function MiniatureWorld({ zoom }: { zoom: RefObject<number> }) {
       <LoopRoad />
       <LowPolyMountains /><Town /><LowPolyTrees /><Coast /><RopeBridge /><Well /><MeadowHouse /><Beach /><StreetFurniture /><StreetWork /><Boulders /><Meadow /><Footpaths /><PalmIsland latitude={ISLAND.latitude} longitude={ISLAND.longitude} /><PalmIsland latitude={-0.54} longitude={2.79} />
     </StaticBatch>
+    {EDGE.tires && <RoadBarriers />}
     <Boat /><BeachFloats /><Fireflies /><FishingBoat latitude={-0.79} longitude={0.54} /><Airplane />
   </group>;
 }

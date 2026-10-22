@@ -3,6 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import { Gauge, Heart, Sparkles } from 'lucide-react';
 import type { Controls } from './game/driving';
 import { Keys } from './Keys';
+import { currentPad } from './game/gamepad';
 import type { InputDevice } from './inputDevice';
 
 // The guide: teaching by doing, one thing at a time, in the player's own buttons (keyboard, Xbox pad or touch).
@@ -14,6 +15,8 @@ import type { InputDevice } from './inputDevice';
 //    boost the first time it is ready, and the camera and map after a while. A tip informs and fades by itself; using
 //    it while it shows ticks it.
 // Every prompt answers live: keys light while held, a bar fills with speed, a tick when done. The × skips the lesson.
+const STEP_GIVE_UP_S = 20;
+
 type Phase = 'wait' | 'steer' | 'speed' | 'goal' | 'free';
 type Tip = 'goal' | 'drift' | 'boost' | 'views';
 const SPEED_TARGET_KMH = 40;
@@ -49,15 +52,19 @@ export default function Coach({ rails = false, lesson, active, controls, speed, 
   // One watcher for everything: lit keys, step completion and the moment for a tip.
   useEffect(() => {
     if (!active || phase === 'wait') return;
-    let last = performance.now(), steering = 0, hardTurn = 0, free = 0;
+    let last = performance.now(), steering = 0, hardTurn = 0, free = 0, stepTime = 0;
     const timer = window.setInterval(() => {
       const now = performance.now(), dt = Math.min((now - last) / 1000, 0.1);
       last = now;
       const c = controls.current, { speed: kmh, offroad: off, boostReady: ready, trafficOn: traffic } = live.current;
-      const left = c.left || (c.steer ?? 0) > 0.2, right = c.right || (c.steer ?? 0) < -0.2;
-      const gas = c.forward || (c.throttle ?? 0) > 0.2;
-      if (c.boost) used.boost = true;
-      if (c.brake && (left || right)) used.drift = true;
+      // The pad is read by the scene, not through controls, so the lesson reads it too.
+      const pad = currentPad();
+      const padSteer = pad ? pad.steer : 0;
+      const left = c.left || (c.steer ?? 0) > 0.2 || padSteer < -0.35, right = c.right || (c.steer ?? 0) < -0.2 || padSteer > 0.35;
+      const gas = c.forward || (c.throttle ?? 0) > 0.2 || (pad?.throttle ?? 0) > 0.2;
+      const boost = c.boost || !!pad?.boost, brake = c.brake || !!pad?.handbrake;
+      if (boost) used.boost = true;
+      if (brake && (left || right)) used.drift = true;
       setKeys(k => (k.gas === gas && k.left === left && k.right === right ? k : { gas, left, right }));
       if (phase === 'steer') {
         if (left || right) steering += dt;
@@ -65,6 +72,8 @@ export default function Coach({ rails = false, lesson, active, controls, speed, 
         if (!rails && steering > 1.6) setDone(true);
       }
       if (phase === 'speed' && kmh >= SPEED_TARGET_KMH) setDone(true);
+      // A step never holds the lesson up for long: whatever the input, it moves on (and the traffic comes in).
+      if (phase === 'steer' || phase === 'speed') { stepTime += dt; if (stepTime > STEP_GIVE_UP_S) setDone(true); }
       if (phase === 'goal') {
         if (traffic && !seen.has('goal')) { markSeen('goal'); setTip({ kind: 'goal', ticked: false }); setPhase('free'); }
         else if (seen.has('goal')) setPhase('free');
@@ -75,7 +84,7 @@ export default function Coach({ rails = false, lesson, active, controls, speed, 
       hardTurn = kmh > DRIFT_TIP.minKmh && (left || right) && !off ? hardTurn + dt : 0;
       setTip(current => {
         if (current) {
-          const ticked = current.kind === 'boost' && c.boost || current.kind === 'drift' && c.brake && (left || right);
+          const ticked = current.kind === 'boost' && boost || current.kind === 'drift' && brake && (left || right);
           return ticked && !current.ticked ? { ...current, ticked: true } : current;
         }
         const show = (kind: Tip) => { markSeen(kind); return { kind, ticked: false }; };

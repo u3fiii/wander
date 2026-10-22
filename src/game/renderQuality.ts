@@ -19,12 +19,38 @@ export const QUALITY_PROFILES = {
 } as const;
 export type QualityProfile = typeof QUALITY_PROFILES[VisualQuality];
 
-export function selectVisualQuality({ forced, touch = false, cores = 8, memory = 8 }: {
-  forced?: string | null; touch?: boolean; cores?: number; memory?: number;
+const TIERS: readonly VisualQuality[] = ['low', 'mobile', 'high'];
+const isTier = (value?: string | null): value is VisualQuality => TIERS.includes(value as VisualQuality);
+
+// `console`: a games console's browser (Xbox). It reports a desktop's cores and memory, but the browser only gets a
+// small share of the machine, so it gets the light profile. `fallback`: a lighter tier this device dropped to before
+// after running too slow (see watchSlowFrames); it only ever lowers the pick.
+export function selectVisualQuality({ forced, touch = false, cores = 8, memory = 8, console: gameConsole = false, fallback }: {
+  forced?: string | null; touch?: boolean; cores?: number; memory?: number; console?: boolean; fallback?: string | null;
 }): VisualQuality {
-  if (forced === 'low' || forced === 'mobile' || forced === 'high') return forced;
-  if (touch) return cores <= 2 || memory <= 2 ? 'low' : 'mobile';
-  return cores <= 4 || memory <= 4 ? 'low' : 'high';
+  if (isTier(forced)) return forced;
+  const picked: VisualQuality = gameConsole ? 'low'
+    : touch ? (cores <= 2 || memory <= 2 ? 'low' : 'mobile')
+    : cores <= 4 || memory <= 4 ? 'low' : 'high';
+  return isTier(fallback) && TIERS.indexOf(fallback) < TIERS.indexOf(picked) ? fallback : picked;
+}
+
+// The tier below, for a device that can't keep up with its own.
+export const lighterTier = (tier: VisualQuality): VisualQuality => TIERS[Math.max(0, TIERS.indexOf(tier) - 1)];
+
+// A device that can't hold even 30 frames a second for a good while of driving, at its lowest resolution or not, is
+// on too heavy a tier. Only active rendering counts.
+const SLOW = { fps: 26, seconds: 12 };
+export const createSlowFrameState = () => ({ time: 0, frames: 0, slow: 0 });
+export function watchSlowFrames(state: ReturnType<typeof createSlowFrameState>, delta: number, active: boolean) {
+  if (!active || !Number.isFinite(delta) || delta <= 0 || delta > 0.5) return false;
+  state.time += delta;
+  state.frames++;
+  if (state.time < 1) return false;
+  state.slow = state.frames / state.time < SLOW.fps ? state.slow + state.time : 0;
+  state.time = 0;
+  state.frames = 0;
+  return state.slow >= SLOW.seconds;
 }
 
 export function resolutionBounds(profile: QualityProfile, deviceDpr: number) {

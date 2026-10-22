@@ -4,7 +4,7 @@ import { Flame } from 'lucide-react';
 import type { CarState, Controls } from './game/driving';
 import { CAR_CONFIG } from './game/config';
 import { difficulty } from './game/difficulty';
-import { playBoostReady } from './game/audio';
+import { playReady } from './game/audio';
 
 // Boost meter beside the speedometer: a glass disc with a ring round it and a flame in the middle.
 // - Charging: the ring fills, and the seconds left show in the label. Skilled moves top it up, shown as a "+%"
@@ -35,7 +35,7 @@ export default function BoostGauge({ car, controls, offroad, mobile = false }: {
       lastCharge = c.boostCharge;
       const next = c.boosting ? 'burning' : c.boostCharge >= 1 ? 'ready' : 'charging';
       if (next !== last) {
-        if (next === 'ready' && last === 'charging') { setReadyCount(n => n + 1); playBoostReady(); }
+        if (next === 'ready' && last === 'charging') { setReadyCount(n => n + 1); playReady(); }
         last = next;
         setState(next);
       }
@@ -48,9 +48,17 @@ export default function BoostGauge({ car, controls, offroad, mobile = false }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [car]);
   const blocked = state === 'ready' && offroad;
-  const press = (on: boolean) => { controls.current.boost = on; };
+  const [shake, setShake] = useState(0);
+  const press = (on: boolean) => {
+    controls.current.boost = on;
+    if (!on) return;
+    // Felt as well as seen: a firm buzz when it fires, a double tick when it can't (off the road).
+    if (state === 'ready' && !offroad) navigator.vibrate?.(28);
+    else if (blocked) { navigator.vibrate?.([10, 40, 10]); setShake(n => n + 1); }
+  };
   return <button
-    className={`boost-gauge ${state}${blocked ? ' blocked' : ''}`}
+    // (Two classes taking turns restart the shake on each refused press without remounting the button mid-press.)
+    className={`boost-gauge ${state}${blocked ? ' blocked' : ''}${shake ? ` refused-${shake % 2}` : ''}`}
     aria-label={state === 'ready' ? 'Boost ready' : state === 'burning' ? 'Boosting' : 'Boost charging'}
     onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); press(true); }}
     onPointerUp={() => press(false)} onPointerCancel={() => press(false)} onLostPointerCapture={() => press(false)}

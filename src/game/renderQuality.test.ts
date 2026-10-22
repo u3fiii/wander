@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adaptPacing, adaptResolution, createPacingState, createResolutionState, QUALITY_PROFILES, resolutionBounds, selectVisualQuality } from './renderQuality.ts';
+import { adaptPacing, adaptResolution, createPacingState, createResolutionState, createSlowFrameState, lighterTier, QUALITY_PROFILES, resolutionBounds, selectVisualQuality, watchSlowFrames } from './renderQuality.ts';
 
 test('touch devices get a sharp mobile profile, with a fallback for constrained hardware', () => {
   assert.equal(selectVisualQuality({ touch: true }), 'mobile');
@@ -122,4 +122,28 @@ test('a device that cannot hold 60 settles at a steady 30, and goes back to 60 o
   assert.equal(run(6, 1 / 40, 0.024), 30);
   assert.equal(run(25, null, 0.006), 30, 'the wait has doubled');
   assert.equal(run(30, null, 0.006), 60);
+});
+
+test('a console browser gets the light tier, and a remembered fallback only ever lowers the pick', () => {
+  assert.equal(selectVisualQuality({ console: true }), 'low');
+  assert.equal(selectVisualQuality({ console: true, forced: 'high' }), 'high');
+  assert.equal(selectVisualQuality({ fallback: 'mobile' }), 'mobile');
+  assert.equal(selectVisualQuality({ touch: true, fallback: 'high' }), 'mobile');
+  assert.equal(selectVisualQuality({ fallback: 'nonsense' }), 'high');
+  assert.equal(lighterTier('high'), 'mobile');
+  assert.equal(lighterTier('low'), 'low');
+});
+
+test('only a long stretch under 30 frames a second counts as too slow', () => {
+  const run = (fps: number, seconds: number, state = createSlowFrameState()) => {
+    let hit = false;
+    for (let i = 0; i < fps * seconds; i++) hit = watchSlowFrames(state, 1 / fps, true) || hit;
+    return hit;
+  };
+  assert.equal(run(30, 60), false);
+  assert.equal(run(20, 8), false);
+  assert.equal(run(20, 14), true);
+  const state = createSlowFrameState();
+  run(20, 8, state); run(50, 2, state);
+  assert.equal(run(20, 8, state), false, 'a smooth stretch starts the count again');
 });
