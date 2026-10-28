@@ -8,6 +8,7 @@ import '@fontsource/quicksand/latin-500.css';
 import '@fontsource/quicksand/latin-700.css';
 import App from './App';
 import './style.css';
+import './HomeMobile.css';
 
 // Render after the locally bundled UI fonts are ready to avoid a layout jump.
 Promise.all([

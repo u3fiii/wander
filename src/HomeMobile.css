@@ -1,0 +1,25 @@
+@media (max-width: 600px) {
+  .intro .intro-card .cta {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: none;
+    gap: 10px;
+  }
+
+  .intro .intro-card .cta > .rise {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .intro .intro-card .cta .start-button,
+  .intro .intro-card .cta .party-button {
+    width: 100%;
+    max-width: none;
+    min-height: 52px;
+    height: 52px;
+    margin: 0;
+  }
+}
