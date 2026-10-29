@@ -3,7 +3,8 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CAR_CONFIG } from './config';
-import { buildCarRig, logModelNodes, updateWheels } from './carRig';
+import { applySuspension, buildCarRig, logModelNodes, updateWheels } from './carRig';
+import type { Suspension } from './carRig';
 import { withDraco } from './gltf';
 import { JITTER, PALETTE, seededRandom } from './palette';
 import { bakeRoles, jitterAmount, playerCarRole, roleMaterials, textureSampler } from './recolor';
@@ -12,10 +13,12 @@ import type { VehicleId } from './vehicles';
 import type { CarState } from './driving';
 import { styleCompact } from './compactStyle';
 import { prepareVehicleModel } from './vehicleModel';
+import { applyCarLook, forgetCarLook, syncCarLook } from './carLook';
 
-// `tint` paints the body another colour (party mode: one per player).
-export default function PlayerVehicle({ vehicleId, car, onReady, tint }: {
-  vehicleId: VehicleId; car?: React.RefObject<CarState>; onReady?: () => void; tint?: string;
+// `tint` paints the body another colour (party mode: one per player). `suspension`, when given, moves the body on
+// its springs and each wheel (carRig.ts); without it the car sits still on its wheels.
+export default function PlayerVehicle({ vehicleId, car, onReady, tint, suspension }: {
+  vehicleId: VehicleId; car?: React.RefObject<CarState>; onReady?: () => void; tint?: string; suspension?: React.RefObject<Suspension>;
 }) {
   const definition = VEHICLES.find(vehicle => vehicle.id === vehicleId)!;
   const gltf = useLoader(GLTFLoader, definition.url, withDraco);
@@ -36,6 +39,8 @@ export default function PlayerVehicle({ vehicleId, car, onReady, tint }: {
           : role === 'window' ? 'windows' : role === 'tire' ? 'tires' : role === 'lamp' ? 'carYellow'
           : role === 'accent' ? 'carCream' : 'roadShoulder', roughness: role === 'window' ? 0.5 : undefined }), jitter);
         if (tint) baked.roles.forEach((role, index) => { if (role === 'body') (child.material as THREE.MeshStandardMaterial[])[index].color.set(tint); });
+        // Each part's colour comes from the Car look tab (carLook.ts); a party car keeps its player colour.
+        if (!tint) baked.roles.forEach((role, index) => { (child.material as THREE.MeshStandardMaterial[])[index].userData.carPart = role; });
       } else {
         child.material = Array.isArray(child.material) ? child.material.map(item => item.clone()) : material.clone();
         if (vehicleId === 'rover') {
@@ -58,18 +63,26 @@ export default function PlayerVehicle({ vehicleId, car, onReady, tint }: {
     const rig = buildCarRig(model, definition.wheelNodes ? {
       wheelNodeNames: definition.wheelNodes, wheelRadius: radius,
     } : undefined);
+    // The car's own studio lights, part colours and finish (carLook.ts, the Car look tab).
+    rig.frame.traverse(child => {
+      if (!(child instanceof THREE.Mesh)) return;
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) if (material instanceof THREE.MeshStandardMaterial) applyCarLook(material);
+    });
     return { rig, ownedMaterials, ownedGeometries, ownedTextures };
   }, [gltf.scene, vehicleId, definition, tint]);
   // Each mounted model owns its travel origin, so switching cars never spins the wheels by the whole run distance.
   const travel = useMemo(() => ({ last: car?.current.wheelTravel ?? 0 }), [rig, car]);
   useFrame(() => {
+    syncCarLook();
     if (!car) return;
     const delta = car.current.wheelTravel - travel.last;
     travel.last = car.current.wheelTravel;
     updateWheels(rig, car.current.steering, Math.abs(delta) < 1 ? delta : 0);
+    if (suspension?.current) applySuspension(rig, suspension.current);
   });
   useEffect(() => { onReady?.(); }, [rig, onReady]);
   useEffect(() => () => {
+    rig.frame.traverse(child => { if (child instanceof THREE.Mesh) [child.material].flat().forEach(forgetCarLook); });
     rig.dispose();
     // Source geometry and textures stay in useLoader's cache for the garage and future car switches.
     ownedMaterials.forEach(material => material.dispose());

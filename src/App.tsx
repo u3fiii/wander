@@ -12,7 +12,6 @@ import Coach from './Coach';
 import BoostGauge from './BoostGauge';
 import WaveButton from './WaveButton';
 import { resetRunWave, waveScore, waveWord } from './game/wave';
-import { resetJam } from './game/jam';
 import type { DriftScore, Telemetry } from './game/Scene';
 import { BOOST_EARN, DRIVE_MODE, earnBoost, emptyControls, initialLoopCar, recoverToRoad } from './game/driving';
 import type { ControlKey } from './game/driving';
@@ -203,6 +202,8 @@ import { NEAR_MISS_LOOK_COLOURS, NEAR_MISS_LOOK_SAVED, NEAR_MISS_LOOK_SLIDERS, n
 import type { NearMissLook } from './game/nearMissLook';
 import { WARM_LIGHT_COLOURS, WARM_LIGHT_SAVED, WARM_LIGHT_SLIDERS, warmLight } from './game/warmLight';
 import type { WarmLight } from './game/warmLight';
+import { CAR_LOOK_COLOURS, CAR_LOOK_PRESETS, CAR_LOOK_SAVED, CAR_LOOK_SLIDERS, carLook } from './game/carLook';
+import type { CarLook } from './game/carLook';
 import { SOUND_TUNING_SAVED, SOUND_TUNING_SLIDERS, applySoundTuning, soundTuning } from './game/soundTuning';
 import type { SoundTuning } from './game/soundTuning';
 import { cinematicState } from './game/cinematic';
@@ -353,7 +354,7 @@ function NightSky() {
 // nightLook.json. Picking a tab switches the game to that time of day so the changes can be seen.
 type LookValues = Record<string, number | string>;
 type LookSlider = { key: string; label: string; min: number; max: number; step: number; group?: string };
-type LookMode = 'day' | 'night' | 'car' | 'drift' | 'theme' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
+type LookMode = 'day' | 'night' | 'car' | 'carLook' | 'drift' | 'theme' | 'camera' | 'boost' | 'nearMiss' | 'sound' | 'warm';
 function LookPanel({ mode, onMode, look, sliders, colours, choices, extra, saved, endpoint, serialize, onChange, onSaved, onClose }: {
   mode: LookMode; onMode: (mode: LookMode) => void; look: LookValues; sliders: LookSlider[]; colours?: Array<{ key: string; label: string }>; saved: LookValues;
   // A row of buttons choosing one value (the theme to edit).
@@ -389,6 +390,7 @@ function LookPanel({ mode, onMode, look, sliders, colours, choices, extra, saved
         <button className={mode === 'day' ? 'on' : ''} onClick={() => { onMode('day'); setStatus(''); }}>Day</button>
         <button className={mode === 'night' ? 'on' : ''} onClick={() => { onMode('night'); setStatus(''); }}>Night</button>
         <button className={mode === 'car' ? 'on' : ''} onClick={() => { onMode('car'); setStatus(''); }}>Car</button>
+        <button className={mode === 'carLook' ? 'on' : ''} onClick={() => { onMode('carLook'); setStatus(''); }}>Car look</button>
         <button className={mode === 'drift' ? 'on' : ''} onClick={() => { onMode('drift'); setStatus(''); }}>Drift</button>
         <button className={mode === 'theme' ? 'on' : ''} onClick={() => { onMode('theme'); setStatus(''); }}>Stages</button>
         <button className={mode === 'camera' ? 'on' : ''} onClick={() => { onMode('camera'); setStatus(''); }}>Camera</button>
@@ -635,6 +637,8 @@ export default function App() {
   const changeBoost = (next: BoostTuning) => { applyBoostTuning(next); setBoostValues(next); };
   const [nearMissValues, setNearMissValues] = useState<NearMissLook>({ ...nearMissLook });
   const changeNearMiss = (next: NearMissLook) => { Object.assign(nearMissLook, next); setNearMissValues(next); };
+  const [carLookValues, setCarLookValues] = useState<CarLook>({ ...carLook });
+  const changeCarLook = (next: CarLook) => { Object.assign(carLook, next); setCarLookValues(next); };
   const [warmValues, setWarmValues] = useState<WarmLight>({ ...warmLight });
   const changeWarm = (next: WarmLight) => { Object.assign(warmLight, next); setWarmValues(next); };
   const [soundValues, setSoundValues] = useState<SoundTuning>({ ...soundTuning });
@@ -1111,7 +1115,6 @@ export default function App() {
   const reset = useCallback(() => {
     boostElapsed.current = 0; setBoostUnlocked(false);
     resetRunWave();
-    resetJam();
     controls.current = emptyControls(); curbArmed.current = false; setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
     // A new run: hearts, stage, stats, stars, clean driving and the best-score note start over.
     beatBest.current = false; lastDistance.current = 0; distanceCarry.current = 0; comboRef.current = { count: 0, until: 0 }; setCombo({ count: 0, id: 0 }); shownScore.current = 0; if (scoreText.current) scoreText.current.textContent = '0'; bestAtRunStart.current = loadBest();
@@ -1230,10 +1233,10 @@ export default function App() {
     {showLook && <LookPanel
       mode={lookMode}
       onMode={mode => { setLookMode(mode); if (mode === 'day' || mode === 'night' || mode === 'nearMiss') goTo(mode === 'day' ? 'day' : 'night'); }}
-      look={{ day: look, night: nightValues, car: carValues, drift: driftValues, theme: themeValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
-      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, drift: DRIFT_TUNING_SLIDERS, theme: stageDetail ? THEME_TUNING_SLIDERS : STAGE_SIMPLE_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
-      colours={lookMode === 'theme' ? stageDetail ? THEME_COLOURS : STAGE_SIMPLE_COLOURS : lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : undefined}
-      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, drift: DRIFT_TUNING_SAVED, theme: themeSaved(Number(themeValues.theme), Number(themeValues.view)), camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
+      look={{ day: look, night: nightValues, car: carValues, carLook: carLookValues, drift: driftValues, theme: themeValues, camera: cameraValues, boost: boostValues, nearMiss: nearMissValues, sound: soundValues, warm: warmValues }[lookMode]}
+      sliders={{ day: DAY_LOOK_SLIDERS, night: NIGHT_LOOK_SLIDERS, car: CAR_TUNING_SLIDERS, carLook: CAR_LOOK_SLIDERS, drift: DRIFT_TUNING_SLIDERS, theme: stageDetail ? THEME_TUNING_SLIDERS : STAGE_SIMPLE_SLIDERS, camera: CAMERA_TUNING_SLIDERS, boost: BOOST_TUNING_SLIDERS, nearMiss: NEAR_MISS_LOOK_SLIDERS, sound: SOUND_TUNING_SLIDERS, warm: WARM_LIGHT_SLIDERS }[lookMode]}
+      colours={lookMode === 'theme' ? stageDetail ? THEME_COLOURS : STAGE_SIMPLE_COLOURS : lookMode === 'night' ? NIGHT_LOOK_COLOURS : lookMode === 'boost' ? BOOST_TUNING_COLOURS : lookMode === 'nearMiss' ? NEAR_MISS_LOOK_COLOURS : lookMode === 'warm' ? WARM_LIGHT_COLOURS : lookMode === 'carLook' ? CAR_LOOK_COLOURS : undefined}
+      saved={{ day: DAY_LOOK_SAVED, night: NIGHT_LOOK_SAVED, car: CAR_TUNING_SAVED, carLook: CAR_LOOK_SAVED, drift: DRIFT_TUNING_SAVED, theme: themeSaved(Number(themeValues.theme), Number(themeValues.view)), camera: CAMERA_TUNING_SAVED, boost: BOOST_TUNING_SAVED, nearMiss: NEAR_MISS_LOOK_SAVED, sound: SOUND_TUNING_SAVED, warm: WARM_LIGHT_SAVED }[lookMode]}
       serialize={lookMode === 'theme' ? currentThemeTuning : undefined}
       onSaved={lookMode === 'theme' ? markThemeTuningSaved : undefined}
       choices={lookMode === 'theme' ? themeChoices() : undefined}
@@ -1252,8 +1255,11 @@ export default function App() {
           </button>
           <span>{STAGES.length <= 2 ? 'Keep at least 2 stages' : STAGES[Number(themeValues.theme)]?.name}</span>
         </div>
+      </div> : lookMode === 'carLook' ? <div className="car-presets" role="group" aria-label="Presets">
+        <span>Start from</span>
+        {CAR_LOOK_PRESETS.map(preset => <button key={preset.name} onClick={() => changeCarLook({ ...carLookValues, ...preset.look } as CarLook)}>{preset.name}</button>)}
       </div> : undefined}
-      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', drift: '/__drift-tuning', theme: '/__theme-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
+      endpoint={{ day: '/__day-look', night: '/__night-look', car: '/__car-tuning', carLook: '/__car-look', drift: '/__drift-tuning', theme: '/__theme-tuning', camera: '/__camera-tuning', boost: '/__boost-tuning', nearMiss: '/__near-miss-look', sound: '/__sound-tuning', warm: '/__warm-light' }[lookMode]}
       onChange={values => {
         if (lookMode === 'day') changeLook(values as DayLook);
         else if (lookMode === 'night') changeNightLook(values as NightLook);
@@ -1264,6 +1270,7 @@ export default function App() {
         else if (lookMode === 'boost') changeBoost(values as unknown as BoostTuning);
         else if (lookMode === 'nearMiss') changeNearMiss(values as unknown as NearMissLook);
         else if (lookMode === 'warm') changeWarm(values as unknown as WarmLight);
+        else if (lookMode === 'carLook') changeCarLook(values as unknown as CarLook);
         else changeSound(values as unknown as SoundTuning);
       }}
       onClose={() => setShowLook(false)}

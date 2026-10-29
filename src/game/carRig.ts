@@ -14,11 +14,32 @@ const SPRING_STEP = 1 / 120;
 export type CarRig = {
   // Holds the chassis and wheels in model space and turns them to face the vehicle's -z.
   frame: THREE.Group;
+  // The body on its springs: the chassis, pivoting at axle height (`pivot`, model space). The wheels are not in it,
+  // so the body leans, dips and bounces on top of them while they stay on the road.
+  sprung: THREE.Group;
+  pivot: number;
+  // Each wheel's mount (moved up and down by the suspension) and its resting height, model space.
+  mount: Record<WheelKey, THREE.Group>;
+  rest: Record<WheelKey, number>;
   steer: Record<'FL' | 'FR', THREE.Group>;
   spin: Record<WheelKey, THREE.Group>;
   wheelRadius?: number;
   dispose: () => void;
 };
+
+// The suspension's pose this frame, in the car's own space (m, radians; written by the scene, applied by
+// applySuspension): the body's pitch (+ nose up), roll, lift and squash, and how far each wheel is pushed up from rest.
+// `pivot` is where the body pivots (the axle height, m), filled in by the model.
+export type Suspension = { pitch: number; roll: number; lift: number; squash: number; pivot: number; wheels: Record<WheelKey, number> };
+export const createSuspension = (): Suspension => ({ pitch: 0, roll: 0, lift: 0, squash: 0, pivot: 0, wheels: { FL: 0, FR: 0, RL: 0, RR: 0 } });
+
+// How the body moves on its wheels:
+// - `rollScale`: the share of the body spring's lean that goes to the body (the wheels no longer lean with it, so less
+//   reads as more);
+// - `travel`: the most the body sinks or rises on its springs (m);
+// - `wheelBump`: how much more than the body each wheel follows the road's small bumps (the front ones first);
+// - `droop`: how far the wheels hang down in the air (m); `landingDrop`/`landingSquash`: the body's sag on landing.
+export const SUSPENSION = { rollScale: 0.6, travel: 0.08, wheelBump: 1.8, droop: 0.07, landingDrop: 0.08, landingSquash: 0.1, wheelbase: 1.2 };
 
 export function logModelNodes(model: THREE.Object3D) {
   model.traverse(node => console.log(`[car model] ${node.type} "${node.name}" parent="${node.parent?.name ?? ''}"`));
@@ -37,6 +58,9 @@ function placeholderWheelFactory() {
     new THREE.MeshStandardMaterial({ color: PALETTE.carCream, roughness: 0.85, metalness: 0, flatShading: true }),
     new THREE.MeshStandardMaterial({ color: PALETTE.roadShoulder, roughness: 0.85, metalness: 0, flatShading: true }),
   ];
+  // The tyre and the hub take their colours from the Car look tab (carLook.ts).
+  materials[0].userData.carPart = 'wheel';
+  materials[1].userData.carPart = 'hub';
   const create = () => {
     const wheel = new THREE.Group();
     geometries.forEach((geometry, index) => {
@@ -90,7 +114,45 @@ export function buildCarRig(chassis: THREE.Object3D, options: {
     else spinPivot.add(placeholders.create());
     spin[key] = spinPivot;
   }
-  return { frame, steer, spin, wheelRadius: options.wheelRadius, dispose: placeholders.dispose };
+  const mount = { FL: steer.FL, FR: steer.FR, RL: spin.RL, RR: spin.RR };
+  const rest = { FL: mount.FL.position.y, FR: mount.FR.position.y, RL: mount.RL.position.y, RR: mount.RR.position.y };
+  // The chassis hangs from a pivot at the wheels' centre height, beside the wheels rather than over them.
+  const pivot = (rest.FL + rest.FR + rest.RL + rest.RR) / 4;
+  const sprung = new THREE.Group();
+  sprung.name = 'carSprung';
+  sprung.position.y = pivot;
+  frame.add(sprung);
+  frame.updateMatrixWorld(true);
+  sprung.attach(chassis);
+  return { frame, sprung, pivot, mount, rest, steer, spin, wheelRadius: options.wheelRadius, dispose: placeholders.dispose };
+}
+
+// Puts the body and the wheels where the suspension says. The model frame is turned half round (its +z is the car's
+// back) and scaled, so the car's pitch and roll turn the other way here and lengths are divided by the scale.
+export function applySuspension(rig: CarRig, pose: Suspension) {
+  const k = 1 / CAR_CONFIG.bodyScale;
+  pose.pivot = rig.pivot * CAR_CONFIG.bodyScale;
+  rig.sprung.position.y = rig.pivot + pose.lift * k;
+  rig.sprung.rotation.set(-pose.pitch, 0, -pose.roll);
+  rig.sprung.scale.set(1 + pose.squash * 0.5, 1 - pose.squash, 1 + pose.squash * 0.5);
+  for (const key of WHEELS) rig.mount[key].position.y = rig.rest[key] + pose.wheels[key] * k;
+}
+
+// The suspension's pose from the body spring and the road: the body leans, dips and bounces within its travel; the
+// wheels follow the road's small bumps (the front ones a wheelbase ahead of the rear), hang down in the air, and stay
+// planted otherwise. `landing` is the landing sag (0..1).
+export function poseSuspension(pose: Suspension, spring: BodySpring, car: CarState, landing: number, flying: boolean, offroad: boolean) {
+  const S = SUSPENSION;
+  pose.pitch = spring.pitch;
+  pose.roll = spring.roll * S.rollScale;
+  pose.lift = THREE.MathUtils.clamp(spring.bounce - landing * S.landingDrop, -S.travel, S.travel);
+  pose.squash = spring.squash + landing * S.landingSquash;
+  const speedRatio = Math.min(1, Math.abs(car.speed) / CAR_CONFIG.maxSpeed);
+  const bump = CAR_CONFIG.bumpHeight * (offroad ? CAR_CONFIG.offroadBumpFactor : 1) * speedRatio * S.wheelBump;
+  for (const key of WHEELS) {
+    const [, axle] = WHEEL_LAYOUT[key];
+    pose.wheels[key] = flying ? -S.droop : bump * bumps(car.distance + axle * S.wheelbase / 2);
+  }
 }
 
 export function updateWheels(rig: CarRig, steer: number, travel: number) {

@@ -1,3 +1,5 @@
+import { LANE_SCALE, ROAD_WIDENING } from './roadWidth.ts';
+
 // Every knob for how the player car drives, moves and is filmed. Metres, seconds, radians.
 export const CAR_CONFIG = {
   // Speed
@@ -63,8 +65,8 @@ export const CAR_CONFIG = {
   // The curb: once the car's outer wheels are on it (its centre `curbStart` m from the centre line, fully at
   // `curbFull`), it rumbles, and its top speed sinks to `curbSpeedFactor` of the usual, scrubbed off at `curbScrub`
   // m/s². Nothing scores while riding it (see App), so the edge is safe but not a free lane.
-  curbStart: 2.35,
-  curbFull: 2.85,
+  curbStart: 2.35 + ROAD_WIDENING,
+  curbFull: 2.85 + ROAD_WIDENING,
   curbSpeedFactor: 0.42,
   // Riding it on and on drags harder: after `curbLongAfter` s on the curb the top speed is down to `curbSpeedFactorLong`
   // (it eases back once the car is off the curb a while).
@@ -72,7 +74,7 @@ export const CAR_CONFIG = {
   curbLongAfter: 1.5,
   curbScrub: 18,
   roadAssist: 3,
-  roadEdgeHalfWidth: 3.04, // asphalt (2.88) plus the curb, a hair inside the bridge railing posts (3.08) so the wall never snags on them
+  roadEdgeHalfWidth: 3.04 + ROAD_WIDENING, // half the asphalt plus the curb, a hair inside the bridge railing posts so the wall never snags on them
   roadEdgeZone: 1.8,
   roadAssistFull: 3,
   roadEdgeSlack: 1.6,
@@ -82,7 +84,7 @@ export const CAR_CONFIG = {
   roadEdgeAssist: 3,
   // The old assist (boost, touch screens): the heading eases back toward the road direction, firmer once the car is
   // this far (m) from the centre line and heading out.
-  roadEdgeStart: 1.8,
+  roadEdgeStart: 1.8 * LANE_SCALE,
   // The approach to the bridge: extra road assist (per second) that fades out over this many radians from the deck.
   bridgeFunnelAssist: 14,
   bridgeFunnelReach: 0.5,
@@ -96,7 +98,7 @@ export const CAR_CONFIG = {
   crashAssist: 3.5,
   crashAssistTime: 1.2,
   // Back to road (F): how far from the road centre the car is put back, at most.
-  recoverLaneOffset: 1.4,
+  recoverLaneOffset: 1.4 * LANE_SCALE,
   // Off-road (on land, away from the road)
   offroadSpeedFactor: 0.5,
   offroadSlowdownTime: 1,
@@ -164,7 +166,7 @@ export const CAR_CONFIG = {
   cruiseFollowGap: 4.5,
   cruiseStopGap: 3,
   cruiseLookAhead: 18,
-  cruiseLaneOffset: 1.22,
+  cruiseLaneOffset: 1.22 * LANE_SCALE,
   cruiseLaneGain: 0.45,
   cruiseLaneMaxAngle: 0.18,
   cruiseSteerRate: 2.6,

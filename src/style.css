@@ -1902,3 +1902,23 @@
 ::-webkit-scrollbar-thumb{background:#ffffff30;border-radius:6px}
 ::-webkit-scrollbar-thumb:hover{background:#ffffff50}
 ::-webkit-scrollbar-corner{background:transparent}
+
+/* The Car look tab's presets: one row of small pills, each filling in a whole look to start from. */
+.car-presets{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:4px 0 10px}
+.car-presets span{width:100%;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;color:#8a6d3b}
+.car-presets button{padding:6px 12px;border-radius:999px;border:1px solid #17252f26;background:#ffffff99;color:#1e3a3a;font-size:12px;font-weight:700;transition:background .15s,transform .15s}
+.car-presets button:hover{background:#fff;transform:translateY(-1px)}
+.car-presets button:active{transform:scale(.96)}
+
+/* Narrower windows with a keyboard: the stage card in the middle would run under the clock and hearts. Up to 1280 px
+   it moves left, beside the menu button; below 1000 px it drops to its own row under the buttons, centred. */
+@media (pointer:fine) and (max-width:1280px){
+  .playing .hud-center{left:112px;translate:none}
+}
+@media (pointer:fine) and (max-width:1000px){
+  .playing .hud-center{left:50%;top:96px;translate:-50% 0}
+}
+
+/* The end-of-run shot fades the whole driving HUD out (see .finale above), the boost and shockwave discs included,
+   whatever state their own rules leave them in: nothing in colour stays over the black-and-white finale. */
+.app.finale .boost-gauge,.app.finale .wave-button,.app.finale .wave-flash,.app.finale .big-note,.app.finale .speed-label{opacity:0!important;animation:none!important;transition:opacity .6s ease;pointer-events:none}

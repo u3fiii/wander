@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DRIVE_MODE, EDGE, RAILS, TIRES, lateralScale, emptyControls, initialCar, initialLoopCar, keepOnBridge, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
+import { DRIVE_MODE, EDGE, FORWARD, RAILS, TIRES, lateralScale, emptyControls, initialCar, initialLoopCar, keepOnBridge, isBlocked, onRoadSurface, recoverToRoad, stepCar, stepLoopCar } from './driving.ts';
 import type { CarState, Controls } from './driving.ts';
 import { CAR_CONFIG, LOOP_DRIVE } from './config.ts';
 import { FULL_TURN, GLOBE_RADIUS, LOOP_LENGTH, loopFrame, loopLatitude, loopPoint } from './globe.ts';
@@ -394,7 +394,7 @@ test('riding the curb rumbles the car down to a slower pace; back in the lane it
     }
     return { curb, lowest };
   };
-  const onCurb = run(2.75), inLane = run(1.2);
+  const onCurb = run(CAR_CONFIG.curbFull - 0.1), inLane = run(1.2);
   assert.ok(onCurb.curb > 0.5, `on the curb (${onCurb.curb.toFixed(2)})`);
   assert.ok(onCurb.lowest < CAR_CONFIG.maxSpeed * 0.8, `slowed on the curb (${onCurb.lowest.toFixed(1)} m/s)`);
   assert.equal(inLane.curb, 0);
@@ -426,4 +426,18 @@ test('steering away from a bridge rail is not straightened back into it', () => 
     assert.equal(car.heading, -side * 0.4);
     assert.equal(car.speed, 8);
   }
+});
+
+test('with a keyboard the car never ends up turned round, however hard it is steered, drifted or reversed', () => {
+  const car = { ...initialLoopCar(), x: 0.6, speed: 14 };
+  let widest = 0;
+  const startX = car.x;
+  for (let i = 0; i < 60 * 6; i++) {
+    const input = i < 60 * 3 ? { forward: true, left: true, brake: i % 90 < 60 } : i < 60 * 4 ? { back: true, right: true } : { forward: true, right: true };
+    stepLoopCar(car, { ...emptyControls(), ...input }, 1 / 60, true);
+    widest = Math.max(widest, Math.abs(car.heading));
+  }
+  assert.ok(widest <= FORWARD.max + 1e-6, `never more than ${FORWARD.max} rad off the road (${widest.toFixed(2)})`);
+  assert.ok(widest < Math.PI / 2, 'so never facing back the way it came');
+  assert.ok(car.x > startX, 'and still headed on along the road');
 });

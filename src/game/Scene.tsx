@@ -1,3 +1,4 @@
+import { LANE_SCALE } from './roadWidth';
 import { Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useLoader, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -7,11 +8,10 @@ import { DRIVING_CONFIG as CAR_CONFIG } from './vehicleHandling';
 import { BOOST_FEEL, boostTuning } from './boostTuning';
 import { createDust, createSoilClods, createSpeedLines, createTireMarks, updateDust, updateSoilClods, updateSpeedLines, updateTireMarks } from './juice';
 import { playBoost, playReady, playHonk, playImpact, playSlowMoWhoosh, playThud, playWhoosh, updateAudio } from './audio';
-import { createBodySpring, updateBodySpring, updateCamera } from './carRig';
-import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
+import { createBodySpring, createSuspension, poseSuspension, updateBodySpring, updateCamera } from './carRig';
+import { GLOBE_RADIUS, loopFrame, loopLatitude, spherePoint } from './globe';
 import { ROAD_PATHS, distanceToRoadNetwork, isLandAt, landInfluence, roadPathFrame, roadPathMetric, roadSurfaceElevation, terrainElevation, terrainNormal } from './worldMap';
 import { JUMP, createJump, stepJump } from './jump';
-import { JAM, recordWave, stepJam, trafficJam } from './jam';
 import { WAVE, chargeWave, fireWave, runWave, waveOver, waveRadius } from './wave';
 import { DRIVE_MODE, RAILS, initialLoopCar, tireBounce, keepOnBridge, recoverToRoad, stepLoopCar } from './driving';
 import { clearObstacleGroup, drainNearMisses, drainTrafficHits, drainTrafficTouch, isSpecialNearMiss, setObstacleGroup } from './obstacles';
@@ -103,14 +103,14 @@ export type SceneProps = {
 const localUp = new THREE.Vector3(0, 1, 0);
 const localGlobeCenter = new THREE.Vector3(0, -GLOBE_RADIUS, 0);
 const scenicSpawnAngles = [0.32, 0.78, 1.92, 2.55, 3.82, 4.46, 5.7] as const;
-const TRAFFIC_LANE_OFFSET = 1.22;
+const TRAFFIC_LANE_OFFSET = 1.22 * LANE_SCALE;
 // Traffic doesn't leave the curb free: now and then a car drives on the outer side of its lane (`offset` m further
 // out, which leaves no room to squeeze by on the curb), about `share` of the time on its own slow rhythm; and when the
 // player has been riding the curb for `playerCurbTime` s, cars on that side within `reach` m along the road drift out
 // to it too. They move over at `rate` (gently, like a real car pulling over), never in a jump.
-const CURB_HUG = { offset: 0.95, share: 0.3, rate: 0.7, reach: 45, playerCurbTime: 0.8 };
+const CURB_HUG = { offset: 0.95 * LANE_SCALE, share: 0.3, rate: 0.7, reach: 45, playerCurbTime: 0.8 };
 // A swaying car drifts this far (m) either side of its lane line, a full sway taking 2π / rate seconds.
-const SWERVE = { width: 0.9, rate: 0.75 };
+const SWERVE = { width: 0.9 * LANE_SCALE, rate: 0.75 };
 // Just inside the road edge (half width 2.88): counts as on-road but clear of both traffic lanes.
 const PARKING_OFFSET = -3.2;
 
@@ -202,7 +202,7 @@ function BoostFlame({ car, vehicleId }: { car: React.RefObject<CarState>; vehicl
 
 // Head and tail lamps that glow at night (additive cores + soft halos), faded by the night blend.
 // Night lights are warm and soft everywhere: amber headlamps and beams, like the street lamps and windows.
-function CarModel({ car, vehicleId, active, landingCompression, landingActive, bodyRoll, nightBlend }: {
+function CarModel({ car, vehicleId, active, landingCompression, landingActive, bodyRoll, nightBlend, flying }: {
   car: React.RefObject<CarState>;
   vehicleId: VehicleId;
   active: boolean;
@@ -210,9 +210,15 @@ function CarModel({ car, vehicleId, active, landingCompression, landingActive, b
   landingActive: React.RefObject<boolean>;
   bodyRoll: React.RefObject<number>;
   nightBlend: React.RefObject<number>;
+  // In the air over a crest (jump.ts): the wheels hang down.
+  flying?: React.RefObject<{ flying: boolean }>;
 }) {
   const body = useRef<THREE.Group>(null!);
+  const lamps = useRef<THREE.Group>(null!);
+  const lampsInner = useRef<THREE.Group>(null!);
   const spring = useMemo(createBodySpring, []);
+  // The body on its springs and each wheel (carRig.ts): the model applies it, the lamps and the flame follow the body.
+  const suspension = useRef(createSuspension());
   const landing = useRef(0);
   const effects = vehicleEffects(vehicleId);
   useFrame((_, delta) => {
@@ -220,16 +226,21 @@ function CarModel({ car, vehicleId, active, landingCompression, landingActive, b
     const dt = Math.min(delta, LOOP_DRIVE.maxFrameDelta);
     updateBodySpring(spring, state, dt, active && !landingActive.current, !surfaceAt(state).onRoad || (state.curb ?? 0) > 0.4);
     landing.current = THREE.MathUtils.damp(landing.current, landingCompression.current, 13, dt);
-    body.current.rotation.x = spring.pitch + landing.current * 0.09;
-    body.current.rotation.z = spring.roll;
+    // The whole car (wheels too) only swings its tail and wiggles; leaning, dipping, bouncing and squashing are the
+    // body's alone, on top of wheels that stay on the road.
     body.current.rotation.y = spring.wiggle + spring.driftYaw;
-    // Squash keeps volume: shorter means a little wider.
-    body.current.scale.set(1 + spring.squash * 0.5, (1 - landing.current * 0.34) * (1 - spring.squash), 1 + spring.squash * 0.5);
-    body.current.position.y = spring.bounce - landing.current * 0.22;
-    bodyRoll.current = spring.roll;
+    const pose = suspension.current;
+    poseSuspension(pose, spring, state, landing.current, !!flying?.current.flying, !surfaceAt(state).onRoad);
+    lamps.current.position.y = pose.pivot + pose.lift;
+    lamps.current.rotation.set(pose.pitch, 0, pose.roll);
+    lamps.current.scale.set(1 + pose.squash * 0.5, 1 - pose.squash, 1 + pose.squash * 0.5);
+    lampsInner.current.position.y = -pose.pivot;
+    bodyRoll.current = pose.roll;
   });
   return <group ref={body} name="carBody">
-    <PlayerVehicle vehicleId={vehicleId} car={car} />
+    <PlayerVehicle vehicleId={vehicleId} car={car} suspension={suspension} />
+    {/* The lamps and the boost flame ride on the body, so they lean and bounce with it. */}
+    <group ref={lamps}><group ref={lampsInner}>
     <BoostFlame car={car} vehicleId={vehicleId} />
     <CarLamps
       blend={nightBlend}
@@ -240,6 +251,7 @@ function CarModel({ car, vehicleId, active, landingCompression, landingActive, b
       rearHeight={effects.tailHeight}
     />
     <HeadlightBeam blend={nightBlend} />
+    </group></group>
   </group>;
 }
 
@@ -382,7 +394,6 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   const motion = useRef({ speed: Math.abs(speed), push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0, cooldown: 0, waveId: runWave.id });
   const hit = useRef({ hop: 0, hopVelocity: 0, roll: 0, rollVelocity: 0, squash: 0, squashVelocity: 0 });
   const presence = useRef(enabled && trafficActive(progressIndex) ? 1 : 0);
-  const jamSeen = useRef(trafficJam.id);
   // Swaying in the lane (higher levels): eased in and out, with this car's own phase.
   const swerve = useRef({ amount: 0, phase: progressIndex * 1.7, time: 0 });
   // How far out towards the curb this car is driving (see CURB_HUG).
@@ -403,17 +414,9 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05) * gameTime.scale;
     const m = motion.current;
-    // A traffic jam just formed (jam.ts) with this car in it: it is put in its place (out of the player's sight) at
-    // the jam's crawl. While the jam stands it is on the road even if the level would leave it parked.
-    const inJam = trafficJam.active && trafficJam.members.has(progressIndex);
-    if (inJam && jamSeen.current !== trafficJam.id) {
-      jamSeen.current = trafficJam.id;
-      progress.current = trafficJam.members.get(progressIndex)!;
-      Object.assign(m, { speed: JAM.speed, push: 0, pushVelocity: 0, spin: 0, spinVelocity: 0 });
-    }
     if (!paused) progress.current = (progress.current + Math.sign(speed) * m.speed * dt / roadPathMetric(path, progress.current) + 1) % 1;
     progresses.current[progressIndex] = progress.current;
-    const active = enabled && (trafficActive(progressIndex) || inJam);
+    const active = enabled && trafficActive(progressIndex);
     // Most traffic cars are dormant at early levels. Keep their route progress,
     // but skip the path frame, collision and animation work while fully hidden.
     if (!active && presence.current < 0.01) {
@@ -458,10 +461,10 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     presence.current = THREE.MathUtils.damp(presence.current, active ? 1 : 0, 3, Math.min(delta, 0.05));
     obstacle.inactive = presence.current < 0.6;
     group.current.visible = presence.current > 0.01;
-    const cruise = inJam ? JAM.speed : Math.abs(speed) * difficulty.trafficSpeed;
+    const cruise = Math.abs(speed) * difficulty.trafficSpeed;
     let followGap = Infinity;
     traffic.forEach((other, index) => {
-      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed) || !(trafficActive(index) || (trafficJam.active && trafficJam.members.has(index)))) return;
+      if (index === progressIndex || Math.sign(other.speed) !== Math.sign(speed) || !trafficActive(index)) return;
       const fraction = ((progresses.current[index] - progress.current) * Math.sign(speed) + 1) % 1;
       followGap = Math.min(followGap, fraction * roadPathMetric(path, progress.current));
     });
@@ -1261,16 +1264,11 @@ function DrivingScene(props: SceneProps) {
       props.onWave?.('fire');
     }
     waveHeld.current = wavePressed;
-    // Traffic jams (jam.ts): once the shockwave is learned, the road bunches cars up ahead now and then while it is
-    // ready. (Road progress runs with longitude, the way the player drives.)
-    const roadProgress = ((car.x / FULL_TURN) % 1 + 1) % 1;
-    stepJam(realDt, roadProgress, roadPathMetric(ROAD_PATHS[0], roadProgress), runWave.charge >= 1, waveOn,
-      traffic.map((other, index) => ({ index, progress: trafficProgresses.current[index] ?? other.progress, forward: other.speed > 0 })));
     if (runWave.time >= 0 && !props.paused) {
       const before = runWave.time;
       runWave.time += realDt;
       const counted = WAVE.spread + 0.15;
-      if (before < counted && runWave.time >= counted) { recordWave(runWave.hits); props.onWave?.('done', runWave.hits); }
+      if (before < counted && runWave.time >= counted) props.onWave?.('done', runWave.hits);
       if (waveOver(runWave)) runWave.time = -1;
     }
     let throttle = Math.max(pedals.current.throttle, pad.throttle);
@@ -1924,7 +1922,7 @@ function DrivingScene(props: SceneProps) {
         <WaveRing />
         <Suspense fallback={null}><Traffic paused={props.paused} enabled={props.trafficEnabled !== false} progresses={trafficProgresses} player={props.car} reactive={props.started} nightBlend={nightBlend} /></Suspense>
         {props.party && !!props.partyCount && <PartyCars run={props.party} count={props.partyCount} nightBlend={nightBlend} />}
-        <group ref={vehicle}><PartyBody run={props.party} index={0}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} /></PartyBody><MapPin show={!!props.mapView} /></group>
+        <group ref={vehicle}><PartyBody run={props.party} index={0}><CarModel car={props.car} vehicleId={props.vehicleId} active={props.started && !props.paused} landingCompression={landingCompression} landingActive={landingActive} bodyRoll={bodyRoll} nightBlend={nightBlend} flying={air} /></PartyBody><MapPin show={!!props.mapView} /></group>
         <primitive object={tireMarks.mesh} />
         <primitive object={dust.mesh} />
         <primitive object={soilClods.mesh} />

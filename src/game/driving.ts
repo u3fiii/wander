@@ -1,3 +1,4 @@
+import { LANE_SCALE, ROAD_WIDENING } from './roadWidth.ts';
 import { BLOCKS, DRIVE, JUICE_CONFIG, LOOP_DRIVE } from './config.ts';
 import { DRIVING_CONFIG as CAR_CONFIG, impactPower } from './vehicleHandling.ts';
 import { FULL_TURN, GLOBE_RADIUS, loopFrame, loopLatitude, loopMetric } from './globe.ts';
@@ -92,14 +93,14 @@ export const DRIVE_MODE = { rails: false };
 // `straighten`: let go of the pads and the car lines itself up with the road again at this rate (1/s), so it never
 // keeps rolling on toward the edge it was pointed at; past `clearFrom` m from the middle it also angles back in a
 // little (`clearGain` rad per m, at most `clearMax`).
-export const RAILS = { autoThrottle: 1, tutorialMaxSpeed: 11, tutorialCentering: 0.08, maxHeading: 0.9, straighten: 6, clearFrom: 1.2, clearGain: 0.12, clearMax: 0.12 };
+export const RAILS = { autoThrottle: 1, tutorialMaxSpeed: 11, tutorialCentering: 0.08, maxHeading: 0.9, straighten: 6, clearFrom: 1.2 * LANE_SCALE, clearGain: 0.12, clearMax: 0.12 };
 
 // The road's edge as a wall of tyres instead of a slowing curb: a car that reaches them (its centre `line` m from the
 // centre line) is bounced back in, sideways (`push` m/s, from a graze to a full-on hit at `fullHit` m/s outward),
 // turned back along the road, and loses a little speed (`speedLoss` at a full hit). It never sticks: a bounce, and on
 // it goes, and running along them they ease it off at `nudge` m/s. `?edge=curb` in the address brings the old slowing curb back, for comparison.
 export const EDGE = { tires: typeof location === 'undefined' || new URLSearchParams(location.search).get('edge') !== 'curb' };
-export const TIRES = { line: 2.3, give: 0.08, push: [1.4, 4.5] as const, fullHit: 4, speedLoss: 0.14, straighten: 14, turnRate: 2.2, minOutward: 0.35, wait: 0.25, settle: 7, nudge: 1.2 };
+export const TIRES = { line: 2.3 + ROAD_WIDENING, give: 0.08, push: [1.4, 4.5] as const, fullHit: 4, speedLoss: 0.14, straighten: 14, turnRate: 2.2, minOutward: 0.35, wait: 0.25, settle: 7, nudge: 1.2 };
 // The latest bounce, for the scene (the sound, the buzz and the tyres' wobble).
 export const tireBounce = { id: 0, x: 0, z: 0, strength: 0 };
 function bounceOffTires(car: CarState, dt: number) {
@@ -135,6 +136,20 @@ function keepFacingForward(car: CarState) {
   if (Math.abs(car.heading) <= RAILS.maxHeading) return;
   car.heading = Math.sign(car.heading) * RAILS.maxHeading;
   car.yawRate = 0;
+}
+// With a keyboard or a pad the car never ends up turned round either: turning round on this narrow road is hard work
+// and no fun. It can swing well across the road (drifts, hard turns, a knock from traffic): past `soft` radians off the
+// road's direction any further swing outward is eased back, and `max` is as far as it ever gets. Reversing still backs
+// it up, facing forward.
+export const FORWARD = { soft: 0.95, max: 1.25, ease: 7 };
+function keepPointingAhead(car: CarState, dt: number) {
+  car.heading = wrapAngle(car.heading);
+  const angle = Math.abs(car.heading);
+  if (angle <= FORWARD.soft) return;
+  const side = Math.sign(car.heading);
+  const eased = FORWARD.soft + (angle - FORWARD.soft) * Math.exp(-FORWARD.ease * dt);
+  car.heading = side * Math.min(FORWARD.max, eased);
+  if (car.yawRate * side > 0) car.yawRate = 0;
 }
 
 // The road direction the assists line the car up with: whichever way along the road it is closer to facing,
@@ -498,6 +513,7 @@ function integrateLoopCar(car: CarState, controls: Controls, dt: number, respect
   car.leadSpeed = lead ? lead.speed : 0;
   keepOnBridge(car, previousX, previousZ, dt);
   if (DRIVE_MODE.rails) keepFacingForward(car);
+  else if (respectWater) keepPointingAhead(car, dt);
   // With the road assist at its top (and always on touch screens) the road's edge is a wall on every step, not only
   // while the car is on the road: a shove from traffic or a trunk can never leave it off the road.
   if (respectWater && (DRIVE_MODE.rails || CAR_CONFIG.roadAssist >= CAR_CONFIG.roadAssistFull)) {

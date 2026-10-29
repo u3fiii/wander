@@ -1,3 +1,4 @@
+import { MAIN_ROAD_WIDTH } from './roadWidth.ts';
 import { IcosahedronGeometry } from 'three';
 import { FULL_TURN, GLOBE_RADIUS, roadLatitude, roadLayoutVersion, sphereNormal, spherePoint } from './globe.ts';
 import type { Vec3 } from './globe.ts';
@@ -5,7 +6,7 @@ import { PLANET_TERRAIN, planetNoise } from './planetTerrain.ts';
 
 export const WORLD_SETTINGS = {
   roads: {
-    mainWidth: 5.76,
+    mainWidth: MAIN_ROAD_WIDTH,
     branchWidth: 3.8,
     shoulderExtra: 1.7,
     surfaceLift: 0.24,

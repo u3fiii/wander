@@ -1,3 +1,4 @@
+import { ROAD_WIDENING } from './roadWidth';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
@@ -1290,7 +1291,8 @@ function streetSpot(roadLongitude: number, side: number, distance: number, yaw: 
   const frame = roadPathFrame(ROAD_PATHS[0], roadLongitude / turn);
   const roadCenter = new THREE.Vector3(...frame.point);
   const sideVector = new THREE.Vector3(...frame.side).multiplyScalar(side);
-  const { latitude, longitude } = toLatLon(roadCenter.clone().addScaledVector(sideVector, distance));
+  // (Set-backs were chosen for the original road: they move out with its edge.)
+  const { latitude, longitude } = toLatLon(roadCenter.clone().addScaledVector(sideVector, distance + ROAD_WIDENING));
   const normal = new THREE.Vector3(...groundNormal(latitude, longitude));
   const forward = sideVector.clone().negate().projectOnPlane(normal).normalize().applyAxisAngle(normal, yaw);
   const right = new THREE.Vector3().crossVectors(normal, forward);
