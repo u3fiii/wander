@@ -18,7 +18,7 @@ import { nightLook } from './nightLook';
 import { PLANET_TERRAIN, planetNoise } from './planetTerrain';
 import { ACTIVE_QUALITY, ART_DIRECTION } from './artDirection';
 import { createSimpleSwimRing } from './mobileScenery';
-import { batchStatic } from './staticBatch';
+import { BATCHING, batchStatic, mergeModel } from './staticBatch';
 import { RETINT, applyRetint, themeSlotOf, themeState, themedColour, trackRetint } from './themes';
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
 import type { PaletteKey } from './palette';
@@ -2085,7 +2085,7 @@ function Boat() {
     if (size.x > size.z) holder.rotation.y = Math.PI / 2;
     holder.scale.setScalar(BOAT.length / Math.max(size.x, size.z));
     holder.position.y = -BOAT.draft;
-    return holder;
+    return mergeParts(holder);
   }, [collada]);
   const mooring = useMemo(() => new THREE.Vector3(...sphereNormal(BOAT.latitude, BOAT.longitude)), []);
   const base = useMemo(() => frameAt(BOAT.latitude, BOAT.longitude).orientation, []);
@@ -2131,7 +2131,7 @@ function BeachFloats() {
 }
 
 function SimpleBeachFloats() {
-  const template = useMemo(() => createSimpleSwimRing(SWIM_RING.diameter), []);
+  const template = useMemo(() => mergeParts(createSimpleSwimRing(SWIM_RING.diameter)), []);
   useEffect(() => () => template.traverse(child => {
     if (child instanceof THREE.Mesh) child.geometry.dispose();
   }), [template]);
@@ -2157,7 +2157,7 @@ function DetailedBeachFloats() {
     holder.add(ring);
     ring.position.set(-centre.x, -bounds.min.y, -centre.z);
     holder.scale.setScalar(SWIM_RING.diameter / Math.max(size.x, size.z));
-    return holder;
+    return mergeParts(holder);
   }, [gltf.scene]);
   return <BeachFloatPlacement template={template} />;
 }
@@ -2320,7 +2320,8 @@ function Boulders() {
     return () => clearObstacleGroup('boulders');
   }, [placed]);
   useEffect(() => () => materials.forEach(material => material.dispose()), [materials]);
-  return <>{placed.map((item, index) => <group key={`boulder-${index}`} position={item.position} quaternion={item.orientation}><primitive object={item.object} /></group>)}</>;
+  // Placed after the rest of the scenery was merged, so merged on their own once they are down.
+  return <StaticBatch key={placed.length}>{placed.map((item, index) => <group key={`boulder-${index}`} position={item.position} quaternion={item.orientation}><primitive object={item.object} /></group>)}</StaticBatch>;
 }
 
 // A little palm island out in the polar bay (CC BY-NC, see the README): two palms, a dock, a shack, coconuts and
@@ -2493,7 +2494,7 @@ function FishingBoat({ latitude, longitude }: { latitude: number; longitude: num
     holder.traverse(child => {
       if (child instanceof THREE.Mesh) { child.castShadow = true; child.receiveShadow = true; }
     });
-    return holder;
+    return mergeParts(holder);
   }, [gltf]);
   const mooring = useMemo(() => new THREE.Vector3(...sphereNormal(latitude, longitude)), [latitude, longitude]);
   const base = useMemo(() => frameAt(latitude, longitude).orientation, [latitude, longitude]);
@@ -2746,8 +2747,9 @@ function Airplane() {
     propeller.parent!.add(pivot);
     pivot.updateMatrixWorld(true);
     pivot.attach(propeller);
+    pivot.userData.dynamic = true;
     const size = bounds.getSize(new THREE.Vector3());
-    return { model, pivot, scale: PLANE.wingspan / size.x };
+    return { model: mergeParts(model), pivot, scale: PLANE.wingspan / size.x };
   }, [gltf.scene]);
   const flight = useMemo(() => {
     const position = new THREE.Vector3(...sphereNormal(0.55, 2.4));
@@ -2908,8 +2910,7 @@ function Coast() {
 }
 
 // Everything that never moves sits under StaticBatch, which merges it into a few big meshes once it has loaded
-// (see staticBatch.ts); things that move or animate stay outside it. `?nobatch` in the address turns it off.
-const BATCHING = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('nobatch');
+// (see staticBatch.ts); things that move or animate stay outside it, each merged into itself (mergeParts).
 function StaticBatch({ children }: { children: React.ReactNode }) {
   const group = useRef<THREE.Group>(null!);
   useEffect(() => {
@@ -2925,6 +2926,9 @@ function StaticBatch({ children }: { children: React.ReactNode }) {
   }, []);
   return <group ref={group}>{children}</group>;
 }
+
+// A moving model's own parts merged together (see mergeModel), retinted with the theme like the scenery.
+const mergeParts = <T extends THREE.Object3D>(model: T) => mergeModel(model, { lightweight: ACTIVE_QUALITY.lightweightShading, retint: RETINT });
 
 // The plane's position in world space, updated every frame (read by the scene for the plane's sound).
 export const airplaneState = { position: new THREE.Vector3(0, 1e4, 0) };

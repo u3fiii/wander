@@ -14,6 +14,7 @@ import type { CarState } from './driving';
 import { styleCompact } from './compactStyle';
 import { prepareVehicleModel } from './vehicleModel';
 import { applyCarLook, forgetCarLook, syncCarLook } from './carLook';
+import { mergeSameLook } from './staticBatch';
 
 // `tint` paints the body another colour (party mode: one per player). `suspension`, when given, moves the body on
 // its springs and each wheel (carRig.ts); without it the car sits still on its wheels.
@@ -63,6 +64,8 @@ export default function PlayerVehicle({ vehicleId, car, onReady, tint, suspensio
     const rig = buildCarRig(model, definition.wheelNodes ? {
       wheelNodeNames: definition.wheelNodes, wheelRadius: radius,
     } : undefined);
+    // The body's parts that look the same drawn together (the classic's eight chrome pieces are one draw, not eight).
+    mergeSameLook(rig.sprung).forEach(geometry => ownedGeometries.add(geometry));
     // The car's own studio lights, part colours and finish (carLook.ts, the Car look tab).
     rig.frame.traverse(child => {
       if (!(child instanceof THREE.Mesh)) return;

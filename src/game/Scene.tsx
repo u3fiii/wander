@@ -30,6 +30,7 @@ import { nearMissLook } from './nearMissLook';
 import { VISUAL_QUALITY, ACTIVE_QUALITY, ART_DIRECTION, recordSlowVisit, FORCED_QUALITY } from './artDirection';
 import { adaptPacing, adaptResolution, createPacingState, createResolutionState, createSlowFrameState, lighterTier, resolutionBounds, watchSlowFrames } from './renderQuality';
 import { cullBehindGlobe } from './horizonCull';
+import { mergeModel } from './staticBatch';
 import { setCssVar } from '../cssVar';
 import { advanceTheme, currentThemes, setTheme, themeSettings, themeSunWarmth, themedColour, themeState } from './themes';
 import type { Weather as WeatherKind } from './themes';
@@ -156,7 +157,8 @@ function KenneyCar({ modelUrl, scale = 1.35, color, jitter }: { modelUrl: string
       child.castShadow = true;
       child.receiveShadow = true;
     });
-    return clone;
+    // One draw call per kind of surface instead of one per part and colour (see mergeModel).
+    return mergeModel(clone, { lightweight: ACTIVE_QUALITY.lightweightShading });
   }, [source, texture, color, jitter]);
   useEffect(() => () => {
     model.traverse(child => {
@@ -1969,6 +1971,56 @@ function FrameLimiter({ paused }: { paused: boolean }) {
   return null;
 }
 
+// Shader warm-up: three.js compiles a material's shader the first time it is drawn, which stalls that frame (on a
+// phone, for a good fraction of a second). So once the world has loaded, everything that is hidden for now and shown
+// later (the boost flame, the shockwave ring, the lamps at night, traffic before it joins) is compiled up front:
+// shown for the length of one compile call, never drawn, then hidden again. Meshes merged away (staticBatch.ts) are
+// left out: they are never shown again.
+// Lights matter too: every lit shader is built for the number of lights shown, so when the car's fill light comes on
+// at dusk they would all be rebuilt at once. So it all happens twice, with the hidden lights off (as by day) and on.
+// And each of those twice again: for drawing straight to the screen, and into an image first (depth of field draws
+// the scene that way, and three.js builds a slightly different shader for it). The compiling itself runs in the
+// background where the browser can (compileAsync).
+const WARMUP_AFTER_FRAMES = 20;
+function ShaderWarmup() {
+  const gl = useThree(state => state.gl);
+  const scene = useThree(state => state.scene);
+  const camera = useThree(state => state.camera);
+  const frames = useRef(0);
+  useFrame(() => {
+    if (frames.current < 0 || ++frames.current < WARMUP_AFTER_FRAMES) return;
+    frames.current = -1;
+    const shown: THREE.Object3D[] = [], lights: THREE.Object3D[] = [];
+    const visit = (object: THREE.Object3D) => {
+      if (object.userData.merged) return;
+      if (!object.visible) (object instanceof THREE.Light ? lights : shown).push(object);
+      object.children.forEach(visit);
+    };
+    visit(scene);
+    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    const previous = gl.getRenderTarget();
+    const compile = () => {
+      gl.setRenderTarget(null);
+      const onScreen = gl.compileAsync(scene, camera);
+      gl.setRenderTarget(target);
+      const intoImage = gl.compileAsync(scene, camera);
+      return [onScreen, intoImage];
+    };
+    const pending: Promise<unknown>[] = [];
+    try {
+      shown.forEach(object => { object.visible = true; });
+      pending.push(...compile());
+      lights.forEach(object => { object.visible = true; });
+      pending.push(...compile());
+    } finally {
+      gl.setRenderTarget(previous);
+      [...shown, ...lights].forEach(object => { object.visible = false; });
+    }
+    Promise.allSettled(pending).then(() => target.dispose());
+  });
+  return null;
+}
+
 // Adaptive resolution: every couple of seconds of driving, if frames have been coming slowly the pixel density
 // steps down (to the quality profile's floor), unless the main thread itself was the bottleneck (fewer pixels
 // wouldn't help then), and after a good while of smooth frames it steps back up. The
@@ -2060,6 +2112,7 @@ export default memo(function Scene(props: SceneProps) {
     <FrameLimiter paused={props.paused} />
     <AdaptiveResolution active={props.started && !props.paused && !props.tutorialDriving && !props.finale} />
     {SHOW_STATS && <RenderStats />}
-    <Suspense fallback={null}><DrivingScene {...props} /></Suspense>
+    {/* The warm-up shares the scene's Suspense, so it only starts counting once everything has loaded. */}
+    <Suspense fallback={null}><DrivingScene {...props} /><ShaderWarmup /></Suspense>
   </Canvas>;
 });

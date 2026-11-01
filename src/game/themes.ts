@@ -112,8 +112,9 @@ export function slotForMaterial(material: THREE.Material) {
   return colour ? slotForColour(colour) : -1;
 }
 
-// The shared uniform the themed shaders read, and the factors behind it.
-export const themeUniforms = { uThemeFactor: { value: THEMED_KEYS.map(() => new THREE.Vector3(1, 1, 1)) } };
+// The shared uniform the themed shaders read, and the factors behind it: r, g, b for each slot in turn. A flat array
+// of numbers, not one vector per slot: three.js would re-pack vectors into numbers for every draw that uses them.
+export const themeUniforms = { uThemeFactor: { value: new Float32Array(THEMED_KEYS.length * 3).fill(1) } };
 export const THEME_SLOTS = THEMED_KEYS.length;
 
 // How strongly a theme tints the world (0 = not at all, 1 = as designed, above 1 = pushed further), how long a change
@@ -165,7 +166,7 @@ function refresh() {
   THEMED_KEYS.forEach((key, slot) => {
     themedColour(key, current, from, to, t);
     const b = base[slot];
-    themeUniforms.uThemeFactor.value[slot].set(factor(current.r, b.r), factor(current.g, b.g), factor(current.b, b.b));
+    themeUniforms.uThemeFactor.value.set([factor(current.r, b.r), factor(current.g, b.g), factor(current.b, b.b)], slot * 3);
   });
   themeState.version++;
 }
@@ -246,16 +247,16 @@ export function trackRetint(root: THREE.Object3D, skip: (object: THREE.Object3D)
 export function applyRetint(tracked: Tracked) {
   const factors = themeUniforms.uThemeFactor.value;
   for (const { material, base, slot } of tracked.materials) {
-    const f = factors[slot];
-    material.color.setRGB(Math.min(1, base.r * f.x), Math.min(1, base.g * f.y), Math.min(1, base.b * f.z));
+    const f = slot * 3;
+    material.color.setRGB(Math.min(1, base.r * factors[f]), Math.min(1, base.g * factors[f + 1]), Math.min(1, base.b * factors[f + 2]));
   }
   for (const { mesh, base, slots } of tracked.instances) {
     const colours = mesh.instanceColor!.array as Float32Array;
     for (let index = 0; index < slots.length; index++) {
       const slot = slots[index];
       if (slot < 0) continue;
-      const f = factors[slot], k = index * 3;
-      colours[k] = Math.min(1, base[k] * f.x); colours[k + 1] = Math.min(1, base[k + 1] * f.y); colours[k + 2] = Math.min(1, base[k + 2] * f.z);
+      const f = slot * 3, k = index * 3;
+      colours[k] = Math.min(1, base[k] * factors[f]); colours[k + 1] = Math.min(1, base[k + 1] * factors[f + 1]); colours[k + 2] = Math.min(1, base[k + 2] * factors[f + 2]);
     }
     mesh.instanceColor!.needsUpdate = true;
   }

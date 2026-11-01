@@ -14,14 +14,17 @@ export function CarLamps({ blend, halfWidth, front, rear, height, rearHeight = h
     return { head: glow(WARM_LIGHT.headlamp), headHalo: glow(WARM_LIGHT.headlampHalo), tail: glow(PALETTE.carRed), tailHalo: glow(PALETTE.carRed) };
   }, []);
   useEffect(() => () => { geometry.dispose(); Object.values(materials).forEach(material => material.dispose()); }, [geometry, materials]);
+  const lamps = useRef<THREE.Group>(null!);
   useFrame(() => {
     const n = blend.current;
+    // By day they are out: hidden, not drawn at nothing (eight draw calls a car).
+    lamps.current.visible = n > 0.004;
     materials.head.opacity = n;
     materials.headHalo.opacity = n * 0.3;
     materials.tail.opacity = n * 0.9;
     materials.tailHalo.opacity = n * 0.3;
   });
-  return <group>
+  return <group ref={lamps} visible={false}>
     {[-1, 1].map(side => <group key={side}>
       <mesh geometry={geometry} material={materials.head} position={[side * halfWidth, height, front]} scale={0.09} />
       <mesh geometry={geometry} material={materials.headHalo} position={[side * halfWidth, height, front]} scale={0.26} />

@@ -24,7 +24,7 @@ test('a change eases over a few seconds instead of snapping', () => {
 test('retinting multiplies each tracked colour by its slot factor, and the base look leaves colours untouched', () => {
   setTheme(0, true);
   const slot = themeSlotOf('land');
-  assert.ok(themeUniforms.uThemeFactor.value[slot].equals(new THREE.Vector3(1, 1, 1)));
+  assert.deepEqual([...themeUniforms.uThemeFactor.value.subarray(slot * 3, slot * 3 + 3)], [1, 1, 1]);
   const material = new THREE.MeshStandardMaterial({ color: PALETTE.land });
   const other = new THREE.MeshStandardMaterial({ color: '#123456' });
   const root = new THREE.Group();

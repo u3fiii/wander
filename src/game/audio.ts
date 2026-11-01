@@ -2,9 +2,10 @@ import { JUICE_CONFIG } from './config.ts';
 import { createEngineState, stepEngine } from './engineModel.ts';
 import { nightAmount } from './dayCycle.ts';
 import slowMoWhooshUrl from '../assets/sound/alexis_gaming_cam-woosh-saber-laser-346099.mp3?url';
-import ambienceUrl from '../assets/sound/soundreality-wind-blowing-457954.mp3?url';
-import seaUrl from '../assets/sound/freesound_community-sea-and-seagull-wave-5932.mp3?url';
-import planeUrl from '../assets/sound/loswin23-small-airplane-520026.mp3?url';
+// The long background loops as AAC at a modest bit rate (the .mp3 originals sit beside them): a third of the download.
+import ambienceUrl from '../assets/sound/wind-blowing.m4a?url';
+import seaUrl from '../assets/sound/sea-and-seagulls.m4a?url';
+import planeUrl from '../assets/sound/small-airplane.m4a?url';
 import readyUrl from '../assets/sound/microwave ding.mp3?url';
 
 // Car audio on the Web Audio API. Layers, all feeding one master gain (and, for the world's sounds, a low-pass

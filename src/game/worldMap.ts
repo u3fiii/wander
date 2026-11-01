@@ -275,7 +275,16 @@ export function roadPathMetric(path: RoadPath, t: number) {
 // thousands of times while the world is built).
 let roadSamples: { latitudes: Float64Array; longitudes: Float64Array; halfWidth: number }[] = [];
 let roadSamplesLayout = -1;
+// The same point is often asked about several times a frame (the car's own spot): the last answer is kept.
+const lastRoadQuery = { latitude: NaN, longitude: NaN, layout: -1, distance: 0 };
 export function distanceToRoadNetwork(latitude: number, longitude: number) {
+  const last = lastRoadQuery;
+  if (latitude === last.latitude && longitude === last.longitude && last.layout === roadLayoutVersion) return last.distance;
+  const distance = measureToRoadNetwork(latitude, longitude);
+  last.latitude = latitude; last.longitude = longitude; last.layout = roadLayoutVersion; last.distance = distance;
+  return distance;
+}
+function measureToRoadNetwork(latitude: number, longitude: number) {
   if (roadSamplesLayout !== roadLayoutVersion) {
     roadSamplesLayout = roadLayoutVersion;
     roadSamples = ROAD_PATHS.map(path => {

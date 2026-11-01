@@ -31,11 +31,15 @@ function batchable(material: THREE.Material): material is Surface {
   if (surface.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) return false;
   return !(surface instanceof THREE.MeshStandardMaterial) || (!surface.roughnessMap && !surface.metalnessMap);
 }
-function signature(material: Surface) {
+// What a merged mesh's material is made from, so pieces that would draw the same share one. Roughness is matched to
+// the nearest 0.1 (0.88 and 0.92 look the same on this matte world, and each extra kind is another draw call in every
+// sector); with `lightweight` the merged material is Lambert, which has no roughness or metalness at all.
+function signature(material: Surface, lightweight: boolean) {
   const standard = material as THREE.MeshStandardMaterial, phong = material as THREE.MeshPhongMaterial;
-  return [material.type, material.side, material.flatShading, material.map?.uuid ?? '', material.fog, material.wireframe,
-    material.polygonOffset, material.polygonOffsetFactor, material.polygonOffsetUnits, material.depthTest, material.depthWrite,
-    standard.roughness?.toFixed(2), standard.metalness?.toFixed(2), phong.shininess?.toFixed(0)].join('|');
+  const shared = [material.side, material.flatShading, material.map?.uuid ?? '', material.fog, material.wireframe,
+    material.polygonOffset, material.polygonOffsetFactor, material.polygonOffsetUnits, material.depthTest, material.depthWrite];
+  if (lightweight) return shared.join('|');
+  return [material.type, ...shared, standard.roughness?.toFixed(1), standard.metalness?.toFixed(1), phong.shininess?.toFixed(0)].join('|');
 }
 
 // One material group of a mesh as plain, non-indexed geometry in the batch root's space, with its colour baked in.
@@ -89,7 +93,8 @@ function lambertCopy(source: Surface) {
 // `retint` (themes.ts): each piece is given a retint slot per vertex, and `prepare` sets up the merged materials
 // to use it.
 export type Retint = { slotFor: (material: THREE.Material) => number; prepare: (material: THREE.Material) => void };
-export function batchStatic(root: THREE.Object3D, globeCenter: THREE.Vector3, { lightweight = false, retint }: { lightweight?: boolean; retint?: Retint } = {}) {
+// `sectors: false` keeps everything in one piece per kind of surface (for a single model, see mergeModel).
+export function batchStatic(root: THREE.Object3D, globeCenter: THREE.Vector3, { lightweight = false, retint, sectors = true }: { lightweight?: boolean; retint?: Retint; sectors?: boolean } = {}) {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const buckets = new Map<string, { material: Surface; geometries: THREE.BufferGeometry[]; cast: boolean; receive: boolean; order: number }>();
@@ -116,10 +121,13 @@ export function batchStatic(root: THREE.Object3D, globeCenter: THREE.Vector3, { 
       // Splitting a single-material mesh gains nothing; one with a group left over keeps the leftover.
       if (merged.length && (merged.length === pieces.length || Array.isArray(mesh.material))) {
         for (const { material, geometry: part } of merged) {
-          part!.computeBoundingBox();
-          part!.boundingBox!.getCenter(centre).sub(globeCenter).normalize();
-          const sector = sectorOf(centre);
-          const key = `${signature(material as Surface)}#${mesh.castShadow}${mesh.receiveShadow}#${mesh.renderOrder}#${sector}`;
+          let sector = '';
+          if (sectors) {
+            part!.computeBoundingBox();
+            part!.boundingBox!.getCenter(centre).sub(globeCenter).normalize();
+            sector = sectorOf(centre);
+          }
+          const key = `${signature(material as Surface, lightweight)}#${mesh.castShadow}${mesh.receiveShadow}#${mesh.renderOrder}#${sector}`;
           const bucket = buckets.get(key) ?? { material: material as Surface, geometries: [], cast: mesh.castShadow, receive: mesh.receiveShadow, order: mesh.renderOrder };
           bucket.geometries.push(part!);
           buckets.set(key, bucket);
@@ -158,7 +166,8 @@ export function batchStatic(root: THREE.Object3D, globeCenter: THREE.Vector3, { 
     batches.add(mesh);
     made.push({ mesh, material });
   }
-  hidden.forEach(mesh => { mesh.visible = false; });
+  // Marked, so nothing (the shader warm-up in Scene.tsx) mistakes them for something waiting to be shown.
+  hidden.forEach(mesh => { mesh.visible = false; mesh.userData.merged = true; });
   const detached = detachEmpty(root, new Set(hidden));
   root.add(batches);
   return {
@@ -167,10 +176,21 @@ export function batchStatic(root: THREE.Object3D, globeCenter: THREE.Vector3, { 
       root.remove(batches);
       made.forEach(({ mesh, material }) => { mesh.geometry.dispose(); material.dispose(); });
       detached.reverse().forEach(({ object, parent, index }) => { parent.children.splice(Math.min(index, parent.children.length), 0, object); object.parent = parent; });
-      hidden.forEach(mesh => { mesh.visible = true; });
+      hidden.forEach(mesh => { mesh.visible = true; delete mesh.userData.merged; });
       trimmed.forEach(({ mesh, geometry }) => { mesh.geometry = geometry; });
     },
   };
+}
+
+// `?nobatch` in the address turns all merging off (for comparing).
+export const BATCHING = typeof window === 'undefined' || !new URLSearchParams(window.location.search).has('nobatch');
+
+// A model that moves as one piece (a traffic car, a boat, the plane): its parts merged, the same way, into one mesh
+// per kind of surface in the model's own space, so it costs a draw call or two instead of one for every part and
+// every colour on it. Parts that move on their own (a propeller) must be marked `userData.dynamic` first.
+export function mergeModel<T extends THREE.Object3D>(root: T, options: { lightweight?: boolean; retint?: Retint } = {}) {
+  if (BATCHING) batchStatic(root, new THREE.Vector3(), { ...options, sectors: false });
+  return root;
 }
 
 // Takes out of the scene graph every branch under `root` with nothing left to draw: it held meshes that were merged
@@ -205,4 +225,68 @@ function detachEmpty(root: THREE.Object3D, merged: Set<THREE.Object3D>) {
   };
   walk(root);
   return detached;
+}
+
+// Parts of one rigid model that share a look merged into one mesh each, keeping the materials themselves (unlike
+// batchStatic, nothing is baked into vertex colours): for a model whose materials are changed live, like the player's
+// car with its Car look colours. Parts share a look when their materials are the same in every way that shows (or
+// carry the same `userData.carPart`, whose colour is set for them). Hidden or dynamic parts stay as they are.
+export function mergeSameLook(root: THREE.Object3D) {
+  if (!BATCHING) return [];
+  root.updateMatrixWorld(true);
+  const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const toRoot = new THREE.Matrix4();
+  const looks = new Map<string, { material: THREE.Material; geometries: THREE.BufferGeometry[]; meshes: Set<THREE.Mesh>; cast: boolean; receive: boolean }>();
+  const lookOf = (material: THREE.Material) => {
+    const standard = material as THREE.MeshStandardMaterial;
+    const colour = standard.userData.carPart ?? standard.color?.getHexString();
+    return [material.type, colour, standard.roughness, standard.metalness, standard.emissive?.getHexString(), standard.map?.uuid,
+      material.side, material.transparent, material.opacity, material.vertexColors, standard.flatShading].join('|');
+  };
+  root.traverse(object => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh || mesh.children.length || (mesh as THREE.InstancedMesh).isInstancedMesh || (mesh as THREE.SkinnedMesh).isSkinnedMesh) return;
+    for (let p: THREE.Object3D | null = mesh; p && p !== root; p = p.parent) if (p.userData.dynamic || !p.visible) return;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    const count = geometry.getAttribute('position').count;
+    const groups = Array.isArray(mesh.material) && mesh.geometry.groups.length ? mesh.geometry.groups : [{ start: 0, count, materialIndex: 0 }];
+    toRoot.multiplyMatrices(rootInverse, mesh.matrixWorld);
+    geometry.applyMatrix4(toRoot);
+    for (const group of groups) {
+      const material = materials[group.materialIndex ?? 0];
+      const part = new THREE.BufferGeometry();
+      for (const name of ['position', 'normal', 'uv', 'color']) {
+        const attribute = geometry.getAttribute(name) as THREE.BufferAttribute | undefined;
+        if (!attribute || (name === 'uv' && !(material as THREE.MeshStandardMaterial).map) || (name === 'color' && !material.vertexColors)) continue;
+        const size = attribute.itemSize, end = Math.min(count, group.start + group.count);
+        part.setAttribute(name, new THREE.BufferAttribute((attribute.array as Float32Array).slice(group.start * size, end * size), size));
+      }
+      const key = `${lookOf(material)}#${mesh.castShadow}${mesh.receiveShadow}#${Object.keys(part.attributes).join()}`;
+      const look = looks.get(key) ?? { material, geometries: [], meshes: new Set(), cast: mesh.castShadow, receive: mesh.receiveShadow };
+      look.geometries.push(part);
+      look.meshes.add(mesh);
+      looks.set(key, look);
+    }
+    geometry.dispose();
+  });
+  // Only worth it where two or more meshes share a look. Returns the new geometries (the caller owns them).
+  const made: THREE.BufferGeometry[] = [];
+  if (![...looks.values()].some(look => look.meshes.size > 1)) {
+    looks.forEach(look => look.geometries.forEach(geometry => geometry.dispose()));
+    return made;
+  }
+  for (const look of looks.values()) {
+    const geometry = mergeGeometries(look.geometries, false);
+    look.geometries.forEach(part => part.dispose());
+    if (!geometry) continue;
+    const mesh = new THREE.Mesh(geometry, look.material);
+    mesh.name = 'merged-look';
+    mesh.castShadow = look.cast;
+    mesh.receiveShadow = look.receive;
+    root.add(mesh);
+    made.push(geometry);
+  }
+  looks.forEach(look => look.meshes.forEach(mesh => mesh.removeFromParent()));
+  return made;
 }

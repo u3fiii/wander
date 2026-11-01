@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { batchStatic, sectorOf } from './staticBatch.ts';
+import { batchStatic, mergeModel, mergeSameLook, sectorOf } from './staticBatch.ts';
 
 const box = (material: THREE.Material, x: number) => {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
@@ -107,4 +107,46 @@ test('a mesh with one glowing material merges the rest and keeps drawing only th
   assert.equal(merged.geometry.getAttribute('position').count, 30, 'five faces of two triangles');
   undo();
   assert.equal(house.geometry, geometry);
+});
+
+test('a moving model merges into itself, leaving a part marked dynamic alone', () => {
+  const model = new THREE.Group();
+  model.position.set(5, 0, 0);
+  model.scale.setScalar(2);
+  const paint = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.9 });
+  const trim = new THREE.MeshStandardMaterial({ color: 0x00ff00, roughness: 0.88 });
+  const propeller = box(new THREE.MeshStandardMaterial(), 0);
+  propeller.userData.dynamic = true;
+  model.add(box(paint, 0), box(trim, 2), propeller);
+  mergeModel(model);
+  const batches = model.getObjectByName('static-batches')!;
+  assert.equal(batches.children.length, 1, 'roughness 0.88 and 0.9 draw together');
+  assert.equal(propeller.parent, model);
+  // Merged in the model's own space: the model's transform still applies once.
+  const merged = batches.children[0] as THREE.Mesh;
+  merged.geometry.computeBoundingBox();
+  assert.ok(Math.abs(merged.geometry.boundingBox!.max.x - 2.5) < 1e-6);
+});
+
+test('parts with the same look merge and keep their live material; nothing merges when no look is shared', () => {
+  const body = new THREE.Group();
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+  chrome.userData.carPart = 'chrome';
+  const chromeToo = chrome.clone();
+  const paint = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+  paint.userData.carPart = 'body';
+  body.add(box(chrome, 0), box(chromeToo, 2), box(paint, 4));
+  const made = mergeSameLook(body);
+  assert.equal(made.length, 2);
+  const meshes = body.children as THREE.Mesh[];
+  assert.equal(meshes.length, 2);
+  const shiny = meshes.find(mesh => (mesh.material as THREE.Material).userData.carPart === 'chrome')!;
+  assert.equal(shiny.geometry.getAttribute('position').count, 72);
+  assert.ok(shiny.material === chrome || shiny.material === chromeToo, 'the material itself is kept, so its colour can still change');
+  assert.ok(shiny.castShadow);
+
+  const lone = new THREE.Group();
+  lone.add(box(paint, 0), box(chrome, 2));
+  assert.equal(mergeSameLook(lone).length, 0);
+  assert.equal(lone.children.length, 2);
 });

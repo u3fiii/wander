@@ -102,10 +102,29 @@ export function trackStaticNearMiss(latitude: number, longitude: number, clearan
 }
 
 const groups = new Map<string, Obstacle[]>();
-let flat: Obstacle[] = [];
+// Traffic and everything that stays put are kept apart, so the lookups for one never walk the hundreds of the other.
+// Each still one also keeps its point on the unit sphere: a lookup first skips, with a few multiplications, every one
+// clearly too far away to matter, and does the exact (trigonometric) test only on the few left.
+let moving: Obstacle[] = [];
+let still: Array<{ obstacle: Obstacle; x: number; y: number; z: number }> = [];
+const onSphere = (latitude: number, longitude: number) =>
+  ({ x: Math.cos(latitude) * Math.sin(longitude), y: Math.sin(latitude), z: Math.cos(latitude) * Math.cos(longitude) });
 
 function rebuild() {
-  flat = [...groups.values()].flat();
+  const all = [...groups.values()].flat();
+  moving = all.filter(obstacle => obstacle.movable);
+  still = all.filter(obstacle => !obstacle.movable).map(obstacle => ({ obstacle, ...onSphere(obstacle.latitude, obstacle.longitude) }));
+}
+
+// The still obstacles that might be within `reach` metres (plus each one's own hitbox) of a point. Generous: the
+// straight-line distance used here and the exact tests' flat-map distance differ by a few per cent at these ranges.
+function* stillNear(latitude: number, longitude: number, reach: number) {
+  const point = onSphere(latitude, longitude);
+  for (const item of still) {
+    const dx = point.x - item.x, dy = point.y - item.y, dz = point.z - item.z;
+    const limit = (2 * (item.obstacle.radius * HITBOX_SCALE + reach) + 1) / GLOBE_RADIUS;
+    if (dx * dx + dy * dy + dz * dz <= limit * limit) yield item.obstacle;
+  }
 }
 
 export function setObstacleGroup(key: string, obstacles: Obstacle[]) {
@@ -121,8 +140,7 @@ export function clearObstacleGroup(key: string) {
 const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
 
 export function obstacleAt(latitude: number, longitude: number, clearance: number): Obstacle | undefined {
-  for (const obstacle of flat) {
-    if (obstacle.movable) continue;
+  for (const obstacle of stillNear(latitude, longitude, clearance)) {
     const dz = (latitude - obstacle.latitude) * GLOBE_RADIUS;
     const dx = wrap(longitude - obstacle.longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     if (Math.hypot(dx, dz) < obstacle.radius * HITBOX_SCALE + clearance) return obstacle;
@@ -134,8 +152,7 @@ export function obstacleAt(latitude: number, longitude: number, clearance: numbe
 // (the same test as obstacleAt, so gap < 0 is a hit) and the unit [east, north] direction from it to the point.
 function nearestStatic(latitude: number, longitude: number, clearance: number) {
   let best: { obstacle: Obstacle; gap: number; away: [number, number] } | undefined;
-  for (const obstacle of flat) {
-    if (obstacle.movable) continue;
+  for (const obstacle of stillNear(latitude, longitude, clearance + NEAR_MISS.watch)) {
     const north = (latitude - obstacle.latitude) * GLOBE_RADIUS;
     const east = wrap(longitude - obstacle.longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     const distance = Math.hypot(east, north);
@@ -178,8 +195,8 @@ export function classifyTrafficHit(contact: TrafficContact, facing: [number, num
 // touching. `gap` < 0 means overlap; `away` is the unit direction pushing the capsule off the obstacle.
 export function trafficContact(latitude: number, longitude: number, forward: [number, number], halfLength: number, radius: number): TrafficContact | undefined {
   let best: TrafficContact | undefined;
-  for (const obstacle of flat) {
-    if (!obstacle.movable || obstacle.inactive || (obstacle.untouchable ?? 0) > 0) continue;
+  for (const obstacle of moving) {
+    if (obstacle.inactive || (obstacle.untouchable ?? 0) > 0) continue;
     const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
     const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     if (Math.hypot(east, north) > 8) continue;
@@ -203,8 +220,8 @@ export function trafficContact(latitude: number, longitude: number, forward: [nu
 // it is moving along `forward` (negative: coming towards us). For the cars that drive themselves to keep their distance.
 export function trafficAhead(latitude: number, longitude: number, forward: [number, number], maxDistance: number, laneHalfWidth: number, ownHalfLength: number) {
   let best: { gap: number; speed: number } | undefined;
-  for (const obstacle of flat) {
-    if (!obstacle.movable || obstacle.inactive) continue;
+  for (const obstacle of moving) {
+    if (obstacle.inactive) continue;
     const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
     const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     const along = east * forward[0] + north * forward[1];
@@ -222,8 +239,8 @@ export function trafficAhead(latitude: number, longitude: number, forward: [numb
 // is under `reach` metres, nearest first. (`trafficContact` is just the first of these when it is touching.)
 export function trafficNear(latitude: number, longitude: number, forward: [number, number], halfLength: number, radius: number, reach: number) {
   const found: TrafficContact[] = [];
-  for (const obstacle of flat) {
-    if (!obstacle.movable || obstacle.inactive || (obstacle.untouchable ?? 0) > 0) continue;
+  for (const obstacle of moving) {
+    if (obstacle.inactive || (obstacle.untouchable ?? 0) > 0) continue;
     const north = (obstacle.latitude - latitude) * GLOBE_RADIUS;
     const east = wrap(obstacle.longitude - longitude) * GLOBE_RADIUS * Math.cos((latitude + obstacle.latitude) * 0.5);
     if (Math.hypot(east, north) > 10) continue;

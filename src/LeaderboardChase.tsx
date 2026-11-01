@@ -8,7 +8,9 @@ import type { Entry } from './game/leaderboard';
 import './DriverCard.css';
 import { STAGE_POINTS, cardLook, stageAt, stageProgress } from './game/stages';
 
-const number = (n: number) => Math.max(0, Math.floor(n)).toLocaleString('en-US');
+// One formatter, made once: toLocaleString builds a new one on every call, and the score is drawn many times a second.
+const grouped = new Intl.NumberFormat('en-US');
+const number = (n: number) => grouped.format(Math.max(0, Math.floor(n)));
 
 export function LeaderboardSpotlight({ open, level, best }: { open: () => void; level: { level: number; title: string }; best: number }) {
   const [board, setBoard] = useState<Entry[] | null>(null);
