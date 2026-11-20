@@ -23,7 +23,7 @@ import { RETINT, applyRetint, themeSlotOf, themeState, themedColour, trackRetint
 import { FLOWER_COLORS, JITTER, PALETTE, ROOF_WEIGHTS, TREE_WEIGHTS, WALL_WEIGHTS, seededRandom, weightedPick } from './palette';
 import type { PaletteKey } from './palette';
 import type { FaceSample } from './recolor';
-import { bakeRoles, houseRole, jitterAmount, logMaterials, paletteMaterial, planeRole, planterRole, roleMaterials, textureSampler, treeRole } from './recolor';
+import { bakeRoles, houseRole, jitterAmount, logMaterials, paletteMaterial, planeRole, planterRole, roleMaterials, textureSampler } from './recolor';
 import cityTextureUrl from '../assets/kenny city/Textures/colormap.png?url';
 import buildingAUrl from '../assets/kenny city/building-type-a.obj?url';
 import buildingCUrl from '../assets/kenny city/building-type-c.obj?url';
@@ -38,7 +38,7 @@ import treeLargeUrl from '../assets/kenny city/tree-large.obj?url';
 import treeSmallUrl from '../assets/kenny city/tree-small.obj?url';
 import pathStonesUrl from '../assets/kenny city/path-stones-long.obj?url';
 import japaneseGardenUrl from '../assets/japanese_bridge_garden/bridge-garden.glb?url';
-import lowPolyTreesUrl from '../assets/low_poly_trees/trees.glb?url';
+import lowPolyTreesUrl from '../assets/low_poly_trees/trees-baked.glb?url';
 import mountainModelUrl from '../assets/low_poly_mountain_free/mountain.glb?url';
 import ropeBridgeUrl from '../assets/old_ropebridge_low_poly/ropebridge.glb?url';
 import wellUrl from '../assets/low_poly_well/well.glb?url';
@@ -1475,14 +1475,14 @@ function LowPolyTrees() {
       let leafFaces = 0, allFaces = 0;
       tree.traverse(child => {
         if (!(child instanceof THREE.Mesh)) return;
-        const map = (Array.isArray(child.material) ? child.material[0] : child.material as THREE.MeshStandardMaterial).map;
-        const baked = bakeRoles(child.geometry, map ? textureSampler(map) : (_u, _v, out) => out.set(PALETTE.mainTree), treeRole);
-        child.geometry = baked.geometry;
-        baked.geometry.groups.forEach(group => {
+        // Face colours and palette roles are baked from the source textures before shipping.
+        const { roles, paletteGroups } = child.userData;
+        child.geometry = child.geometry.toNonIndexed();
+        for (const group of paletteGroups) {
+          child.geometry.addGroup(group.start, group.count, group.materialIndex);
           allFaces += group.count;
-          if (baked.roles[group.materialIndex!].startsWith('leaves')) leafFaces += group.count;
-        });
-        child.userData.roles = baked.roles;
+          if (roles[group.materialIndex].startsWith('leaves')) leafFaces += group.count;
+        }
         child.castShadow = true;
         child.receiveShadow = true;
       });

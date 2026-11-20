@@ -994,7 +994,7 @@ function DrivingScene(props: SceneProps) {
   useEffect(() => {
     gl.toneMapping = THREE.ACESFilmicToneMapping;
     gl.outputColorSpace = THREE.SRGBColorSpace;
-    gl.shadowMap.type = THREE.PCFShadowMap;
+    gl.shadowMap.type = THREE.PCFSoftShadowMap;
     // Weaker devices redraw the shadow map only every few frames (see `shadowInterval`).
     gl.shadowMap.autoUpdate = ACTIVE_QUALITY.shadowInterval <= 1;
   }, [gl]);
@@ -1025,7 +1025,7 @@ function DrivingScene(props: SceneProps) {
   });
   useFrame(() => {
     if (ACTIVE_QUALITY.shadowInterval <= 1) return;
-    if (shadowFrame.current++ % ACTIVE_QUALITY.shadowInterval === 0) gl.shadowMap.needsUpdate = true;
+    if (!props.started || shadowFrame.current++ % ACTIVE_QUALITY.shadowInterval === 0) gl.shadowMap.needsUpdate = true;
   });
   useEffect(() => {
     scene.fog = fog;
@@ -2003,6 +2003,7 @@ function ShaderWarmup() {
       gl.setRenderTarget(null);
       const onScreen = gl.compileAsync(scene, camera);
       gl.setRenderTarget(target);
+      if (!ACTIVE_QUALITY.depthOfField) return [onScreen];
       const intoImage = gl.compileAsync(scene, camera);
       return [onScreen, intoImage];
     };
@@ -2010,8 +2011,10 @@ function ShaderWarmup() {
     try {
       shown.forEach(object => { object.visible = true; });
       pending.push(...compile());
-      lights.forEach(object => { object.visible = true; });
-      pending.push(...compile());
+      if (lights.length) {
+        lights.forEach(object => { object.visible = true; });
+        pending.push(...compile());
+      }
     } finally {
       gl.setRenderTarget(previous);
       [...shown, ...lights].forEach(object => { object.visible = false; });

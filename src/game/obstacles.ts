@@ -110,17 +110,28 @@ let still: Array<{ obstacle: Obstacle; x: number; y: number; z: number }> = [];
 const onSphere = (latitude: number, longitude: number) =>
   ({ x: Math.cos(latitude) * Math.sin(longitude), y: Math.sin(latitude), z: Math.cos(latitude) * Math.cos(longitude) });
 
+// A query in a latitude band visits obstacles in their original contact order.
+const bandCount = 32;
+const indexedReach = 10;
+const bandOf = (y: number) => Math.max(0, Math.min(bandCount - 1, Math.floor((y + 1) * bandCount / 2)));
+const bands = Array.from({ length: bandCount }, (): typeof still => []);
+
 function rebuild() {
   const all = [...groups.values()].flat();
   moving = all.filter(obstacle => obstacle.movable);
   still = all.filter(obstacle => !obstacle.movable).map(obstacle => ({ obstacle, ...onSphere(obstacle.latitude, obstacle.longitude) }));
+  for (const band of bands) band.length = 0;
+  for (const item of still) {
+    const span = (2 * (item.obstacle.radius * HITBOX_SCALE + indexedReach) + 1) / GLOBE_RADIUS;
+    for (let i = bandOf(item.y - span); i <= bandOf(item.y + span); i++) bands[i].push(item);
+  }
 }
 
 // The still obstacles that might be within `reach` metres (plus each one's own hitbox) of a point. Generous: the
 // straight-line distance used here and the exact tests' flat-map distance differ by a few per cent at these ranges.
 function* stillNear(latitude: number, longitude: number, reach: number) {
   const point = onSphere(latitude, longitude);
-  for (const item of still) {
+  for (const item of reach <= indexedReach ? bands[bandOf(point.y)] : still) {
     const dx = point.x - item.x, dy = point.y - item.y, dz = point.z - item.z;
     const limit = (2 * (item.obstacle.radius * HITBOX_SCALE + reach) + 1) / GLOBE_RADIUS;
     if (dx * dx + dy * dy + dz * dz <= limit * limit) yield item.obstacle;
