@@ -17,7 +17,7 @@ test('touch devices get a sharp mobile profile, with a fallback for constrained 
 });
 
 test('mobile retains a clarity floor without supersampling lower-density screens', () => {
-  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 3), { min: 0.9, max: 2, initial: 1.3 });
+  assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 3), { min: 0.9, max: 1.5, initial: 1.3 });
   assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, 1), { min: 0.9, max: 1, initial: 1 });
   assert.deepEqual(resolutionBounds(QUALITY_PROFILES.mobile, NaN), { min: 0.9, max: 1, initial: 1 });
 });
@@ -48,7 +48,7 @@ test('sustained overload lowers quality to its floor and stable frames recover i
   s.frames(900, 1 / 30);
   assert.equal(s.dpr, 0.9);
   s.frames(5400);
-  assert.equal(s.dpr, 2);
+  assert.equal(s.dpr, 1.5);
 });
 
 test('pause and long gaps clear stale samples and give rendering a fresh warmup', () => {
@@ -83,7 +83,7 @@ test('phones with the same reported hardware settle at different resolutions bas
     limited.frames(1, limited.dpr <= 1.3 ? 1 / 60 : 1 / 42);
     highestLimited = Math.max(highestLimited, limited.dpr);
   }
-  assert.equal(strong.dpr, 2);
+  assert.equal(strong.dpr, 1.5);
   assert.ok(highestLimited <= 1.4);
   assert.ok(limited.dpr <= 1.4);
 });

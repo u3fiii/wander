@@ -210,6 +210,7 @@ import { cinematicState } from './game/cinematic';
 import { VISUAL_QUALITY } from './game/artDirection';
 import { levelFor, loadXp, saveXp, streakXp } from './game/progression';
 import { rampFor } from './game/difficulty';
+import { readCheckpoint, writeCheckpoint } from './game/runCheckpoint';
 import { HEARTS, HEART_GRACE_MS, emptyRunStats, loadBest, saveBest, stageFor } from './game/leaderboard';
 import RunOver from './RunOver';
 import Leaderboard from './Leaderboard';
@@ -758,6 +759,21 @@ export default function App() {
   const shownScore = useRef(0);
   const scoreTarget = useRef(0);
   scoreTarget.current = score;
+  const [interrupted, setInterrupted] = useState(readCheckpoint);
+  useEffect(() => {
+    if (!started || partyOn) return;
+    const save = () => writeCheckpoint(scoreTarget.current, runStats.current);
+    if (runOver) { save(); return; }
+    const timer = window.setInterval(save, 2000);
+    const onHide = () => { if (document.hidden) save(); };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', save);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', save);
+    };
+  }, [started, partyOn, runOver]);
   useEffect(() => {
     let frame = 0, last = performance.now();
     const tick = (now: number) => {
@@ -1113,6 +1129,7 @@ export default function App() {
   const controls = useRef(emptyControls());
   const car = useRef(initialLoopCar());
   const reset = useCallback(() => {
+    writeCheckpoint(0, runStats.current); setInterrupted(null);
     boostElapsed.current = 0; setBoostUnlocked(false);
     resetRunWave();
     controls.current = emptyControls(); curbArmed.current = false; setResetKey(k => k + 1); setPaused(false); setScore(0); setHitNote(null);
@@ -1450,6 +1467,8 @@ export default function App() {
     {help && <Help rails={!!RAILS} device={device} close={() => setHelp(false)} />}
     {boardOpen && <Leaderboard close={() => setBoardOpen(false)} />}
     {finale && <div className="letterbox" aria-hidden="true"><i /><i /></div>}
+    {interrupted && !started && <RunOver score={interrupted.score} stats={interrupted.stats} newBest={false}
+      onPlayAgain={() => { reset(); start(); }} onHome={() => { reset(); }} />}
     {runOver && <RunOver score={score} newBest={beatBest.current} stats={runStats.current} onPlayAgain={() => { setRoad(r => r + 1); reset(); }}
       onHome={() => { setRoad(r => r + 1); reset(); returnToHero(); }} />}
     <LoadingScreen ready={ready} onLeave={() => setRevealed(true)} />

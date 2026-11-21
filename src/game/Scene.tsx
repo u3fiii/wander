@@ -443,7 +443,9 @@ function TrafficCar({ modelUrl, pathIndex, progress: startProgress, speed, scale
     const chasing = reactive && rider.curbTime > CURB_HUG.playerCurbTime && riderAside > TRAFFIC_LANE_OFFSET + 0.6 && riderAlong < CURB_HUG.reach;
     const hugTarget = enabled && (ownRhythm || chasing) ? CURB_HUG.offset : 0;
     if (!paused) curbHug.current = THREE.MathUtils.damp(curbHug.current, hugTarget, CURB_HUG.rate, dt);
-    group.current.position.set(...frame.point).addScaledVector(right, TRAFFIC_LANE_OFFSET + curbHug.current + m.push + swayOffset);
+    const laneLimit = Math.max(0, path.width / 2 - TRAFFIC_COLLISION.radius * scale);
+    const offset = THREE.MathUtils.clamp(TRAFFIC_LANE_OFFSET + curbHug.current + m.push + swayOffset, -laneLimit, laneLimit);
+    group.current.position.set(...frame.point).addScaledVector(right, offset);
     const surfaceRadius = Math.hypot(frame.point[0], frame.point[1] + GLOBE_RADIUS, frame.point[2]);
     group.current.position.sub(localGlobeCenter).normalize().multiplyScalar(surfaceRadius).add(localGlobeCenter);
     back.copy(tangent).negate();

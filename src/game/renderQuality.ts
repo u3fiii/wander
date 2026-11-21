@@ -9,7 +9,7 @@ export const QUALITY_PROFILES = {
     depthOfField: false, lightweightShading: true, msaa: 0, decorationDensity: 0.2, decorativeShadows: false, simpleSwimRings: true,
   },
   mobile: {
-    shadowMapSize: 512, shadowExtent: 30, shadowInterval: 2, minDpr: 0.9, initialDpr: 1.3, maxDpr: 2,
+    shadowMapSize: 512, shadowExtent: 30, shadowInterval: 2, minDpr: 0.9, initialDpr: 1.3, maxDpr: 1.5,
     depthOfField: false, lightweightShading: true, msaa: 0, decorationDensity: 0.28, decorativeShadows: false, simpleSwimRings: true,
   },
   high: {

@@ -89,7 +89,10 @@ async function load(name: FileName) {
     try { buffers[name] = await decode(`${import.meta.env.BASE_URL}audio/${name}.${extension}`); return; } catch { /* try the next */ }
   }
 }
-if (typeof window !== 'undefined' && typeof OfflineAudioContext !== 'undefined') {
+let recordingsRequested = false;
+function requestRecordings() {
+  if (recordingsRequested || typeof OfflineAudioContext === 'undefined') return;
+  recordingsRequested = true;
   Promise.all(FILES.map(load)).then(() => { if (graph) buildLoops(); });
   decode(slowMoWhooshUrl).then(buffer => { buffers.slowmo = trimmed(buffer, 0.25, 2.2); if (graph) buildLoops(); }).catch(() => undefined);
   decode(ambienceUrl).then(buffer => { buffers.ambience = seamless(buffer, 2); if (graph) buildLoops(); }).catch(() => undefined);
@@ -288,6 +291,7 @@ export function startAudio() {
 
 export function setMuted(value: boolean) {
   muted = value;
+  if (!muted) requestRecordings();
   if (graph) glide(graph.master.gain, value ? 0 : AUDIO_CONFIG.master, graph.context.currentTime, 0.05);
 }
 
